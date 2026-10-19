@@ -1,0 +1,28 @@
+# 浏览器独立 profile —— 内含 Network/Cookies、Login Data、Local State（加密密钥）
+# 一旦用户登录 B站/YouTube，这里就是真实凭据，绝不能入库
+browser_profile/
+
+# 从 profile 导出的登录凭据（喂给 yt-dlp 用），绝不入库
+cookies.txt
+*.cookies.txt
+storage_state.json
+
+# Python 虚拟环境
+venv/
+__pycache__/
+*.py[cod]
+
+# 下载产物
+下载/
+*.mp4
+*.m4a
+*.webm
+*.flv
+
+# 本地记忆（含机器相关路径，不入库）
+.workbuddy/memory/
+
+# 杂项
+*.log
+Thumbs.db
+desktop.ini
