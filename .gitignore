@@ -22,6 +22,10 @@ __pycache__/
 # 本地记忆（含机器相关路径，不入库）
 .workbuddy/memory/
 
+# 征文写作产物（文章、配图、截图素材）—— 与工程代码无关，不入库
+_article/
+征文相关截图/
+
 # 杂项
 *.log
 Thumbs.db

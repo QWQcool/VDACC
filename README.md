@@ -1,6 +1,10 @@
-# DYDownload —— 抖音视频下载器
+# VDACC —— 多平台视频 / 音频下载器
 
-把抖音上看到的视频存到本地，1080p 原画质、无水印。粘贴分享口令就行。
+支持抖音（纯 HTTP 签名，浏览器兜底）、B站（含 4K，需登录）、网易云音乐（无损），
+其它 http(s) 站点交给 yt-dlp 兜底。三种用法：**Web 界面**（`vdl serve`）、**命令行**（`vdl`）、
+**Agent Skill**（`video-acquire`）。
+
+下面这个 tkinter 界面是抖音专用的轻量入口；要下 B站/音乐或同时选多个档位，用 Web 界面。
 
 ## 怎么用
 
@@ -89,11 +93,14 @@ python scripts/vdl_run.py get "<url>" --json -o 下载
 ## 目录说明
 
 ```
-DYDownload\
-├─ 抖音下载器.bat     双击启动图形界面
-├─ dy_gui.pyw         界面代码（tkinter）
-├─ dy_dl.py           入口 + 浏览器引擎（Playwright 截流），也能命令行直接用
-├─ dy_http.py         纯 HTTP 引擎（只用标准库，自己算签名；无浏览器也能跑）
+VDACC\
+├─ VDACC.bat          一键启动 Web 界面（首次自动建 venv、装依赖）
+├─ 抖音下载器.bat     双击启动抖音专用 tkinter 界面
+├─ vdl\               核心包：core 契约层 / engines / cli / server / web
+├─ skill\             Agent Skill 源（video-acquire）
+├─ dy_dl.py           抖音入口 + 浏览器引擎（Playwright 截流），兼容旧用法
+├─ dy_http.py         抖音纯 HTTP 引擎（只用标准库，自己算签名；无浏览器也能跑）
+├─ dy_gui.pyw         抖音 tkinter 界面
 ├─ venv\              独立 Python 环境（playwright + yt-dlp）
 ├─ browser_profile\   独立浏览器配置（58MB，删了会自动重建）
 └─ 下载\              输出目录
@@ -117,7 +124,8 @@ venv\Scripts\python.exe dy_dl.py 链接 --engine browser   # 只用浏览器截�
 
 ## 新命令行（vdl，给 agent / GUI 用）
 
-`vdl` 是统一 core：抖音走纯 HTTP 引擎，输出稳定 JSON，B站/网易云已注册但会如实返回 `not_implemented`。
+`vdl` 是统一 core：**抖音、B站、网易云三平台均已实现**，其它 http(s) 链接交给 yt-dlp 兜底；
+输出稳定 JSON，失败时给可指导下一步的错误码，而不是一句「下载失败」。
 
 ```bash
 python -m vdl probe "链接" --json              # 只解析：标题/作者/档位/真实体积
@@ -190,12 +198,16 @@ http(s) 链接会被尝试一次，失败时返回 yt-dlp 的原始报错，而�
 正常。抖音竖屏短视频码率本身就低（这条 9 秒 1080×1440 只有 731kbps / 0.8MB）。脚本已经取了最高档，不是压缩过。
 
 **能下别的平台吗？**
-这个工作空间专治抖音。B 站、YouTube、小红书等可以直接用 venv 里的 yt-dlp（除抖音外都是好的；抖音的修复还没合并，见上文）：
+能。抖音、B站、网易云是专用引擎，`vdl probe` / `vdl get` 直接吃链接；B站要 1080P+ 先跑 `vdl auth bilibili`。
+其它站点由 `ytdlp-generic` 兜底，失败会返回 yt-dlp 的原始报错而不是「不支持」：
 
 ```bash
-venv\Scripts\python.exe -m yt_dlp -F "视频链接"
-venv\Scripts\python.exe -m yt_dlp "视频链接"
+python -m vdl probe "链接"      # 先看能不能解析、有哪些档位
+python -m vdl get   "链接"      # 专用引擎没命中会自动落到 yt-dlp 兜底
 ```
+
+只想用 yt-dlp 本体也可以（`venv\Scripts\python.exe -m yt_dlp "链接"`），但**抖音除外**——
+官方版修复还没合并，见上文。
 
 **下载的文件没有水印吗？**
 没有。取的是抖音自己发布的播放流，不是后期裁剪去水印。
