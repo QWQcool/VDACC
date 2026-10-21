@@ -245,21 +245,16 @@ P3 之后的每一段都应能独立失败而不影响下载器。
 
 ---
 
-## 8. 待决策（阻塞开工）
+## 8. 已决策（2026-10-21，原「待决策」已清空）
 
-1. **ffmpeg 怎么装？**
-   - (a) winget 系统级安装
-   - (b) 便携版 `ffmpeg.exe` + `ffprobe.exe` 丢进 `venv\Scripts\`
-   - 倾向 (b)，与现有「独立 venv + 独立 profile」风格一致，不污染系统
-
-2. **分析侧模型走哪条？**
-   - (a) 本地 VLM（16GB 显存可跑 7B，免费但慢，要下权重）
-   - (b) 云端多模态 API（快，需 key 与费用）
-   - 这个决定会决定 P3 的整个技术选型
-
-3. **B站现在要不要登录？**
-   - 不登录只能 720P
-   - 要 1080P 需用户本人在弹出的独立 Edge 里扫码登录一次（必须人工）
+| # | 决策 | 影响 |
+|---|---|---|
+| 1 | **ffmpeg：便携版**，`ffmpeg.exe` + `ffprobe.exe` 放 `venv\Scripts\`，不污染系统 PATH | 二进制不入库（venv 已 gitignore）；换机需 `vdl doctor --fix` 或脚本拉取。运行时查找顺序：`venv\Scripts` → PATH → 报 `ffmpeg_missing` |
+| 2 | **分析侧走云端 API**（用户提供 DeepSeek key） | C2 画面理解不再需要本地显存。⚠️ 待确认：DeepSeek 公开 API 是否支持**图像输入**；若只支持文本，C2 需另选云端 VLM（Qwen-VL / GLM-4V / Gemini），C1（抽帧+转写）不受影响 |
+| 3 | **B站 V1 就登录** | `vdl auth bilibili`：独立 profile 扫码 → `storage_state()` 导出 cookie → yt-dlp 用。不登录只到 720P |
+| 4 | GUI 壳 = **本地 Web UI**（`vdl serve`），tkinter 仅过渡 | 端口固定 `8765` + 一次性 token；SSE 推进度 |
+| 5 | 音乐默认 **lossless**，拿不到时如实降级并标注 | 单曲体积大，UI 必须先显示真实大小 |
+| 6 | infOS **暂不集成**，UI 风格向它靠 | 等作者确认要不要子应用；我们的 `vdl serve` 已为其预留对接点 |
 
 ---
 
@@ -268,3 +263,5 @@ P3 之后的每一段都应能独立失败而不影响下载器。
 - 2026-10-19：初版。完成架构探讨，建立 git 版本管理，确定 P0-P5 顺序与三项待决策。
 - 2026-10-21：更正抖音签名结论（`a_bogus` → `x-secsdk-web-signature`）。实测 PR #17826 补丁在官方 yt-dlp 2026.08.19 上干净应用，无 cookie 下 1080×1920 / 30fps；未打补丁仍 403。追加 P0.5，浏览器方案降级为兜底，并新增 B站/多平台的纯 HTTP 方向判断。
 - 2026-10-21：**P0.5 完成**。新增 `dy_http.py`（标准库实现 ttwid 自注册 + uifid 兜底 + MD5 签名 + `aid=6383` + 流式落盘），`dy_dl.download()` 改为 `engine=auto|http|browser`，默认 HTTP 优先、失败回退浏览器。实测：与 yt-dlp 补丁版产出**字节数完全一致**（6,281,768），1080×1920/30fps，冷启动 1.15 秒/条；系统 Python（无 playwright）可直接运行。
+- 2026-10-21：**形态决策**。① GUI 壳选「本地 Web UI」（core 起 HTTP + 单页），tkinter 仅保留为过渡；② 音乐只做网易云，且必须走 `vdl auth` 自有 profile 扫码导出的 cookie（eapi 播放地址接口），外层直链只覆盖免费曲；③ infOS 当前**没有运行时插件机制**（wiki 的 MOD 文档对应旧 Python 架构，TS 重构 5c760e9 已移除），集成只能走「薄 Vue 页面 + 本地 HTTP 服务」；④ UI 参考见 `docs/design/ui-reference.md`。
+- 2026-10-21：**参数与基线落定**。ffmpeg 用便携版；分析侧云端（DeepSeek key，图像输入能力待确认）；B站 V1 登录；端口 8765 + token；音乐默认 lossless；infOS 暂不集成。用 REA 对 `remote-client-prototype` 抓了视觉参照基线（`docs/design/screenshots/prototype-baseline-1440x900.png`，1440×900 / reduced-motion）。角色资产经 infOS 作者口头许可使用，仅出现在空态/解析中/完成三处，后续可替换为自有角色。
