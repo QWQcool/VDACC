@@ -115,6 +115,17 @@ python -m vdl get   "https://music.163.com/song?id=28606052" --format exhigh  # 
 登录后（`vdl auth netease`）默认取 **无损 FLAC**，未登录最高 320K 并给出提示。
 落盘时用 ffmpeg 写标题/歌手/专辑/年份 + 800px 封面，歌词另存 `.lrc`。
 
+B站（不登录通常只到 720P，1080P+ 需要 `vdl auth bilibili`）：
+
+```bash
+python -m vdl auth bilibili
+python -m vdl probe "https://www.bilibili.com/video/BV1j5nj68E48"
+python -m vdl get   "https://www.bilibili.com/video/BV1j5nj68E48" --format bili-1920
+```
+
+清晰度按**宽度**归档（4K / 2K / 1080P / 720P / 480P），同档位优先 H.264 保证兼容；
+下载时自动配对最佳音轨并用 ffmpeg 合并成一个 mp4。
+
 `vdl serve` 会打印一个带 `token` 的地址，**必须用那个地址打开**（直接访问 127.0.0.1:8765
 会拿不到 token，接口返回 401）。token 只在本机有效，用来防别的网页偷偷向本地服务发任务。
 

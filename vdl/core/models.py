@@ -29,6 +29,8 @@ class Format:
     reason: str = ''
     # 内部字段：真实可下载地址（可能多条 CDN 镜像），不序列化
     urls: list = field(default_factory=list, repr=False)
+    # 内部字段：引擎私有信息（如 B站 的 video_id/audio_id），不序列化
+    extra: dict = field(default_factory=dict, repr=False)
 
     def to_dict(self):
         return {

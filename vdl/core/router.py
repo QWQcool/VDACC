@@ -9,17 +9,15 @@ from .models import ProbeResult
 
 
 def build_engines(log=None):
+    from ..engines.bilibili import BilibiliEngine
     from ..engines.douyin import DouyinEngine
     from ..engines.netease import NeteaseEngine
-    from ..engines.pending import PendingEngine
 
+    # 顺序有意义：抖音的裸 ID 规则比 B站 的 BV 号更宽，必须排在前面
     return [
         DouyinEngine(log=log),
         NeteaseEngine(log=log),
-        PendingEngine(
-            'bilibili', 'bilibili-ytdlp', ('bilibili.com', 'b23.tv'),
-            'B站引擎尚未接入（计划 P5：yt-dlp + 登录 cookie）',
-            '先看抖音/网易云；B站能力在 P5 落地'),
+        BilibiliEngine(log=log),
     ]
 
 

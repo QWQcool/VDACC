@@ -147,7 +147,8 @@ class JobStore:
                 if total:
                     job['total'] = total
                 job['bytes'] = written
-                job['percent'] = round(written / total * 100, 1) if total else 0
+                # 预估体积可能偏小（B站 filesize_approx），到 100% 前留 0.1 的余量
+                job['percent'] = min(99.9, round(written / total * 100, 1)) if total else 0
                 now = time.time()
                 dt = now - last['t']
                 if dt >= 0.5:
