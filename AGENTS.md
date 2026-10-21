@@ -46,6 +46,7 @@
 | yt-dlp 的 B站支持 | 完整（BiliBili / Bangumi / Playlist / Live / Intl） |
 | yt-dlp 的抖音支持 | 官方版仍 403 + 误导性 `Fresh cookies needed`；PR #17826（+56/-1）实测可修 |
 | 抖音签名 | `x-secsdk-web-signature` = `md5(uifid_timestamp_SALT_query)`，纯 HTTP，无需 cookie |
+| 网易云播放地址 | `GET /api/song/enhance/player/url?ids=[id]&br=999000` + `MUSIC_U` 直接返回 `level=lossless` 的 FLAC；**不需要 eapi/weapi 加密** |
 | ffmpeg | 当前开发机已装 n8.1.2（winget）；换机仍需确认，缺失会让 B站/YouTube 变无声视频 |
 | Playwright | 1.64.0，用 `channel=msedge` 复用系统 Edge，不下载 chromium |
 | venv | Python 3.13.4，必须带 tkinter |

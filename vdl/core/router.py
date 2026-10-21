@@ -10,18 +10,16 @@ from .models import ProbeResult
 
 def build_engines(log=None):
     from ..engines.douyin import DouyinEngine
+    from ..engines.netease import NeteaseEngine
     from ..engines.pending import PendingEngine
 
     return [
         DouyinEngine(log=log),
+        NeteaseEngine(log=log),
         PendingEngine(
             'bilibili', 'bilibili-ytdlp', ('bilibili.com', 'b23.tv'),
             'B站引擎尚未接入（计划 P5：yt-dlp + 登录 cookie）',
-            '先看抖音；B站能力在 P5 落地'),
-        PendingEngine(
-            'netease', 'netease-eapi', ('music.163.com', '163cn.tv', 'y.music.163.com'),
-            '网易云引擎尚未接入（计划 P4：eapi + 登录 cookie）',
-            '先看抖音；音乐能力在 P4 落地'),
+            '先看抖音/网易云；B站能力在 P5 落地'),
     ]
 
 

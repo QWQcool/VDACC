@@ -436,6 +436,12 @@
 
     els.previewClose.addEventListener('click', closePreview);
     els.preview.addEventListener('cancel', (e) => { e.preventDefault(); closePreview(); });
+    els.previewVideo.addEventListener('error', () => {
+      // FLAC 之类的音频浏览器多半解不了；如实提示，不假装在加载
+      if (els.previewVideo.getAttribute('src')) {
+        toast('这个格式浏览器可能无法预览（如 FLAC），下载后用本地播放器打开');
+      }
+    });
 
     const list = await api('/api/jobs', { method: 'GET' });
     if (list.ok) list.jobs.slice().reverse().forEach(upsertJob);

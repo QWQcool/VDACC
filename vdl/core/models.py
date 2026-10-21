@@ -103,6 +103,7 @@ class DownloadResult:
     skipped: bool = False
     media: object = None
     error: dict = None
+    warnings: list = field(default_factory=list)
 
     def to_dict(self):
         return {
@@ -113,5 +114,6 @@ class DownloadResult:
             'format_id': self.format_id,
             'skipped': self.skipped,
             'media': self.media.to_dict() if self.media else None,
+            'warnings': self.warnings,
             'error': self.error,
         }

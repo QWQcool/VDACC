@@ -56,12 +56,25 @@ def _human_probe(result):
     dur = f'{m.duration_ms / 1000:.1f}s' if m.duration_ms else '未知时长'
     print(m.title)
     print(f'  {m.author or "未知作者"} · {dur} · {result.platform} / {result.engine}')
-    print(f'  {"档位":<22}{"清晰度":<10}{"编码":<7}{"帧率":<6}{"体积":>11}  标记')
-    for f in result.formats:
-        size = f'{f.bytes / 1048576:.2f} MB' if f.bytes else '未知'
-        fps = str(f.fps) if f.fps else '-'
-        mark = '推荐' if f.recommended else ('带水印' if f.watermark else '')
-        print(f'  {f.id:<22}{f.label:<10}{f.vcodec:<7}{fps:<6}{size:>11}  {mark}')
+
+    audio = all((not f.vcodec) and f.acodec for f in result.formats)
+    if audio:
+        print(f'  {"档位":<12}{"格式":<8}{"码率":<12}{"体积":>11}  标记')
+        for f in result.formats:
+            size = f'{f.bytes / 1048576:.2f} MB' if f.bytes else '未知'
+            kbps = f'{f.bitrate // 1000} kbps' if f.bitrate else '-'
+            mark = '推荐' if f.recommended else ''
+            print(f'  {f.id:<12}{f.ext.upper():<8}{kbps:<12}{size:>11}  {mark}')
+    else:
+        print(f'  {"档位":<22}{"清晰度":<10}{"编码":<7}{"帧率":<6}{"体积":>11}  标记')
+        for f in result.formats:
+            size = f'{f.bytes / 1048576:.2f} MB' if f.bytes else '未知'
+            fps = str(f.fps) if f.fps else '-'
+            mark = '推荐' if f.recommended else ('带水印' if f.watermark else '')
+            print(f'  {f.id:<22}{f.label:<10}{f.vcodec:<7}{fps:<6}{size:>11}  {mark}')
+
+    for w in result.warnings:
+        print(f'  ! {w}')
 
 
 # ---------------------------------------------------------------- 子命令

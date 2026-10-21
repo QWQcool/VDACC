@@ -104,6 +104,17 @@ python -m vdl serve                            # 打开本地 Web 界面（默�
 `--json` 时 **stdout 只有 JSON**，日志走 stderr；文件名形如 `视频ID_标题_1080P.mp4`，
 不同档位同时下载不会互相覆盖。
 
+音乐用同一个入口（`vdl probe` / `vdl get` 支持 `music.163.com/song?id=...`）：
+
+```bash
+python -m vdl probe "https://music.163.com/song?id=28606052"
+python -m vdl get   "https://music.163.com/song?id=28606052"          # 默认无损
+python -m vdl get   "https://music.163.com/song?id=28606052" --format exhigh  # 320K
+```
+
+登录后（`vdl auth netease`）默认取 **无损 FLAC**，未登录最高 320K 并给出提示。
+落盘时用 ffmpeg 写标题/歌手/专辑/年份 + 800px 封面，歌词另存 `.lrc`。
+
 `vdl serve` 会打印一个带 `token` 的地址，**必须用那个地址打开**（直接访问 127.0.0.1:8765
 会拿不到 token，接口返回 401）。token 只在本机有效，用来防别的网页偷偷向本地服务发任务。
 
