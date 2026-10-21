@@ -10,6 +10,7 @@
 import argparse
 import importlib.util
 import json
+import os
 import pathlib
 import shutil
 import sys
@@ -201,13 +202,18 @@ def cmd_doctor(args):
     add('interpreter', True, sys.executable, False,
         'auth/浏览器兜底需要装在带 playwright 的解释器里')
 
+    # doctor 是只读检查，不能顺手创建目录（R1 技术债 #7）
     out_dir = pathlib.Path(args.out)
     try:
-        out_dir.mkdir(parents=True, exist_ok=True)
-        probe_file = out_dir / '.vdl-write-test'
-        probe_file.write_text('ok', encoding='utf-8')
-        probe_file.unlink()
-        writable, out_value = True, str(out_dir.resolve())
+        if out_dir.exists():
+            probe_file = out_dir / '.vdl-write-test'
+            probe_file.write_text('ok', encoding='utf-8')
+            probe_file.unlink()
+            writable, out_value = True, str(out_dir.resolve())
+        else:
+            parent = next((p for p in out_dir.parents if p.exists()), None)
+            writable = bool(parent and os.access(parent, os.W_OK))
+            out_value = f'{out_dir}（不存在，首次下载时创建）'
     except Exception as e:                       # noqa: BLE001 - 要如实汇报任何失败
         writable, out_value = False, f'{out_dir} ({type(e).__name__}: {e})'
     add('out_dir', writable, out_value, True, '输出目录必须可写')

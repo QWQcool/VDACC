@@ -385,21 +385,25 @@ def make_handler(cfg):
 
 # ---------------------------------------------------------------- 启动
 
-def serve(port=8765, out_dir='下载', token=None, open_browser=True, host='127.0.0.1'):
+def make_server(host='127.0.0.1', port=8765, out_dir='下载', token=None, log=None):
+    """构造但不启动。测试用 port=0 拿随机端口，serve() 也走这里。"""
     out = pathlib.Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     hub = Hub()
-    jobs = JobStore(out, hub, log=lambda m: print(m, flush=True))
+    jobs = JobStore(out, hub, log=log or (lambda m: print(m, flush=True)))
     cfg = Config(host, port, token or secrets.token_urlsafe(16), out, hub, jobs)
+    httpd = ThreadingHTTPServer((host, cfg.port), make_handler(cfg))
+    cfg.port = httpd.server_address[1]
+    return httpd, cfg
 
+
+def serve(port=8765, out_dir='下载', token=None, open_browser=True, host='127.0.0.1'):
     try:
-        httpd = ThreadingHTTPServer((host, cfg.port), make_handler(cfg))
+        httpd, cfg = make_server(host=host, port=port, out_dir=out_dir, token=token)
     except OSError as e:
-        print(f'端口 {cfg.port} 起不来：{e}')
+        print(f'端口 {port} 起不来：{e}')
         print('换一个端口：python -m vdl serve --port 8766')
         return 2
-
-    cfg.port = httpd.server_address[1]
     url = f'http://{host}:{cfg.port}/?token={cfg.token}'
     print(f'vdl {__version__} 已启动')
     print(f'  地址: {url}')
