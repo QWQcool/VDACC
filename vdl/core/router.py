@@ -11,13 +11,16 @@ from .models import ProbeResult
 def build_engines(log=None):
     from ..engines.bilibili import BilibiliEngine
     from ..engines.douyin import DouyinEngine
+    from ..engines.generic import GenericYtdlpEngine
     from ..engines.netease import NeteaseEngine
 
-    # 顺序有意义：抖音的裸 ID 规则比 B站 的 BV 号更宽，必须排在前面
+    # 顺序有意义：专用引擎在前，通用兜底永远最后。
+    # 注意抖音的裸 ID 规则比 B站 的 BV 号更宽，必须排在 B站 前面。
     return [
         DouyinEngine(log=log),
         NeteaseEngine(log=log),
         BilibiliEngine(log=log),
+        GenericYtdlpEngine(log=log),
     ]
 
 

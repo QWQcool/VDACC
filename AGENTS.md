@@ -49,6 +49,7 @@
 | 网易云播放地址 | `GET /api/song/enhance/player/url?ids=[id]&br=999000` + `MUSIC_U` 直接返回 `level=lossless` 的 FLAC；**不需要 eapi/weapi 加密** |
 | B站清晰度归档 | 必须按**宽度**（3840/2560/1920/1280/854）；宽银幕（1920×816、4096×1740）按高度会整体下移一档 |
 | B站格式结构 | 全部是 video-only + audio-only，必须成对合并；带 cookie 才看得到 4K/1080P |
+| 路由顺序 | 专用引擎（抖音/网易云/B站）→ `ytdlp-generic` 兜底。抖音裸 ID 规则最宽，必须排最前 |
 | ffmpeg | 当前开发机已装 n8.1.2（winget）；换机仍需确认，缺失会让 B站/YouTube 变无声视频 |
 | Playwright | 1.64.0，用 `channel=msedge` 复用系统 Edge，不下载 chromium |
 | venv | Python 3.13.4，必须带 tkinter |

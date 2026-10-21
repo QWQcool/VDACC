@@ -40,9 +40,13 @@ class RouterTest(unittest.TestCase):
                     'BV1j5nj68E48'):
             self.assertEqual(self.kind(url), 'bilibili', url)
 
-    def test_unknown(self):
+    def test_unknown_falls_back_to_generic(self):
+        # 未知站点交给 yt-dlp 兜底，不再直接判 unsupported
+        self.assertEqual(self.kind('https://example.com/x'), 'generic')
+
+    def test_non_url_rejected(self):
         with self.assertRaises(VdlError) as ctx:
-            route('https://example.com/x', log=lambda *_: None)
+            route('随便一段话', log=lambda *_: None)
         self.assertEqual(ctx.exception.code, ErrorCode.UNSUPPORTED_URL)
 
 
