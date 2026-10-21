@@ -75,6 +75,20 @@ venv\Scripts\python.exe dy_dl.py 链接 --engine browser   # 只用浏览器截�
 `--engine` 三档：`auto`（默认，HTTP 优先、失败回退）/ `http` / `browser`。
 纯 HTTP 引擎只依赖标准库，所以系统 Python 也能直接跑：`python dy_http.py "链接" -o 目录`。
 
+## 新命令行（vdl，给 agent / GUI 用）
+
+`vdl` 是统一 core：抖音走纯 HTTP 引擎，输出稳定 JSON，B站/网易云已注册但会如实返回 `not_implemented`。
+
+```bash
+python -m vdl probe "链接" --json              # 只解析：标题/作者/档位/真实体积
+python -m vdl get "链接" --json -o 下载         # 下载（默认推荐档）
+python -m vdl get "链接" --format normal_720_0 -o 下载
+python -m vdl doctor --json                    # 环境体检：ffmpeg / playwright / yt-dlp / 登录态
+```
+
+`--json` 时 **stdout 只有 JSON**，日志走 stderr；文件名形如 `视频ID_标题_1080P.mp4`，
+不同档位同时下载不会互相覆盖。
+
 ## 常见问题
 
 **换了新视频下不动了？**

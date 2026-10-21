@@ -73,8 +73,14 @@ class HttpEngineError(RuntimeError):
 @dataclass
 class Candidate:
     rate: int          # bit_rate，排序用；不确定的给 0
-    label: str         # 给人看的档位名，如 h264_1080p_2540397
+    label: str         # 档位名，如 normal_1080_0
     url: str
+    width: int = 0
+    height: int = 0
+    bytes: int = 0     # play_addr.data_size，拿不到就是 0（UI 显示"未知"，不要编）
+    fps: int = 0
+    codec: str = ''
+    watermark: bool = False
 
 
 @dataclass
@@ -84,6 +90,8 @@ class Media:
     author: str
     duration_ms: int
     candidates: list = field(default_factory=list)
+    thumbnail: str = ''
+    source_url: str = ''
 
 
 def extract_vid(text):
@@ -244,33 +252,55 @@ class DouyinHttp:
 
         video = aweme.get('video') or {}
         author = aweme.get('author') or {}
+        cover = ((video.get('cover') or {}).get('url_list') or [''])[0]
         return Media(
             vid=str(vid),
             title=(aweme.get('desc') or '').strip() or f'douyin_{vid}',
             author=author.get('nickname') or '',
             duration_ms=int(video.get('duration') or 0),
             candidates=self._candidates(video),
+            thumbnail=cover,
+            source_url=f'{HOST}/video/{vid}',
         )
 
     @staticmethod
     def _candidates(video):
-        """按码率从高到低排；带水印的 download_addr 只放最后兜底。"""
+        """按码率从高到低排；带水印的 download_addr 只放最后兜底。
+
+        每个 bit_rate 自带 data_size / width / height / FPS / is_h265，
+        所以档位信息不用二次探测（截图里那些"未知"体积这里其实拿得到）。
+        """
         out = []
         for br in (video.get('bit_rate') or []):
             rate = int(br.get('bit_rate') or 0)
             label = br.get('gear_name') or f'{rate}bps'
-            for u in ((br.get('play_addr') or {}).get('url_list') or []):
+            pa = br.get('play_addr') or {}
+            w = int(pa.get('width') or 0)
+            h = int(pa.get('height') or 0)
+            size = int(pa.get('data_size') or 0)
+            fps = int(br.get('FPS') or 0)
+            codec = 'h265' if br.get('is_h265') else 'h264'
+            for u in (pa.get('url_list') or []):
                 if u.startswith('http'):
-                    out.append(Candidate(rate, label, u))
+                    out.append(Candidate(rate, label, u, w, h, size, fps, codec))
         # 老接口/没有 bit_rate 数组时的兜底档位
         for key in ('play_addr_h264', 'play_addr', 'play_addr_265'):
-            for u in ((video.get(key) or {}).get('url_list') or []):
+            node = video.get(key) or {}
+            size = int(node.get('data_size') or 0)
+            w = int(node.get('width') or video.get('width') or 0)
+            h = int(node.get('height') or video.get('height') or 0)
+            for u in (node.get('url_list') or []):
                 if u.startswith('http'):
-                    out.append(Candidate(0, key, u))
+                    out.append(Candidate(0, key, u, w, h, size))
         # download_addr 是带水印的播放流，只能垫底
-        for u in ((video.get('download_addr') or {}).get('url_list') or []):
+        node = video.get('download_addr') or {}
+        for u in (node.get('url_list') or []):
             if u.startswith('http'):
-                out.append(Candidate(-1, 'download_addr(带水印)', u))
+                out.append(Candidate(-1, 'download_addr(带水印)', u,
+                                     int(node.get('width') or 0),
+                                     int(node.get('height') or 0),
+                                     int(node.get('data_size') or 0),
+                                     0, '', True))
 
         seen, uniq = set(), []
         for c in sorted(out, key=lambda x: -x.rate):
