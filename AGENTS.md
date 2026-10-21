@@ -57,7 +57,8 @@ ffmpeg 为什么是硬前提：B站/YouTube 全是 DASH 音视频分离，yt-dlp
 ## 三、目录与运行
 
 ```
-├─ dy_dl.py          核心逻辑（Playwright 借浏览器签名）+ 命令行入口
+├─ dy_dl.py          入口 + 浏览器引擎（Playwright 截流）+ 命令行入口
+├─ dy_http.py        纯 HTTP 引擎（只用标准库，自己算签名；默认优先）
 ├─ dy_gui.pyw        tkinter 界面，worker 在子线程调 download()
 ├─ 抖音下载器.bat    start pythonw 启动 GUI，无命令行窗口
 ├─ browser_profile/  独立 Edge 配置（不入库，删了会自动重建）
@@ -79,6 +80,8 @@ venv\Scripts\python.exe dy_dl.py 链接 --headful    # 显示窗口排错
   这个后端未来要给 agent 调用，输出必须是结构化数据而非只给人看的日志。
 - **单例约束**：`browser_profile` 同时只能被一个进程使用，并发会崩。
   多任务必须串行或加文件锁。
+- **纯 HTTP 引擎只用标准库。** `dy_http.py` 故意不依赖 requests / playwright：
+  换台机器 clone 下来就能跑，以后塞进 Skill 也不用先 bootstrap 依赖。别为省事引入新依赖。
 - **提交前脱敏**：确认没有 cookie / 密钥 / 绝对路径 / 机器名进入 diff。
   `browser_profile/`、`cookies.txt` 已在 `.gitignore` 里，不要用 `-f` 强加。
 - 中文注释，函数级说明写清「为什么这么做」，而不只是「做了什么」。

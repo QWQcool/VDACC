@@ -26,6 +26,8 @@ import re
 import sys
 import time
 
+import dy_http
+
 BASE = pathlib.Path(__file__).resolve().parent
 OUT = BASE / '下载'
 PROFILE = BASE / 'browser_profile'
@@ -234,17 +236,69 @@ class Grabber:
         return best
 
 
-def download(targets, out_dir=OUT, log=print, headless=True, force=False):
-    """下载一批目标，返回 [(target, ok, path/msg)]。"""
+def download(targets, out_dir=OUT, log=print, headless=True, force=False,
+             engine='auto'):
+    """下载一批目标，返回 [(target, ok, path/msg)]。
+
+    engine:
+      auto    —— 先走纯 HTTP 签名引擎，失败再回退浏览器（默认）
+      http    —— 只用纯 HTTP：不需要 Playwright / Edge，失败直接报错
+      browser —— 只用原先的 Playwright 截流方案
+    """
+    if engine not in ('auto', 'http', 'browser'):
+        raise ValueError(f'未知 engine: {engine!r}')
+
     out_dir = pathlib.Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     results = []
+    http_eng = dy_http.DouyinHttp(log=log) if engine != 'browser' else None
+    grabber = None
 
-    with Grabber(log=log, headless=headless) as g:
+    def browser():
+        """浏览器是慢路径，只有真的要用时才启动（冷启动 2~4 秒）。"""
+        nonlocal grabber
+        if grabber is None:
+            grabber = Grabber(log=log, headless=headless)
+            grabber.__enter__()
+        return grabber
+
+    try:
         for idx, item in enumerate(targets, 1):
             url = to_url(item)
             log(f'--- ({idx}/{len(targets)}) {url}')
+
+            # ID 能直接从 URL 抠出来时，先看本地有没有，省掉一次详情请求
+            early_vid = dy_http.extract_vid(url)
+            if early_vid and not force:
+                exist = list(out_dir.glob(f'{early_vid}_*.mp4'))
+                if exist:
+                    log(f'    [跳过] 已存在: {exist[0].name}')
+                    results.append((item, True, str(exist[0])))
+                    continue
+
+            if http_eng is not None:
+                try:
+                    info = http_eng.fetch(url)
+                    log(f'    [HTTP] {safe_name(info.title, 50)}')
+                    exist = list(out_dir.glob(f'{info.vid}_*.mp4'))
+                    if exist and not force:
+                        log(f'    [跳过] 已存在: {exist[0].name}')
+                        results.append((item, True, str(exist[0])))
+                        continue
+                    dest = out_dir / f'{info.vid}_{safe_name(info.title)}.mp4'
+                    label, size = http_eng.download(info, dest, force=force)
+                    log(f'    [完成] {dest.name}  ({size / 1048576:.2f} MB, {label})')
+                    results.append((item, True, str(dest)))
+                    continue
+                except Exception as e:
+                    if engine == 'http':
+                        log(f'    [失败] {type(e).__name__}: {e}')
+                        results.append((item, False, f'{type(e).__name__}: {e}'))
+                        continue
+                    log(f'    [HTTP 失败] {type(e).__name__}: {e} → 回退浏览器')
+
             try:
+                g = browser()
                 vid, title, cands, media = g.fetch(url)
                 log(f'    标题: {safe_name(title, 50)}')
                 if not vid:
@@ -282,15 +336,21 @@ def download(targets, out_dir=OUT, log=print, headless=True, force=False):
             except Exception as e:
                 log(f'    [异常] {type(e).__name__}: {e}')
                 results.append((item, False, f'{type(e).__name__}: {e}'))
+    finally:
+        if grabber is not None:
+            grabber.__exit__(None, None, None)
     return results
 
 
 def main():
+    dy_http.setup_console()
     ap = argparse.ArgumentParser(description='抖音视频下载器')
     ap.add_argument('input', nargs='*', help='链接 / 短链 / 视频ID / 整段分享口令')
     ap.add_argument('--headful', action='store_true', help='显示浏览器窗口（排错用）')
     ap.add_argument('--force', action='store_true', help='已存在的也重新下')
     ap.add_argument('-o', '--out', default=str(OUT), help='输出目录')
+    ap.add_argument('--engine', choices=('auto', 'http', 'browser'), default='auto',
+                    help='auto=HTTP 优先失败回退浏览器（默认）；http=纯 HTTP；browser=只用浏览器')
     args = ap.parse_args()
 
     if args.input:
@@ -317,7 +377,8 @@ def main():
 
     print(f'共 {len(targets)} 个目标\n')
     results = download(targets, out_dir=args.out,
-                       headless=not args.headful, force=args.force)
+                       headless=not args.headful, force=args.force,
+                       engine=args.engine)
     ok = sum(1 for _, s, _ in results if s)
     print('')
     print('=' * 58)

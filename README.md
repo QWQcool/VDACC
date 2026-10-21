@@ -12,6 +12,9 @@
 
 文件存到 `下载\`，命名格式 `视频ID_标题.mp4`。同一个视频重复下载会自动跳过。
 
+下载有两条路：**默认先走纯 HTTP 签名引擎**（自己算 `x-secsdk-web-signature`，实测 1.2 秒一条，
+不需要浏览器、不需要 cookie），失败才回退 Playwright 截流。用 `--engine` 可以强制指定。
+
 ## 为什么不用 yt-dlp / 那些 GUI
 
 > **2026-10-21 更正**：这里原先写"抖音详情接口要求 `a_bogus` 签名，只有浏览器 JS 算得出"——**这条是错的**。
@@ -49,7 +52,8 @@ Playwright 起一个独立 Edge（独立 profile，不碰你正在用的）
 DYDownload\
 ├─ 抖音下载器.bat     双击启动图形界面
 ├─ dy_gui.pyw         界面代码（tkinter）
-├─ dy_dl.py           核心逻辑，也能命令行直接用
+├─ dy_dl.py           入口 + 浏览器引擎（Playwright 截流），也能命令行直接用
+├─ dy_http.py         纯 HTTP 引擎（只用标准库，自己算签名；无浏览器也能跑）
 ├─ venv\              独立 Python 环境（playwright + yt-dlp）
 ├─ browser_profile\   独立浏览器配置（58MB，删了会自动重建）
 └─ 下载\              输出目录
@@ -62,16 +66,24 @@ venv\Scripts\python.exe dy_dl.py "https://v.douyin.com/xxxx/"
 venv\Scripts\python.exe dy_dl.py 7601899463951770978
 venv\Scripts\python.exe dy_dl.py "链接1" "链接2" --force
 venv\Scripts\python.exe dy_dl.py 链接 --headful    # 显示浏览器窗口，排错用
+venv\Scripts\python.exe dy_dl.py 链接 --engine http      # 只用纯 HTTP（不需要 playwright）
+venv\Scripts\python.exe dy_dl.py 链接 --engine browser   # 只用浏览器截流
 ```
 
 `--force` 强制重下（默认跳过已存在的）。
 
+`--engine` 三档：`auto`（默认，HTTP 优先、失败回退）/ `http` / `browser`。
+纯 HTTP 引擎只依赖标准库，所以系统 Python 也能直接跑：`python dy_http.py "链接" -o 目录`。
+
 ## 常见问题
 
 **换了新视频下不动了？**
-抖音不定期改接口。先跑 `--headful` 看浏览器里能不能正常播放：
-- 能播放但脚本报错 → 接口字段变了，检查 `collect_candidates()` 里的 `bit_rate` / `play_addr` 路径
-- 浏览器里也播不了 → 视频本身被限（私密/已删/地区限制）
+先看日志里是哪一层失败：
+- 出现 `[HTTP 失败] ... → 回退浏览器` 且浏览器成功 → 只是签名参数变了，浏览器兜底生效；
+  这时该修的是 `dy_http.py`（`SALT` 或 query 参数），不是浏览器那套
+- 两层都失败 → 跑 `--headful` 看浏览器里能不能正常播放：
+  - 能播放但脚本报错 → 接口字段变了，检查 `collect_candidates()` / `_candidates()` 里的 `bit_rate`、`play_addr` 路径
+  - 浏览器里也播不了 → 视频本身被限（私密/已删/地区限制）
 
 **文件只有几百 KB 正常吗？**
 正常。抖音竖屏短视频码率本身就低（这条 9 秒 1080×1440 只有 731kbps / 0.8MB）。脚本已经取了最高档，不是压缩过。
