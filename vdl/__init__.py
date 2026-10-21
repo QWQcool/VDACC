@@ -5,7 +5,7 @@
 CLI、Web GUI、Skill 都是它的壳，不允许在壳里写业务逻辑。
 """
 
-__version__ = '1.0.0'
+__version__ = '1.1.0'
 
 # 契约版本。字段增删要改这里，壳按它决定怎么解析。
 SCHEMA_VERSION = 1

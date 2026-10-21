@@ -141,7 +141,8 @@ class DouyinEngine(Engine):
 
     # ------------------------------------------------------------ 下载
 
-    def download(self, probe, format_id, dest_dir, force=False, progress=None):
+    def download(self, probe, format_id, dest_dir, force=False, progress=None,
+                 should_cancel=None):
         import pathlib
 
         fmt = next((f for f in probe.formats if f.id == format_id), None)
@@ -181,7 +182,8 @@ class DouyinEngine(Engine):
         )
         try:
             _label, size = self.client.download(tmp, dest, max_try=len(fmt.urls),
-                                                force=force, progress=progress)
+                                                force=force, progress=progress,
+                                                should_cancel=should_cancel)
         except dy_http.HttpEngineError as e:
             raise _wrap(e) from None
         return DownloadResult(ok=True, path=str(dest), bytes=size,

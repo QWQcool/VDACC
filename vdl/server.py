@@ -28,6 +28,7 @@ from urllib.parse import parse_qs, urlparse
 from . import SCHEMA_VERSION, __version__
 from .core import router
 from .core.config import load as load_config
+from .core.download import DownloadCancelled
 from .core.errors import ErrorCode, VdlError
 from .core.models import ProbeResult
 from .core.paths import data_dir
@@ -80,7 +81,8 @@ class JobStore:
     单例约束。UI 上多选是多个任务，但执行仍然排队。
     """
 
-    def __init__(self, out_dir, hub, log=print, store_path=None, start_worker=True):
+    def __init__(self, out_dir, hub, log=print, store_path=None, start_worker=True,
+                 concurrency=1):
         self.out_dir = pathlib.Path(out_dir)
         self.hub = hub
         self.log = log
@@ -93,8 +95,9 @@ class JobStore:
             self.store_path.parent.mkdir(parents=True, exist_ok=True)
         self._load()
         if start_worker:
-            threading.Thread(target=self._worker, daemon=True,
-                             name='vdl-worker').start()
+            for i in range(max(1, min(int(concurrency or 1), 4))):
+                threading.Thread(target=self._worker, daemon=True,
+                                 name=f'vdl-worker-{i}').start()
 
     # -- 持久化
 
@@ -149,6 +152,25 @@ class JobStore:
     def get(self, jid):
         return self.jobs.get(jid)
 
+    def cancel(self, jid):
+        job = self.jobs.get(jid)
+        if not job or job.get('status') in ('done', 'failed', 'cancelled'):
+            return False
+        job['cancelRequested'] = True
+        if job.get('status') == 'queued':
+            # 还没开始就直接结案，别等 worker 捡到它
+            job.update(status='cancelled', finishedAt=time.time(),
+                       error={'code': 'cancelled', 'message': '用户取消'})
+            self._emit(job)
+        self._persist()
+        return True
+
+    def retry(self, jid):
+        job = self.jobs.get(jid)
+        if not job:
+            return None
+        return self.submit(job['url'], job.get('formatId'), bool(job.get('force')))
+
     def list(self, limit=50):
         with self._lock:
             ids = list(reversed(self.order))[:limit]
@@ -167,6 +189,13 @@ class JobStore:
                 self._run(job)
 
     def _run(self, job):
+        if job.get('cancelRequested'):
+            job.update(status='cancelled', finishedAt=time.time(),
+                       error={'code': 'cancelled', 'message': '用户取消'})
+            self._emit(job)
+            self._persist()
+            return
+
         job['status'] = 'running'
         self._emit(job)
         try:
@@ -202,11 +231,16 @@ class JobStore:
                     last['b'] = written
                     self._emit(job)
 
-            dl = engine.download(probe, fmt.id, self.out_dir,
-                                 force=job['force'], progress=on_progress)
+            dl = engine.download(probe, fmt.id, self.out_dir, force=job['force'],
+                                 progress=on_progress,
+                                 should_cancel=lambda: bool(job.get('cancelRequested')))
             job.update(status='done', path=dl.path, bytes=dl.bytes, percent=100,
                        speed=0, eta=0, formatId=dl.format_id,
                        finishedAt=time.time())
+        except DownloadCancelled:
+            # .part 保留，重新提交同一档位时会自动续传
+            job.update(status='cancelled', finishedAt=time.time(),
+                       error={'code': 'cancelled', 'message': '用户取消'})
         except VdlError as e:
             job.update(status='failed', error=e.to_dict(), finishedAt=time.time())
         except Exception as e:                       # noqa: BLE001 - 必须如实上报
@@ -400,6 +434,22 @@ def make_handler(cfg):
                 job = cfg.jobs.submit(url, payload.get('formatId'), force)
                 return self._json({'ok': True, 'job': job, 'jobs': [job]}, 202)
 
+            if path.startswith('/api/jobs/'):
+                parts = [p for p in path.split('/') if p]
+                # /api/jobs/<id>/cancel|retry
+                if len(parts) == 4 and parts[3] in ('cancel', 'retry'):
+                    jid = parts[2]
+                    if parts[3] == 'cancel':
+                        if not cfg.jobs.cancel(jid):
+                            return self._err('bad_input', '任务不存在或已结束',
+                                             status=400)
+                        return self._json({'ok': True, 'job': cfg.jobs.get(jid)})
+                    job = cfg.jobs.retry(jid)
+                    if not job:
+                        return self._err('not_found', '任务不存在', status=404)
+                    return self._json({'ok': True, 'job': job}, 202)
+                return self._err('not_found', f'没有这个接口: {path}', status=404)
+
             if path == '/api/preview':
                 # 返回带签名的直链给同源页面播放。只在本机、且已过 token 校验；
                 # 直链有时效，所以每次预览都重新 probe，不缓存。
@@ -475,14 +525,14 @@ def _lan_ips():
 
 
 def make_server(host='127.0.0.1', port=8765, out_dir=None, token=None, log=None,
-                persist=True, allowed_origins=None):
+                persist=True, allowed_origins=None, concurrency=1):
     """构造但不启动。测试用 port=0 拿随机端口、persist=False 隔离历史。"""
     out = pathlib.Path(out_dir or load_config().get('outDir') or '下载')
     out.mkdir(parents=True, exist_ok=True)
     hub = Hub()
     store = (data_dir() / 'jobs.json') if persist else None
     jobs = JobStore(out, hub, log=log or (lambda m: print(m, flush=True)),
-                    store_path=store)
+                    store_path=store, concurrency=concurrency)
     origins = list(load_config().get('allowedOrigins') or []) + list(allowed_origins or [])
     cfg = Config(host, port, token or secrets.token_urlsafe(16), out, hub, jobs,
                  allowed_origins=origins)
@@ -492,12 +542,13 @@ def make_server(host='127.0.0.1', port=8765, out_dir=None, token=None, log=None,
 
 
 def serve(port=8765, out_dir=None, token=None, open_browser=True, host='127.0.0.1',
-          lan=False, allowed_origins=None):
+          lan=False, allowed_origins=None, concurrency=1):
     if lan:
         host = '0.0.0.0'
     try:
         httpd, cfg = make_server(host=host, port=port, out_dir=out_dir, token=token,
-                                 allowed_origins=allowed_origins)
+                                 allowed_origins=allowed_origins,
+                                 concurrency=concurrency)
     except OSError as e:
         print(f'端口 {port} 起不来：{e}')
         print('换一个端口：python -m vdl serve --port 8766')

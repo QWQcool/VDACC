@@ -357,6 +357,7 @@ button:disabled { cursor: default; opacity: .55; }
 .state.running { color: var(--accent); background: var(--accent-soft); }
 .state.done { color: var(--ok); background: rgba(5, 150, 105, .1); }
 .state.failed { color: var(--danger); background: rgba(220, 38, 38, .1); }
+.state.cancelled { color: var(--text-3); background: var(--surface-soft); }
 
 /* ---------- 空态 / 完成态 ---------- */
 

@@ -311,12 +311,15 @@ class DouyinHttp:
 
     # ------------------------------------------------------------ 下载
 
-    def download(self, media, dest, max_try=3, force=False, progress=None):
+    def download(self, media, dest, max_try=3, force=False, progress=None,
+                 should_cancel=None):
         """流式下载到 dest，成功返回 (档位名, 字节数)。
 
         不再像浏览器版那样"把所有候选整个读进内存比大小"：直接按码率从高到低
         试，写 .part 再原子改名，失败就换下一个候选。
 
+        断点续传：`.part` 旁边放一个 `.part.json` 记住它是哪个 URL 下的；
+        下次运行（或换候选）时对得上就续传，对不上就删掉重来，避免拼错文件。
         progress(written, total) 每 0.2 秒最多回调一次；total 未知时为 0。
         """
         dest = pathlib.Path(dest)
@@ -325,65 +328,113 @@ class DouyinHttp:
             return 'existing', dest.stat().st_size
 
         part = dest.with_name(dest.name + '.part')
-        last = None
-        for i, cand in enumerate(media.candidates[:max_try], 1):
+        meta = part.with_name(part.name + '.json')
+
+        resume_url = ''
+        if part.exists() and meta.exists():
             try:
-                size = self._download_one(cand.url, part, progress=progress)
+                resume_url = json.loads(meta.read_text(encoding='utf-8')).get('url', '')
+            except Exception:
+                resume_url = ''
+        if part.exists() and not resume_url:
+            part.unlink(missing_ok=True)
+
+        cands = list(media.candidates[:max_try])
+        if resume_url:                    # 上次下到一半的那个候选优先
+            cands.sort(key=lambda c: c.url != resume_url)
+
+        last = None
+        for i, cand in enumerate(cands, 1):
+            if part.exists() and resume_url != cand.url:
+                part.unlink(missing_ok=True)         # 换候选 = 换文件，不能续
+                meta.unlink(missing_ok=True)
+            resume_url = cand.url
+            try:
+                meta.write_text(json.dumps({'url': cand.url}), encoding='utf-8')
+                size = self._download_one(cand.url, part, progress=progress,
+                                          should_cancel=should_cancel)
                 if not self._looks_like_video(part, size):
                     raise HttpEngineError(f'落地文件不像视频（{size} 字节）', 'bad_payload')
                 dest.unlink(missing_ok=True)
                 part.replace(dest)
+                meta.unlink(missing_ok=True)
                 return cand.label, size
             except HttpEngineError as e:
                 last = e
-                self.log(f'    [候选 {i}/{min(max_try, len(media.candidates))}] '
-                         f'{cand.label} 失败: {e}')
+                self.log(f'    [候选 {i}/{len(cands)}] {cand.label} 失败: {e}')
             except Exception as e:      # 网络中断 / 磁盘异常
                 last = e
                 self.log(f'    [候选 {i}] {cand.label} 异常: {type(e).__name__}: {e}')
-            finally:
-                if part.exists():
-                    try:
-                        part.unlink()
-                    except Exception:
-                        pass
 
         raise HttpEngineError(f'所有候选都失败（最后: {last}）', 'download_failed')
 
-    def _download_one(self, url, part, progress=None):
-        req = urllib.request.Request(url, headers={
+    def _download_one(self, url, part, progress=None, retries=2, should_cancel=None):
+        attempt = 0
+        while True:
+            try:
+                return self._download_once(url, part, progress, should_cancel)
+            except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+                if attempt >= retries:
+                    raise HttpEngineError(f'网络错误: {e}', 'network') from None
+                attempt += 1
+                time.sleep(min(2 ** attempt, 8))
+
+    def _download_once(self, url, part, progress, should_cancel):
+        resume = part.stat().st_size if part.exists() else 0
+        headers = {
             'User-Agent': UA,
             'Referer': HOST + '/',
             'Accept': '*/*',
-        })
-        written = 0
-        with self.opener.open(req, timeout=120) as resp, open(part, 'wb') as f:
-            expected = resp.headers.get('Content-Length')
-            total = int(expected) if expected and expected.isdigit() else 0
+        }
+        if resume:
+            headers['Range'] = f'bytes={resume}-'
+
+        req = urllib.request.Request(url, headers=headers)
+        written = resume
+        with self.opener.open(req, timeout=120) as resp:
+            # 服务端不认 Range 会回 200 + 全量；此时必须从头写
+            if resume and resp.status != 206:
+                resume, written = 0, 0
+            mode = 'ab' if resume else 'wb'
+
+            total = 0
+            content_range = resp.headers.get('Content-Range') or ''
+            if '/' in content_range:
+                raw = content_range.rsplit('/', 1)[-1].strip()
+                total = int(raw) if raw.isdigit() else 0
+            if not total:
+                expected = resp.headers.get('Content-Length')
+                if expected and expected.isdigit():
+                    total = int(expected) + resume
+
             last = 0.0
-            while True:
-                chunk = resp.read(256 * 1024)
-                if not chunk:
-                    break
-                f.write(chunk)
-                written += len(chunk)
-                if progress:
-                    # 节流：256KB 一块在高带宽下回调过密，SSE 会刷屏
-                    now = time.monotonic()
-                    if now - last >= 0.2:
-                        last = now
-                        try:
-                            progress(written, total)
-                        except Exception:
-                            pass                    # 进度回调不该影响下载
+            with open(part, mode) as f:
+                while True:
+                    if should_cancel and should_cancel():
+                        from vdl.core.download import DownloadCancelled
+                        raise DownloadCancelled()
+                    chunk = resp.read(256 * 1024)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    written += len(chunk)
+                    if progress:
+                        # 节流：256KB 一块在高带宽下回调过密，SSE 会刷屏
+                        now = time.monotonic()
+                        if now - last >= 0.2:
+                            last = now
+                            try:
+                                progress(written, total)
+                            except Exception:
+                                pass                # 进度回调不该影响下载
             if progress:
                 try:
                     progress(written, total or written)
                 except Exception:
                     pass
-        if expected and expected.isdigit() and int(expected) != written:
+        if total and written != total:
             raise HttpEngineError(
-                f'长度不符（声明 {expected}，实收 {written}）', 'truncated')
+                f'长度不符（声明 {total}，实收 {written}）', 'truncated')
         return written
 
     @staticmethod

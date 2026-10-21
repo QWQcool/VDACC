@@ -24,7 +24,7 @@ from .core.config import load as load_config
 from .core.config import save as save_config
 from .core.errors import ErrorCode, VdlError
 from .core.models import DownloadResult, ProbeResult
-from .core.paths import auth_dir
+from .core.paths import auth_dir, data_dir
 from .engines.base import pick_format
 
 DEFAULT_OUT = '下载'
@@ -215,6 +215,51 @@ def _fix_deps():
     return True
 
 
+def _live_check(log=None):
+    """对三个真实样本各 probe 一次，判断是「引擎坏了」还是「网络问题」。"""
+    targets = (
+        ('douyin', 'https://www.douyin.com/video/6961737553342991651'),
+        ('netease', 'https://music.163.com/song?id=28606052'),
+        ('bilibili', 'BV1j5nj68E48'),
+    )
+    results = []
+    for site, url in targets:
+        started = time.monotonic()
+        try:
+            res = router.probe(url, log=log)
+            results.append({'site': site, 'ok': bool(res.ok),
+                            'ms': int((time.monotonic() - started) * 1000),
+                            'error': (res.error or {}).get('code')})
+        except Exception as e:                   # noqa: BLE001
+            results.append({'site': site, 'ok': False,
+                            'ms': int((time.monotonic() - started) * 1000),
+                            'error': f'{type(e).__name__}: {e}'})
+    return results
+
+
+def _write_bundle(payload):
+    """诊断包：只含状态与错误，不含 cookie / 完整路径。"""
+    import zipfile
+
+    stamp = time.strftime('%Y%m%d-%H%M%S')
+    target = pathlib.Path.cwd() / f'vdl-diagnose-{stamp}.zip'
+    jobs = []
+    job_file = data_dir() / 'jobs.json'
+    if job_file.exists():
+        try:
+            raw = json.loads(job_file.read_text(encoding='utf-8'))
+            for job in (raw.get('jobs') or [])[-20:]:
+                jobs.append({k: job.get(k) for k in
+                             ('id', 'status', 'formatId', 'percent', 'error')})
+        except Exception:                        # noqa: BLE001
+            pass
+    with zipfile.ZipFile(target, 'w', zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr('doctor.json', json.dumps(payload, ensure_ascii=False, indent=2))
+        zf.writestr('config.json', json.dumps(load_config(), ensure_ascii=False, indent=2))
+        zf.writestr('jobs.json', json.dumps(jobs, ensure_ascii=False, indent=2))
+    return target
+
+
 def cmd_doctor(args):
     if getattr(args, 'fix', False):
         _fix_deps()
@@ -273,6 +318,15 @@ def cmd_doctor(args):
         'checks': checks,
         'warnings': [c['name'] for c in checks if not c['required'] and not c['ok']],
     }
+
+    if getattr(args, 'live', False):
+        payload['live'] = _live_check()
+        if not all(item['ok'] for item in payload['live']):
+            payload['warnings'].append('live')
+
+    if getattr(args, 'bundle', False):
+        payload['bundle'] = str(_write_bundle(payload))
+
     if args.json:
         _emit_json(payload)
     else:
@@ -282,6 +336,13 @@ def cmd_doctor(args):
             print(f'  [{mark}] {c["name"]:<12}{c["value"]}')
             if not c['ok'] and c['hint']:
                 print(f'         → {c["hint"]}')
+        for item in payload.get('live', []):
+            mark = 'OK  ' if item['ok'] else 'FAIL'
+            detail = item['error'] or ''
+            print(f'  [{mark}] live:{item["site"]:<8}{item["ms"]}ms  {detail}')
+        if payload.get('bundle'):
+            print(f'  诊断包: {payload["bundle"]}')
+
     return 0 if payload['ok'] else 1
 
 
@@ -327,11 +388,15 @@ def build_parser():
     s.add_argument('--lan', action='store_true', help='允许局域网访问（手机/其它设备）')
     s.add_argument('--allow-origin', action='append', default=[],
                    help='额外允许的 Origin（infOS 等宿主），可重复')
+    s.add_argument('--concurrency', type=int, default=1, choices=(1, 2, 3, 4),
+                   help='同时下载数，默认 1（对平台更友好）')
     s.set_defaults(func=cmd_serve)
 
     d = sub.add_parser('doctor', help='检查运行环境')
     d.add_argument('-o', '--out', default=None, help='顺带检查输出目录')
     d.add_argument('--fix', action='store_true', help='自动安装缺失的 pip 依赖')
+    d.add_argument('--live', action='store_true', help='对三个站点各解析一次（联网）')
+    d.add_argument('--bundle', action='store_true', help='生成脱敏诊断包 zip')
     d.add_argument('--json', action='store_true')
     d.set_defaults(func=cmd_doctor)
     return ap

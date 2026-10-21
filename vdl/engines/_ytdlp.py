@@ -14,6 +14,7 @@ import pathlib
 import urllib.parse
 
 from .base import Engine
+from ..core.download import DownloadCancelled
 from ..core.env import ffmpeg_path
 from ..core.errors import ErrorCode, VdlError
 from ..core.models import DownloadResult, Format, Media, ProbeResult
@@ -49,6 +50,7 @@ class YtdlpBase(Engine):
             'noplaylist': True,
             'socket_timeout': 20,
             'retries': 2,
+            'continuedl': True,      # yt-dlp 自带断点续传
         }
         if self.cookie_site:
             jar = cookies_file(self.cookie_site)
@@ -191,7 +193,8 @@ class YtdlpBase(Engine):
 
     # ------------------------------------------------------------ 下载
 
-    def download(self, probe, format_id, dest_dir, force=False, progress=None):
+    def download(self, probe, format_id, dest_dir, force=False, progress=None,
+                 should_cancel=None):
         fmt = next((f for f in probe.formats if f.id == format_id), None)
         if fmt is None or not (fmt.extra.get('video_id') or fmt.extra.get('audio_id')):
             raise VdlError(ErrorCode.BAD_INPUT, f'没有这个档位: {format_id}',
@@ -210,6 +213,8 @@ class YtdlpBase(Engine):
 
         def hook(ev):
             # 视频/音频两条流分别回调；按文件名累计，避免百分比来回跳
+            if should_cancel and should_cancel():
+                raise DownloadCancelled()
             if ev.get('status') != 'downloading':
                 return
             seen[ev.get('filename') or 'stream'] = int(ev.get('downloaded_bytes') or 0)
@@ -233,7 +238,7 @@ class YtdlpBase(Engine):
         try:
             with self._ydl(**opts) as ydl:
                 info = ydl.extract_info(probe.media.source_url, download=True)
-        except VdlError:
+        except (VdlError, DownloadCancelled):
             raise
         except Exception as e:                   # noqa: BLE001
             raise self._wrap(e) from None

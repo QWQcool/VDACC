@@ -323,6 +323,17 @@
       // 走了 token 才能取；手机/其它设备也可用这个链接
       window.open(`/api/files/${job.id}?token=${encodeURIComponent(token)}`, '_blank');
     });
+    const cancel = el('button', 'link hidden', '取消');
+    cancel.type = 'button';
+    cancel.addEventListener('click', () => {
+      api(`/api/jobs/${job.id}/cancel`, { method: 'POST' });
+    });
+    const retry = el('button', 'link hidden', '重试');
+    retry.type = 'button';
+    retry.addEventListener('click', async () => {
+      const r = await api(`/api/jobs/${job.id}/retry`, { method: 'POST' });
+      if (r.ok && r.job) upsertJob(r.job);
+    });
     const reveal = el('button', 'link', '打开');
     reveal.type = 'button';
     reveal.addEventListener('click', () => {
@@ -334,10 +345,10 @@
         });
       }
     });
-    foot.append(info, save, reveal);
+    foot.append(info, save, cancel, retry, reveal);
 
     node.append(head, bar, foot);
-    node._refs = { title, state, pct, fill, info, save, reveal };
+    node._refs = { title, state, pct, fill, info, save, cancel, retry, reveal };
     return node;
   }
 
@@ -345,9 +356,16 @@
     const r = node._refs;
     if (job.title) r.title.textContent = job.title;
 
-    const labels = { queued: '排队', running: '下载中', done: '完成', failed: '失败' };
+    const labels = { queued: '排队', running: '下载中', done: '完成',
+                     failed: '失败', cancelled: '已取消' };
+    const active = job.status === 'queued' || job.status === 'running';
     r.state.className = `state ${job.status}`;
     r.state.textContent = labels[job.status] || job.status;
+    r.cancel.classList.toggle('hidden', !active);
+    r.retry.classList.toggle('hidden',
+      !(job.status === 'failed' || job.status === 'cancelled'));
+    r.reveal.classList.toggle('hidden', job.status !== 'done');
+    r.save.classList.toggle('hidden', job.status !== 'done');
 
     const pct = job.status === 'done' ? 100 : (job.percent || 0);
     r.pct.textContent = `${pct}%`;

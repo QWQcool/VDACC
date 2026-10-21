@@ -26,5 +26,6 @@ class PendingEngine(Engine):
     def probe(self, url):
         raise VdlError(ErrorCode.NOT_IMPLEMENTED, self.message, self.next_action)
 
-    def download(self, probe, format_id, dest_dir, force=False, progress=None):
+    def download(self, probe, format_id, dest_dir, force=False, progress=None,
+                 should_cancel=None):
         raise VdlError(ErrorCode.NOT_IMPLEMENTED, self.message, self.next_action)

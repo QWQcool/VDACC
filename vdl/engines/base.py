@@ -20,10 +20,12 @@ class Engine(ABC):
         """解析出 Media + formats，失败抛 VdlError。"""
 
     @abstractmethod
-    def download(self, probe, format_id, dest_dir, force=False, progress=None):
+    def download(self, probe, format_id, dest_dir, force=False, progress=None,
+                 should_cancel=None):
         """按档位下载到 dest_dir，返回 DownloadResult。
 
         progress(written, total) 可选：给 Web UI 的 SSE 用，CLI 可传 None。
+        should_cancel() 返回 True 时应尽快中断，并保留 .part 以便续传。
         """
 
 
