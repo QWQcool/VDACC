@@ -195,3 +195,10 @@ venv\Scripts\python.exe -m yt_dlp "视频链接"
 
 **下载的文件没有水印吗？**
 没有。取的是抖音自己发布的播放流，不是后期裁剪去水印。
+
+## 许可证
+
+代码以 **Apache-2.0** 发布，见 [`LICENSE`](LICENSE)。
+
+角色美术（`vdl/web/assets/`）与第三方组件不在 Apache-2.0 范围内，见 [`NOTICE`](NOTICE)
+与 [`THIRD_PARTY.md`](THIRD_PARTY.md)。路线图见 [`docs/ROADMAP.md`](docs/ROADMAP.md)。

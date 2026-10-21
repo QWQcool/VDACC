@@ -1,0 +1,22 @@
+VDACC
+Copyright 2026 QWQcool
+
+This product includes or references work from third parties.
+The Apache-2.0 license in LICENSE applies to this repository's own code only.
+
+- infOS (https://github.com/YoKONCy/infOS)
+  Character artwork under vdl/web/assets/ is derived from infOS assets and used
+  with the author's permission. It is NOT covered by this project's Apache-2.0
+  license. See THIRD_PARTY.md.
+
+- yt-dlp
+  Not bundled. Installed as an optional runtime dependency (Unlicense).
+
+- FFmpeg
+  Not bundled. Invoked as an external executable (LGPL/GPL depending on build).
+
+- MediaGrabber (friend's project, source provided for reference)
+  Used as an interaction/architecture reference only. No code or assets are
+  copied into this repository.
+
+See THIRD_PARTY.md for the full record.
