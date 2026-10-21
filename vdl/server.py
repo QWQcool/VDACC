@@ -25,8 +25,10 @@ from urllib.parse import parse_qs, urlparse
 
 from . import SCHEMA_VERSION, __version__
 from .core import router
+from .core.config import load as load_config
 from .core.errors import ErrorCode, VdlError
 from .core.models import ProbeResult
+from .core.paths import data_dir
 from .engines.base import pick_format
 
 MAX_BODY = 1 << 20
@@ -76,15 +78,53 @@ class JobStore:
     单例约束。UI 上多选是多个任务，但执行仍然排队。
     """
 
-    def __init__(self, out_dir, hub, log=print):
+    def __init__(self, out_dir, hub, log=print, store_path=None, start_worker=True):
         self.out_dir = pathlib.Path(out_dir)
         self.hub = hub
         self.log = log
+        self.store_path = pathlib.Path(store_path) if store_path else None
         self.jobs = {}
         self.order = []
         self._q = queue.Queue()
         self._lock = threading.Lock()
-        threading.Thread(target=self._worker, daemon=True, name='vdl-worker').start()
+        if self.store_path:
+            self.store_path.parent.mkdir(parents=True, exist_ok=True)
+        self._load()
+        if start_worker:
+            threading.Thread(target=self._worker, daemon=True,
+                             name='vdl-worker').start()
+
+    # -- 持久化
+
+    def _load(self):
+        """恢复历史；上次没跑完的任务标成 interrupted，不要假装它还在跑。"""
+        if not self.store_path or not self.store_path.exists():
+            return
+        try:
+            data = json.loads(self.store_path.read_text(encoding='utf-8'))
+        except Exception:                        # noqa: BLE001 - 坏文件就当没历史
+            return
+        for job in (data.get('jobs') or [])[-100:]:
+            if not isinstance(job, dict) or not job.get('id'):
+                continue
+            if job.get('status') in ('queued', 'running'):
+                job['status'] = 'failed'
+                job['error'] = {'code': 'interrupted',
+                                'message': '上次会话中断，未完成'}
+                job['finishedAt'] = time.time()
+            self.jobs[job['id']] = job
+            self.order.append(job['id'])
+
+    def _persist(self):
+        if not self.store_path:
+            return
+        try:
+            payload = {'jobs': [self.jobs[i] for i in self.order[-100:]]}
+            tmp = self.store_path.with_suffix('.tmp')
+            tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding='utf-8')
+            os.replace(tmp, self.store_path)
+        except Exception as e:                   # noqa: BLE001 - 不能因为存档失败影响下载
+            self.log(f'任务历史保存失败: {type(e).__name__}: {e}')
 
     # -- 对外
 
@@ -101,6 +141,7 @@ class JobStore:
             self.order.append(jid)
         self._q.put(jid)
         self._emit(job)
+        self._persist()
         return job
 
     def get(self, jid):
@@ -171,6 +212,7 @@ class JobStore:
                        error={'code': 'internal', 'message': f'{type(e).__name__}: {e}'})
             self.log(traceback.format_exc())
         self._emit(job)
+        self._persist()
 
 
 # ---------------------------------------------------------------- HTTP
@@ -254,6 +296,7 @@ def make_handler(cfg):
                 return self._json({
                     'ok': True, 'version': __version__, 'schema': SCHEMA_VERSION,
                     'outDir': str(cfg.out_dir), 'jobs': len(cfg.jobs.jobs),
+                    'theme': load_config().get('theme', 'light'),
                 })
             if path == '/api/jobs':
                 return self._json({'ok': True, 'jobs': cfg.jobs.list()})
@@ -385,19 +428,22 @@ def make_handler(cfg):
 
 # ---------------------------------------------------------------- 启动
 
-def make_server(host='127.0.0.1', port=8765, out_dir='下载', token=None, log=None):
-    """构造但不启动。测试用 port=0 拿随机端口，serve() 也走这里。"""
-    out = pathlib.Path(out_dir)
+def make_server(host='127.0.0.1', port=8765, out_dir=None, token=None, log=None,
+                persist=True):
+    """构造但不启动。测试用 port=0 拿随机端口、persist=False 隔离历史。"""
+    out = pathlib.Path(out_dir or load_config().get('outDir') or '下载')
     out.mkdir(parents=True, exist_ok=True)
     hub = Hub()
-    jobs = JobStore(out, hub, log=log or (lambda m: print(m, flush=True)))
+    store = (data_dir() / 'jobs.json') if persist else None
+    jobs = JobStore(out, hub, log=log or (lambda m: print(m, flush=True)),
+                    store_path=store)
     cfg = Config(host, port, token or secrets.token_urlsafe(16), out, hub, jobs)
     httpd = ThreadingHTTPServer((host, cfg.port), make_handler(cfg))
     cfg.port = httpd.server_address[1]
     return httpd, cfg
 
 
-def serve(port=8765, out_dir='下载', token=None, open_browser=True, host='127.0.0.1'):
+def serve(port=8765, out_dir=None, token=None, open_browser=True, host='127.0.0.1'):
     try:
         httpd, cfg = make_server(host=host, port=port, out_dir=out_dir, token=token)
     except OSError as e:

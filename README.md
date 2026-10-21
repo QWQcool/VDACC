@@ -121,6 +121,17 @@ python -m vdl serve                            # 打开本地 Web 界面（默�
 `--json` 时 **stdout 只有 JSON**，日志走 stderr；文件名形如 `视频ID_标题_1080P.mp4`，
 不同档位同时下载不会互相覆盖。
 
+日常使用还有四条：
+
+```bash
+vdl config                                  # 查看配置
+vdl config --set outDir=D:\下载              # 改输出目录
+vdl doctor --fix                            # 自动补装 pip 依赖（ffmpeg 需手动）
+```
+
+- **任务历史会保存**：服务端保留最近 100 条，重启后仍在；上次没跑完的标为「上次会话中断」。
+- **Windows 一键启动**：双击 `VDACC.bat`（首次会建 venv 并装依赖）。
+
 音乐用同一个入口（`vdl probe` / `vdl get` 支持 `music.163.com/song?id=...`）：
 
 ```bash

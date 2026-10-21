@@ -411,8 +411,10 @@
       toast('token 无效：请用启动时打印的完整地址打开');
     }
 
+    // 优先级：用户上次在前端切的主题 > 服务端配置 > 浅色
     const saved = localStorage.getItem('vdl-theme');
-    if (saved) document.documentElement.dataset.theme = saved;
+    document.documentElement.dataset.theme =
+      saved || (health.ok && health.theme) || 'light';
     els.theme.addEventListener('click', () => {
       const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
       document.documentElement.dataset.theme = next;

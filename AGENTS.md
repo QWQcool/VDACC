@@ -97,6 +97,8 @@ venv\Scripts\python.exe dy_dl.py 链接 --headful    # 显示窗口排错
   profile 在 `%LOCALAPPDATA%\vdl\profile`。两者永不入库、永不打印值——日志只报 cookie 名与数量。
 - **Skill 只能由构建脚本组装。** 别手工把 `vdl/` 拷进 `dist/`；改代码只改仓库再 `build_skill.py`。
   Skill 包刻意排除 `vdl/web` 与 `vdl/server.py`（Agent 不需要，且含授权受限的插画）。
+- **legacy 已冻结。** `dy_dl.py` / `dy_gui.pyw` 只保留抖音的浏览器兜底，不再加新能力；
+  新功能一律加在 `vdl/`。**不要**把 tkinter 迁到 vdl——浏览器引擎不在 vdl 里，迁过去会丢能力。
 - **提交前脱敏**：确认没有 cookie / 密钥 / 绝对路径 / 机器名进入 diff。
   `browser_profile/`、`cookies.txt` 已在 `.gitignore` 里，不要用 `-f` 强加。
 - 中文注释，函数级说明写清「为什么这么做」，而不只是「做了什么」。

@@ -20,12 +20,19 @@ import dy_http
 
 from . import __version__
 from .core import router
+from .core.config import load as load_config
+from .core.config import save as save_config
 from .core.errors import ErrorCode, VdlError
 from .core.models import DownloadResult, ProbeResult
 from .core.paths import auth_dir
 from .engines.base import pick_format
 
 DEFAULT_OUT = '下载'
+
+
+def _resolve_out(value):
+    """命令行显式给了就用；否则用配置；再否则用默认。"""
+    return value or load_config().get('outDir') or DEFAULT_OUT
 
 
 # ---------------------------------------------------------------- 输出
@@ -116,7 +123,7 @@ def cmd_get(args):
         return 1
 
     try:
-        dl = engine.download(result, fmt.id, args.out, force=args.force)
+        dl = engine.download(result, fmt.id, _resolve_out(args.out), force=args.force)
     except VdlError as e:
         if args.json:
             _emit_json(DownloadResult(ok=False, format_id=fmt.id, error=e.to_dict()).to_dict())
@@ -166,11 +173,50 @@ def cmd_serve(args):
         print('需要界面请用完整仓库：python -m vdl serve')
         return 2
 
-    return serve(port=args.port, out_dir=args.out, token=args.token,
+    return serve(port=args.port, out_dir=_resolve_out(args.out), token=args.token,
                  open_browser=not args.no_open)
 
 
+def cmd_config(args):
+    if args.set:
+        key, _, value = args.set.partition('=')
+        if not key:
+            print(r'用法: vdl config --set outDir=D:\下载')
+            return 2
+        save_config({key: value})
+        print(f'{key} = {value}')
+
+    data = load_config()
+    if args.json:
+        _emit_json({'ok': True, 'config': data})
+    else:
+        for key, value in data.items():
+            print(f'{key:<10}{value or "(默认)"}')
+    return 0
+
+
+def _fix_deps():
+    """只装 pip 依赖。ffmpeg 是二进制，交给用户/包管理器，不自动下载。"""
+    import subprocess
+
+    missing = [pkg for mod, pkg in (('yt_dlp', 'yt-dlp'), ('playwright', 'playwright'))
+               if importlib.util.find_spec(mod) is None]
+    if not missing:
+        print('可选依赖已齐全，无需修复')
+        return True
+    print('安装: ' + ' '.join(missing))
+    try:
+        subprocess.run([sys.executable, '-m', 'pip', 'install', *missing], check=True)
+    except Exception as e:                       # noqa: BLE001
+        print(f'安装失败（{type(e).__name__}: {e}），请手动执行：'
+              f'pip install {" ".join(missing)}')
+        return False
+    return True
+
+
 def cmd_doctor(args):
+    if getattr(args, 'fix', False):
+        _fix_deps()
     checks = []
 
     def add(name, ok, value='', required=False, hint=''):
@@ -203,7 +249,7 @@ def cmd_doctor(args):
         'auth/浏览器兜底需要装在带 playwright 的解释器里')
 
     # doctor 是只读检查，不能顺手创建目录（R1 技术债 #7）
-    out_dir = pathlib.Path(args.out)
+    out_dir = pathlib.Path(_resolve_out(args.out))
     try:
         if out_dir.exists():
             probe_file = out_dir / '.vdl-write-test'
@@ -253,7 +299,8 @@ def build_parser():
     g = sub.add_parser('get', help='解析并下载')
     g.add_argument('url')
     g.add_argument('--format', default=None, help='档位 id；默认选推荐档')
-    g.add_argument('-o', '--out', default=DEFAULT_OUT, help=f'输出目录（默认 {DEFAULT_OUT}）')
+    g.add_argument('-o', '--out', default=None,
+                   help=f'输出目录（默认配置里的 outDir，再默认 {DEFAULT_OUT}）')
     g.add_argument('--force', action='store_true', help='已存在也重下')
     g.add_argument('--json', action='store_true', help='输出结构化 JSON（stdout）')
     g.set_defaults(func=cmd_get)
@@ -266,15 +313,21 @@ def build_parser():
     a.add_argument('--json', action='store_true')
     a.set_defaults(func=cmd_auth)
 
+    c = sub.add_parser('config', help='查看/修改配置')
+    c.add_argument('--set', default='', help=r'key=value，例如 outDir=D:\下载')
+    c.add_argument('--json', action='store_true')
+    c.set_defaults(func=cmd_config)
+
     s = sub.add_parser('serve', help='启动本地 Web 界面')
     s.add_argument('--port', type=int, default=8765, help='默认 8765，被占用就换一个')
-    s.add_argument('-o', '--out', default=DEFAULT_OUT, help='输出目录')
+    s.add_argument('-o', '--out', default=None, help='输出目录')
     s.add_argument('--token', default=None, help='固定 token（默认随机生成）')
     s.add_argument('--no-open', action='store_true', help='不自动打开浏览器')
     s.set_defaults(func=cmd_serve)
 
     d = sub.add_parser('doctor', help='检查运行环境')
-    d.add_argument('-o', '--out', default=DEFAULT_OUT, help='顺带检查输出目录')
+    d.add_argument('-o', '--out', default=None, help='顺带检查输出目录')
+    d.add_argument('--fix', action='store_true', help='自动安装缺失的 pip 依赖')
     d.add_argument('--json', action='store_true')
     d.set_defaults(func=cmd_doctor)
     return ap

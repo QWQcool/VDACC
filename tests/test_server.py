@@ -14,7 +14,7 @@ import unittest
 import urllib.error
 import urllib.request
 
-from vdl.server import make_server
+from vdl.server import Hub, JobStore, make_server
 
 TOKEN = 'test-token'
 
@@ -24,7 +24,7 @@ class ServerTest(unittest.TestCase):
     def setUpClass(cls):
         cls.tmp = tempfile.mkdtemp(prefix='vdl-test-')
         cls.httpd, cls.cfg = make_server(port=0, out_dir=cls.tmp, token=TOKEN,
-                                         log=lambda *_: None)
+                                         log=lambda *_: None, persist=False)
         cls.base = f'http://127.0.0.1:{cls.cfg.port}'
         cls.thread = threading.Thread(target=cls.httpd.serve_forever, daemon=True)
         cls.thread.start()
@@ -102,6 +102,41 @@ class ServerTest(unittest.TestCase):
     def test_unknown_api(self):
         status, _ = self._call('/api/nope')
         self.assertEqual(status, 404)
+
+
+class JobPersistenceTest(unittest.TestCase):
+    """重启后历史不能丢；上次没跑完的必须标成中断，而不是假装还在跑。"""
+
+    def test_interrupted_marked_on_load(self):
+        tmp = pathlib.Path(tempfile.mkdtemp(prefix='vdl-jobs-'))
+        try:
+            store_file = tmp / 'jobs.json'
+            store_file.write_text(json.dumps({'jobs': [
+                {'id': 'a', 'status': 'running', 'url': 'x'},
+                {'id': 'b', 'status': 'done', 'url': 'y', 'bytes': 1},
+            ]}, ensure_ascii=False), encoding='utf-8')
+
+            jobs = JobStore(tmp, Hub(), log=lambda *_: None,
+                            store_path=store_file, start_worker=False)
+            self.assertEqual(jobs.get('a')['status'], 'failed')
+            self.assertEqual(jobs.get('a')['error']['code'], 'interrupted')
+            self.assertEqual(jobs.get('b')['status'], 'done')
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_persist_writes_history(self):
+        tmp = pathlib.Path(tempfile.mkdtemp(prefix='vdl-jobs-'))
+        try:
+            store_file = tmp / 'jobs.json'
+            jobs = JobStore(tmp, Hub(), log=lambda *_: None,
+                            store_path=store_file, start_worker=False)
+            jobs.jobs['x'] = {'id': 'x', 'status': 'done'}
+            jobs.order.append('x')
+            jobs._persist()
+            saved = json.loads(store_file.read_text(encoding='utf-8'))
+            self.assertEqual(saved['jobs'][0]['id'], 'x')
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
 if __name__ == '__main__':
