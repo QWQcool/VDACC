@@ -116,6 +116,13 @@ def cmd_get(args):
     return 0
 
 
+def cmd_serve(args):
+    from .server import serve
+
+    return serve(port=args.port, out_dir=args.out, token=args.token,
+                 open_browser=not args.no_open)
+
+
 def cmd_doctor(args):
     checks = []
 
@@ -199,6 +206,13 @@ def build_parser():
     g.add_argument('--force', action='store_true', help='已存在也重下')
     g.add_argument('--json', action='store_true', help='输出结构化 JSON（stdout）')
     g.set_defaults(func=cmd_get)
+
+    s = sub.add_parser('serve', help='启动本地 Web 界面')
+    s.add_argument('--port', type=int, default=8765, help='默认 8765，被占用就换一个')
+    s.add_argument('-o', '--out', default=DEFAULT_OUT, help='输出目录')
+    s.add_argument('--token', default=None, help='固定 token（默认随机生成）')
+    s.add_argument('--no-open', action='store_true', help='不自动打开浏览器')
+    s.set_defaults(func=cmd_serve)
 
     d = sub.add_parser('doctor', help='检查运行环境')
     d.add_argument('-o', '--out', default=DEFAULT_OUT, help='顺带检查输出目录')

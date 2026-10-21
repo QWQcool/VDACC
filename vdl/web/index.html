@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VDACC · 媒体下载器</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="mark" aria-hidden="true">▣</span>
+      <b>VDACC</b>
+      <span class="sub">媒体下载器</span>
+    </div>
+    <div class="topbar-right">
+      <span class="ver" id="ver">v0.2</span>
+      <button id="theme" class="ghost" title="切换明暗主题" aria-label="切换明暗主题">◐</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="card">
+      <label class="field">
+        <span class="label">视频链接</span>
+        <div class="row">
+          <input id="url" type="text" autocomplete="off" spellcheck="false"
+                 placeholder="粘贴抖音链接 / 短链 / 视频 ID">
+          <button id="probe" class="primary">解析</button>
+        </div>
+      </label>
+      <p class="hint">当前支持抖音。B站 / 网易云已注册引擎，会如实返回“未接入”而不是假装失败。</p>
+    </section>
+
+    <section id="result" class="card hidden" aria-live="polite"></section>
+
+    <section class="jobs-head">
+      <h2>任务</h2>
+      <span id="jobs-empty" class="hint">还没有任务</span>
+    </section>
+    <section id="jobs" class="jobs" aria-live="polite"></section>
+
+    <footer class="foot">
+      <span id="outdir"></span>
+      <span id="status"></span>
+    </footer>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

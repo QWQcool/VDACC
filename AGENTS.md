@@ -59,7 +59,7 @@ ffmpeg 为什么是硬前提：B站/YouTube 全是 DASH 音视频分离，yt-dlp
 ```
 ├─ dy_dl.py          入口 + 浏览器引擎（Playwright 截流）+ 命令行入口
 ├─ dy_http.py        纯 HTTP 引擎（只用标准库，自己算签名；默认优先）
-├─ vdl/              core 契约层：models / errors / router / engines / cli
+├─ vdl/              core 契约层：models / errors / router / engines / cli / server / web
 ├─ dy_gui.pyw        tkinter 界面，worker 在子线程调 download()
 ├─ 抖音下载器.bat    start pythonw 启动 GUI，无命令行窗口
 ├─ browser_profile/  独立 Edge 配置（不入库，删了会自动重建）
@@ -85,6 +85,9 @@ venv\Scripts\python.exe dy_dl.py 链接 --headful    # 显示窗口排错
   换台机器 clone 下来就能跑，以后塞进 Skill 也不用先 bootstrap 依赖。别为省事引入新依赖。
 - **契约优先。** 对外字段只加在 `vdl/core/models.py`，错误码只加在 `vdl/core/errors.py`；
   CLI、Web GUI、Skill 都吃这两份。不许在壳里自己拼字段名，也不许把已知失败写成"下载失败"了事。
+- **本地服务的安全约束别松。** `vdl serve` 必须：只绑 `127.0.0.1`、`/api/*` 校验 token、
+  带 `Origin` 的请求校验同源、`/api/reveal` 只能打开输出目录内的路径。少任何一条，
+  任意网页都能向本机提交任务或拉起程序。
 - **提交前脱敏**：确认没有 cookie / 密钥 / 绝对路径 / 机器名进入 diff。
   `browser_profile/`、`cookies.txt` 已在 `.gitignore` 里，不要用 `-f` 强加。
 - 中文注释，函数级说明写清「为什么这么做」，而不只是「做了什么」。

@@ -311,11 +311,13 @@ class DouyinHttp:
 
     # ------------------------------------------------------------ 下载
 
-    def download(self, media, dest, max_try=3, force=False):
+    def download(self, media, dest, max_try=3, force=False, progress=None):
         """流式下载到 dest，成功返回 (档位名, 字节数)。
 
         不再像浏览器版那样"把所有候选整个读进内存比大小"：直接按码率从高到低
         试，写 .part 再原子改名，失败就换下一个候选。
+
+        progress(written, total) 每 0.2 秒最多回调一次；total 未知时为 0。
         """
         dest = pathlib.Path(dest)
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -326,7 +328,7 @@ class DouyinHttp:
         last = None
         for i, cand in enumerate(media.candidates[:max_try], 1):
             try:
-                size = self._download_one(cand.url, part)
+                size = self._download_one(cand.url, part, progress=progress)
                 if not self._looks_like_video(part, size):
                     raise HttpEngineError(f'落地文件不像视频（{size} 字节）', 'bad_payload')
                 dest.unlink(missing_ok=True)
@@ -348,7 +350,7 @@ class DouyinHttp:
 
         raise HttpEngineError(f'所有候选都失败（最后: {last}）', 'download_failed')
 
-    def _download_one(self, url, part):
+    def _download_one(self, url, part, progress=None):
         req = urllib.request.Request(url, headers={
             'User-Agent': UA,
             'Referer': HOST + '/',
@@ -357,12 +359,28 @@ class DouyinHttp:
         written = 0
         with self.opener.open(req, timeout=120) as resp, open(part, 'wb') as f:
             expected = resp.headers.get('Content-Length')
+            total = int(expected) if expected and expected.isdigit() else 0
+            last = 0.0
             while True:
                 chunk = resp.read(256 * 1024)
                 if not chunk:
                     break
                 f.write(chunk)
                 written += len(chunk)
+                if progress:
+                    # 节流：256KB 一块在高带宽下回调过密，SSE 会刷屏
+                    now = time.monotonic()
+                    if now - last >= 0.2:
+                        last = now
+                        try:
+                            progress(written, total)
+                        except Exception:
+                            pass                    # 进度回调不该影响下载
+            if progress:
+                try:
+                    progress(written, total or written)
+                except Exception:
+                    pass
         if expected and expected.isdigit() and int(expected) != written:
             raise HttpEngineError(
                 f'长度不符（声明 {expected}，实收 {written}）', 'truncated')
