@@ -26,3 +26,6 @@ __pycache__/
 *.log
 Thumbs.db
 desktop.ini
+
+# Skill 构建产物
+dist/

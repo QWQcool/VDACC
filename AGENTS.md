@@ -63,6 +63,8 @@ ffmpeg 为什么是硬前提：B站/YouTube 全是 DASH 音视频分离，yt-dlp
 ├─ dy_dl.py          入口 + 浏览器引擎（Playwright 截流）+ 命令行入口
 ├─ dy_http.py        纯 HTTP 引擎（只用标准库，自己算签名；默认优先）
 ├─ vdl/              core 契约层：models / errors / router / engines / cli / server / web
+├─ skill/            SKILL.md + references + 入口脚本（Skill 打包源）
+├─ tools/build_skill.py  组装 dist/video-acquire(.zip)
 ├─ dy_gui.pyw        tkinter 界面，worker 在子线程调 download()
 ├─ 抖音下载器.bat    start pythonw 启动 GUI，无命令行窗口
 ├─ browser_profile/  独立 Edge 配置（不入库，删了会自动重建）
@@ -93,6 +95,8 @@ venv\Scripts\python.exe dy_dl.py 链接 --headful    # 显示窗口排错
   任意网页都能向本机提交任务或拉起程序。
 - **凭据只在用户目录。** `vdl auth` 写 `%LOCALAPPDATA%\vdl\auth\`（`storage_state` 里是 HttpOnly cookie），
   profile 在 `%LOCALAPPDATA%\vdl\profile`。两者永不入库、永不打印值——日志只报 cookie 名与数量。
+- **Skill 只能由构建脚本组装。** 别手工把 `vdl/` 拷进 `dist/`；改代码只改仓库再 `build_skill.py`。
+  Skill 包刻意排除 `vdl/web` 与 `vdl/server.py`（Agent 不需要，且含授权受限的插画）。
 - **提交前脱敏**：确认没有 cookie / 密钥 / 绝对路径 / 机器名进入 diff。
   `browser_profile/`、`cookies.txt` 已在 `.gitignore` 里，不要用 `-f` 强加。
 - 中文注释，函数级说明写清「为什么这么做」，而不只是「做了什么」。

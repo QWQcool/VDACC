@@ -57,6 +57,23 @@ Playwright 起一个独立 Edge（独立 profile，不碰你正在用的）
 
 ![界面](docs/design/screenshots/vdl-web-m3.png)
 
+## 做成 Skill（给其它 Agent 用）
+
+```bash
+python tools/build_skill.py --zip     # 产物 dist/video-acquire.zip（约 42 KB）
+```
+
+安装：解压到 Agent 的 skills 目录（例如 `~/.codebuddy/skills/video-acquire/`）。
+Skill 只带 CLI，不含 Web 界面；入口是 `scripts/vdl_run.py`，用法与错误码见包内 `SKILL.md`。
+
+```bash
+python scripts/vdl_run.py doctor --json
+python scripts/vdl_run.py probe "<url>" --json
+python scripts/vdl_run.py get "<url>" --json -o 下载
+```
+
+仓库是唯一事实来源：改代码只改仓库，重新 build 即可；`dist/` 不入库。
+
 ## 目录说明
 
 ```

@@ -157,7 +157,13 @@ def cmd_auth(args):
 
 
 def cmd_serve(args):
-    from .server import serve
+    try:
+        from .server import serve
+    except ImportError:
+        # Skill 包里刻意不带 server.py 与前端资源
+        print('这个安装包只含 CLI（Skill 版），没有 Web 界面')
+        print('需要界面请用完整仓库：python -m vdl serve')
+        return 2
 
     return serve(port=args.port, out_dir=args.out, token=args.token,
                  open_browser=not args.no_open)

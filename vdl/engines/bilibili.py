@@ -45,6 +45,14 @@ class BilibiliEngine(Engine):
         host = (urllib.parse.urlparse(raw).hostname or '').lower()
         return any(host == h or host.endswith('.' + h) for h in self.HOSTS)
 
+    @staticmethod
+    def _normalize(url):
+        """裸 BV 号要补成完整 URL，yt-dlp 不认裸 ID。"""
+        raw = (url or '').strip()
+        if BV_RE.match(raw):
+            return f'https://www.bilibili.com/video/{raw}'
+        return raw
+
     # ------------------------------------------------------------ yt-dlp
 
     def _ydl(self, **overrides):
@@ -103,6 +111,7 @@ class BilibiliEngine(Engine):
         return pref, (fmt.get('tbr') or 0)
 
     def probe(self, url):
+        url = self._normalize(url)
         try:
             with self._ydl() as ydl:
                 info = ydl.extract_info(url, download=False)
