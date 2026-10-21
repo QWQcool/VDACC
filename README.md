@@ -57,6 +57,18 @@ Playwright 起一个独立 Edge（独立 profile，不碰你正在用的）
 
 ![界面](docs/design/screenshots/vdl-web-m3.png)
 
+## 手机 / 局域网 / infOS
+
+```bash
+vdl serve --lan                     # 额外打印局域网地址（带 token）
+vdl serve --allow-origin http://localhost:5173   # 允许 infOS 开发源调用
+```
+
+- 手机和电脑在同一网段时，用打印出的局域网地址直接打开即可（同一套界面，已自适应窄屏）。
+- 任务卡完成后多一个「下载」按钮，走 `/api/files/<jobId>` 把文件取回手机。
+- 公共 WiFi 下别开 `--lan`：拿到链接的任意设备都能提交任务。
+- infOS 的接入方式见 [`integrations/infos/README.md`](integrations/infos/README.md)（薄页面，不改宿主代码）。
+
 ## 做成 Skill（给其它 Agent 用）
 
 ```bash

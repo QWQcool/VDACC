@@ -14,11 +14,13 @@ import os
 import pathlib
 import queue
 import secrets
+import socket
 import subprocess
 import sys
 import threading
 import time
 import traceback
+import urllib.parse
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -218,13 +220,14 @@ class JobStore:
 # ---------------------------------------------------------------- HTTP
 
 class Config:
-    def __init__(self, host, port, token, out_dir, hub, jobs):
+    def __init__(self, host, port, token, out_dir, hub, jobs, allowed_origins=None):
         self.host = host
         self.port = port
         self.token = token
         self.out_dir = pathlib.Path(out_dir)
         self.hub = hub
         self.jobs = jobs
+        self.allowed_origins = tuple(allowed_origins or ())
 
 
 def make_handler(cfg):
@@ -277,8 +280,8 @@ def make_handler(cfg):
             origin = self.headers.get('Origin')
             if not origin:
                 return True                      # curl / 同源导航
-            return origin in (f'http://127.0.0.1:{cfg.port}',
-                              f'http://localhost:{cfg.port}')
+            own = (f'http://127.0.0.1:{cfg.port}', f'http://localhost:{cfg.port}')
+            return origin in own or origin in cfg.allowed_origins
 
         # -- GET
 
@@ -307,7 +310,40 @@ def make_handler(cfg):
                 return self._json({'ok': True, 'job': job})
             if path == '/api/events':
                 return self._sse()
+            if path.startswith('/api/files/'):
+                return self._file(path.rsplit('/', 1)[-1])
             return self._err('not_found', f'没有这个接口: {path}', status=404)
+
+        def _file(self, job_id):
+            """完成任务的原文件回传（手机/宿主取文件用），只允许输出目录内。"""
+            job = cfg.jobs.get(job_id)
+            if not job or job.get('status') != 'done' or not job.get('path'):
+                return self._err('not_found', '任务不存在或未完成', status=404)
+            target = pathlib.Path(job['path']).resolve()
+            root = cfg.out_dir.resolve()
+            if target != root and root not in target.parents:
+                return self._err('bad_input', '路径不在输出目录内', status=403)
+            if not target.exists():
+                return self._err('bad_input', '文件已被移动或删除', status=404)
+
+            ctype = mimetypes.guess_type(str(target))[0] or 'application/octet-stream'
+            size = target.stat().st_size
+            self.send_response(200)
+            self.send_header('Content-Type', ctype)
+            self.send_header('Content-Length', str(size))
+            self.send_header('Content-Disposition',
+                             "attachment; filename*=UTF-8''" +
+                             urllib.parse.quote(target.name))
+            self.end_headers()
+            try:
+                with open(target, 'rb') as fh:
+                    while True:
+                        chunk = fh.read(256 * 1024)
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
 
         def _sse(self):
             self.send_response(200)
@@ -428,8 +464,18 @@ def make_handler(cfg):
 
 # ---------------------------------------------------------------- 启动
 
+def _lan_ips():
+    ips = set()
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ips.add(info[4][0])
+    except OSError:
+        pass
+    return sorted(ip for ip in ips if not ip.startswith('127.'))
+
+
 def make_server(host='127.0.0.1', port=8765, out_dir=None, token=None, log=None,
-                persist=True):
+                persist=True, allowed_origins=None):
     """构造但不启动。测试用 port=0 拿随机端口、persist=False 隔离历史。"""
     out = pathlib.Path(out_dir or load_config().get('outDir') or '下载')
     out.mkdir(parents=True, exist_ok=True)
@@ -437,26 +483,37 @@ def make_server(host='127.0.0.1', port=8765, out_dir=None, token=None, log=None,
     store = (data_dir() / 'jobs.json') if persist else None
     jobs = JobStore(out, hub, log=log or (lambda m: print(m, flush=True)),
                     store_path=store)
-    cfg = Config(host, port, token or secrets.token_urlsafe(16), out, hub, jobs)
+    origins = list(load_config().get('allowedOrigins') or []) + list(allowed_origins or [])
+    cfg = Config(host, port, token or secrets.token_urlsafe(16), out, hub, jobs,
+                 allowed_origins=origins)
     httpd = ThreadingHTTPServer((host, cfg.port), make_handler(cfg))
     cfg.port = httpd.server_address[1]
     return httpd, cfg
 
 
-def serve(port=8765, out_dir=None, token=None, open_browser=True, host='127.0.0.1'):
+def serve(port=8765, out_dir=None, token=None, open_browser=True, host='127.0.0.1',
+          lan=False, allowed_origins=None):
+    if lan:
+        host = '0.0.0.0'
     try:
-        httpd, cfg = make_server(host=host, port=port, out_dir=out_dir, token=token)
+        httpd, cfg = make_server(host=host, port=port, out_dir=out_dir, token=token,
+                                 allowed_origins=allowed_origins)
     except OSError as e:
         print(f'端口 {port} 起不来：{e}')
         print('换一个端口：python -m vdl serve --port 8766')
         return 2
-    url = f'http://{host}:{cfg.port}/?token={cfg.token}'
+
+    local = f'http://127.0.0.1:{cfg.port}/?token={cfg.token}'
     print(f'vdl {__version__} 已启动')
-    print(f'  地址: {url}')
+    print(f'  本机: {local}')
+    if lan:
+        for ip in _lan_ips():
+            print(f'  局域网: http://{ip}:{cfg.port}/?token={cfg.token}')
+        print('  ! 局域网内拿到链接的任意设备都能访问，公共 WiFi 下别开')
     print(f'  输出: {cfg.out_dir.resolve()}')
     print('  Ctrl+C 停止')
     if open_browser:
-        threading.Timer(0.6, lambda: webbrowser.open(url)).start()
+        threading.Timer(0.6, lambda: webbrowser.open(local)).start()
 
     try:
         httpd.serve_forever()

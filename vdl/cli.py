@@ -174,7 +174,8 @@ def cmd_serve(args):
         return 2
 
     return serve(port=args.port, out_dir=_resolve_out(args.out), token=args.token,
-                 open_browser=not args.no_open)
+                 open_browser=not args.no_open, lan=args.lan,
+                 allowed_origins=args.allow_origin)
 
 
 def cmd_config(args):
@@ -323,6 +324,9 @@ def build_parser():
     s.add_argument('-o', '--out', default=None, help='输出目录')
     s.add_argument('--token', default=None, help='固定 token（默认随机生成）')
     s.add_argument('--no-open', action='store_true', help='不自动打开浏览器')
+    s.add_argument('--lan', action='store_true', help='允许局域网访问（手机/其它设备）')
+    s.add_argument('--allow-origin', action='append', default=[],
+                   help='额外允许的 Origin（infOS 等宿主），可重复')
     s.set_defaults(func=cmd_serve)
 
     d = sub.add_parser('doctor', help='检查运行环境')

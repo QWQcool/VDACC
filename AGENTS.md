@@ -91,9 +91,10 @@ venv\Scripts\python.exe dy_dl.py 链接 --headful    # 显示窗口排错
   换台机器 clone 下来就能跑，以后塞进 Skill 也不用先 bootstrap 依赖。别为省事引入新依赖。
 - **契约优先。** 对外字段只加在 `vdl/core/models.py`，错误码只加在 `vdl/core/errors.py`；
   CLI、Web GUI、Skill 都吃这两份。不许在壳里自己拼字段名，也不许把已知失败写成"下载失败"了事。
-- **本地服务的安全约束别松。** `vdl serve` 必须：只绑 `127.0.0.1`、`/api/*` 校验 token、
-  带 `Origin` 的请求校验同源、`/api/reveal` 只能打开输出目录内的路径。少任何一条，
-  任意网页都能向本机提交任务或拉起程序。
+- **本地服务的安全约束别松。** `vdl serve` 必须：默认只绑 `127.0.0.1`、`/api/*` 校验 token、
+  带 `Origin` 的请求校验同源（`--allow-origin` 才放行宿主）、`/api/reveal` 与 `/api/files`
+  只能访问输出目录内的路径。少任何一条，任意网页都能向本机提交任务或读走文件。
+- `--lan` 会把服务暴露到局域网，命令里必须打印醒目警告；不要在公共网络下默认开启。
 - **凭据只在用户目录。** `vdl auth` 写 `%LOCALAPPDATA%\vdl\auth\`（`storage_state` 里是 HttpOnly cookie），
   profile 在 `%LOCALAPPDATA%\vdl\profile`。两者永不入库、永不打印值——日志只报 cookie 名与数量。
 - **Skill 只能由构建脚本组装。** 别手工把 `vdl/` 拷进 `dist/`；改代码只改仓库再 `build_skill.py`。

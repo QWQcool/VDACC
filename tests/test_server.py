@@ -103,6 +103,21 @@ class ServerTest(unittest.TestCase):
         status, _ = self._call('/api/nope')
         self.assertEqual(status, 404)
 
+    # -- 文件回传
+
+    def test_file_download(self):
+        target = pathlib.Path(self.tmp) / 'demo.bin'
+        target.write_bytes(b'hello')
+        self.cfg.jobs.jobs['job-ok'] = {'id': 'job-ok', 'status': 'done',
+                                        'path': str(target)}
+        status, body = self._call('/api/files/job-ok')
+        self.assertEqual(status, 200)
+        self.assertEqual(body, b'hello')
+
+    def test_file_requires_done_job(self):
+        status, _ = self._call('/api/files/missing')
+        self.assertEqual(status, 404)
+
 
 class JobPersistenceTest(unittest.TestCase):
     """重启后历史不能丢；上次没跑完的必须标成中断，而不是假装还在跑。"""

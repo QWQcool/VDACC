@@ -317,6 +317,12 @@
 
     const foot = el('div', 'job-foot');
     const info = el('span', 'info', '');
+    const save = el('button', 'link hidden', '下载');
+    save.type = 'button';
+    save.addEventListener('click', () => {
+      // 走了 token 才能取；手机/其它设备也可用这个链接
+      window.open(`/api/files/${job.id}?token=${encodeURIComponent(token)}`, '_blank');
+    });
     const reveal = el('button', 'link', '打开');
     reveal.type = 'button';
     reveal.addEventListener('click', () => {
@@ -328,10 +334,10 @@
         });
       }
     });
-    foot.append(info, reveal);
+    foot.append(info, save, reveal);
 
     node.append(head, bar, foot);
-    node._refs = { title, state, pct, fill, info, reveal };
+    node._refs = { title, state, pct, fill, info, save, reveal };
     return node;
   }
 
@@ -355,6 +361,7 @@
       r.info.textContent = [job.bytes ? mb(job.bytes) : '', job.path]
         .filter(Boolean).join(' · ');
       r.fill.style.background = 'var(--ok)';
+      r.save.classList.remove('hidden');
       if (node.dataset.state !== 'done') showDoneBanner(job);
     } else {
       const bits = [];
