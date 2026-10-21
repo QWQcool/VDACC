@@ -309,9 +309,32 @@ def make_handler(cfg):
                 url = (payload.get('url') or '').strip()
                 if not url:
                     return self._err('bad_input', '缺少 url')
-                job = cfg.jobs.submit(url, payload.get('formatId'),
-                                      bool(payload.get('force')))
-                return self._json({'ok': True, 'job': job}, 202)
+                force = bool(payload.get('force'))
+                ids = payload.get('formatIds')
+                if isinstance(ids, list) and ids:
+                    jobs = [cfg.jobs.submit(url, fid, force)
+                            for fid in ids if isinstance(fid, str) and fid]
+                    if not jobs:
+                        return self._err('bad_input', 'formatIds 里没有有效档位')
+                    return self._json({'ok': True, 'jobs': jobs, 'job': jobs[0]}, 202)
+                job = cfg.jobs.submit(url, payload.get('formatId'), force)
+                return self._json({'ok': True, 'job': job, 'jobs': [job]}, 202)
+
+            if path == '/api/preview':
+                # 返回带签名的直链给同源页面播放。只在本机、且已过 token 校验；
+                # 直链有时效，所以每次预览都重新 probe，不缓存。
+                url = (payload.get('url') or '').strip()
+                if not url:
+                    return self._err('bad_input', '缺少 url')
+                res = router.probe(url)
+                if not res.ok:
+                    return self._json(res.to_dict())
+                fmt = pick_format(res, payload.get('formatId'))
+                if not fmt or not fmt.urls:
+                    return self._err('no_stream', '这个档位没有可预览地址',
+                                     '重新解析一次再试')
+                return self._json({'ok': True, 'url': fmt.urls[0],
+                                   'formatId': fmt.id, 'ext': fmt.ext})
 
             if path == '/api/reveal':
                 return self._reveal(payload.get('path') or '')

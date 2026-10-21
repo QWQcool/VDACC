@@ -1,5 +1,5 @@
 /* VDACC Web UI —— 纯原生，无构建。
-   安全：数据一律 textContent，绝不 innerHTML。 */
+   安全：所有服务端数据一律 textContent，绝不 innerHTML。 */
 (() => {
   'use strict';
 
@@ -8,13 +8,18 @@
 
   const els = {
     url: $('#url'), probe: $('#probe'), result: $('#result'),
-    jobs: $('#jobs'), empty: $('#jobs-empty'), outdir: $('#outdir'),
-    status: $('#status'), theme: $('#theme'), ver: $('#ver'),
+    chips: $('#chips'), jobsSection: $('#jobs-section'), jobs: $('#jobs'),
+    empty: $('#empty'), outdir: $('#outdir'), status: $('#status'),
+    theme: $('#theme'), ver: $('#ver'), clearDone: $('#clear-done'),
+    doneBanner: $('#done-banner'), doneText: $('#done-text'),
+    preview: $('#preview'), previewVideo: $('#preview-video'),
+    previewClose: $('#preview-close'), previewTitle: $('#preview-title'),
   };
 
-  let current = null;      // 最近一次 probe 结果
-  let picked = null;       // 选中档位 id
+  let current = null;              // 最近一次 probe 结果
+  const selected = new Set();      // 选中的档位 id
   const jobEls = new Map();
+  let probing = false;
 
   // ---------------------------------------------------------------- 工具
 
@@ -33,12 +38,10 @@
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
   };
 
-  const fmtEta = (sec) => (sec === null || sec === undefined ? '' : `${sec}s`);
-
   function toast(msg) {
     els.status.textContent = msg;
     clearTimeout(toast._t);
-    toast._t = setTimeout(() => { els.status.textContent = ''; }, 4000);
+    toast._t = setTimeout(() => { els.status.textContent = ''; }, 4200);
   }
 
   async function api(path, opts) {
@@ -46,16 +49,27 @@
       ...opts,
       headers: Object.assign({ 'X-VDL-Token': token }, (opts && opts.headers) || {}),
     });
-    try { return await res.json(); } catch { return { ok: false, error: { code: 'bad_response', message: `HTTP ${res.status}` } }; }
+    try {
+      return await res.json();
+    } catch {
+      return { ok: false, error: { code: 'bad_response', message: `HTTP ${res.status}` } };
+    }
   }
 
   // ---------------------------------------------------------------- 解析
 
   async function doProbe() {
     const url = els.url.value.trim();
+    if (!url || probing) return;
     if (!url) return toast('先粘贴一个链接');
+
+    probing = true;
     els.probe.disabled = true;
     els.probe.textContent = '解析中';
+    els.url.disabled = true;
+    els.result.classList.remove('hidden');
+    els.result.textContent = '正在解析…';
+
     try {
       const r = await api('/api/probe', {
         method: 'POST',
@@ -63,20 +77,28 @@
         body: JSON.stringify({ url }),
       });
       current = r;
-      const list = r.formats || [];
-      picked = (list.find((f) => f.recommended) || list[0] || {}).id || null;
+      selected.clear();
+      if (r.ok) {
+        const rec = r.formats.find((f) => f.recommended) || r.formats[0];
+        if (rec) selected.add(rec.id);
+      }
       renderResult(r);
     } catch (e) {
       toast(`请求失败：${e.message}`);
+      els.result.textContent = '';
+      els.result.classList.add('hidden');
     } finally {
+      probing = false;
       els.probe.disabled = false;
       els.probe.textContent = '解析';
+      els.url.disabled = false;
     }
   }
 
   function renderResult(r) {
     els.result.textContent = '';
-    els.result.classList.remove('hidden');
+    els.chips.textContent = '';
+    els.chips.classList.add('hidden');
 
     if (!r.ok) {
       const e = r.error || {};
@@ -90,46 +112,53 @@
       return;
     }
 
+    // ---- 媒体卡
     const m = r.media;
     const media = el('div', 'media');
     if (m.thumbnail) {
-      const img = el('img');
+      const img = el('img', 'thumb');
       img.src = m.thumbnail;
       img.alt = '';
-      img.referrerPolicy = 'no-referrer';   // 抖音图床会校验 Referer
+      img.referrerPolicy = 'no-referrer';      // 抖音图床会校验 Referer
       img.loading = 'lazy';
       media.append(img);
     }
 
     const meta = el('div', 'meta');
     meta.append(el('h3', '', m.title));
-    meta.append(el('div', 'sub', [m.author || '未知作者', fmtDur(m.duration_ms), r.platform]
+    meta.append(el('div', 'sub', [m.author || '未知作者', fmtDur(m.duration_ms)]
       .filter(Boolean).join(' · ')));
 
-    if (m.source_url) {
-      const tags = el('div', 'tags');
-      tags.append(el('span', 'tag', m.id));
-      tags.append(el('span', 'tag', r.engine));
-      meta.append(tags);
-    }
+    const tags = el('div', 'tags');
+    tags.append(el('span', 'tag accent', r.platform));
+    tags.append(el('span', 'tag', r.engine));
+    tags.append(el('span', 'tag', m.id));
+    meta.append(tags);
     media.append(meta);
     els.result.append(media);
 
-    const list = el('div', 'formats');
+    // ---- 画质 chips（与列表勾选双向同步）
+    renderChips(r.formats);
+
+    // ---- 素材列表
+    const list = el('div', 'materials');
     r.formats.forEach((f) => {
-      const row = el('label', 'format-row' + (f.id === picked ? ' is-picked' : ''));
-      const radio = el('input');
-      radio.type = 'radio';
-      radio.name = 'fmt';
-      radio.value = f.id;
-      radio.checked = f.id === picked;
-      radio.addEventListener('change', () => {
-        picked = f.id;
-        [...list.children].forEach((c) => c.classList.toggle('is-picked', c.contains(radio)));
+      const row = el('label', 'material');
+      row.dataset.id = f.id;
+
+      const box = el('input');
+      box.type = 'checkbox';
+      box.checked = selected.has(f.id);
+      box.addEventListener('change', () => {
+        if (box.checked) selected.add(f.id); else selected.delete(f.id);
+        row.classList.toggle('is-picked', box.checked);
+        syncChips();
+        syncActions();
       });
+      row.classList.toggle('is-picked', box.checked);
 
       const text = el('div');
-      text.append(el('div', 'name', f.label));
+      text.append(el('div', 'title', f.label));
       text.append(el('div', 'desc', [
         f.width && f.height ? `${f.width}×${f.height}` : '',
         f.vcodec,
@@ -137,28 +166,87 @@
         f.watermark ? '带水印' : '',
       ].filter(Boolean).join(' · ')));
 
-      row.append(
-        radio,
-        text,
-        el('span', 'size', f.bytes ? mb(f.bytes) : '未知'),
-        el('span', 'tag', f.recommended ? '推荐' : ''),
-      );
+      const size = el('span', 'size', f.bytes ? mb(f.bytes) : '未知');
+
+      const prev = el('button', 'preview-btn', '预览');
+      prev.type = 'button';
+      prev.addEventListener('click', (e) => { e.preventDefault(); preview(f.id); });
+
+      row.append(box, text, size, prev);
       list.append(row);
     });
     els.result.append(list);
 
+    // ---- 动作
     const actions = el('div', 'actions');
-    const btn = el('button', 'primary', '下载');
-    btn.id = 'download';
-    btn.addEventListener('click', doDownload);
-    actions.append(btn, el('span', 'hint', '多选在下一版；当前一次下一个档位'));
+    const all = el('button', 'link', '全选');
+    all.type = 'button';
+    all.addEventListener('click', () => {
+      const allOn = selected.size === r.formats.length;
+      selected.clear();
+      if (!allOn) r.formats.forEach((f) => selected.add(f.id));
+      [...list.children].forEach((row) => {
+        const box = row.querySelector('input');
+        box.checked = selected.has(row.dataset.id);
+        row.classList.toggle('is-picked', box.checked);
+      });
+      all.textContent = allOn ? '全选' : '清空';
+      syncChips();
+      syncActions();
+    });
+
+    const spacer = el('span', 'spacer');
+    const go = el('button', 'primary', '下载选中');
+    go.id = 'download';
+    go.addEventListener('click', submitSelected);
+
+    actions.append(all, spacer, go);
     els.result.append(actions);
+    syncActions();
+  }
+
+  function renderChips(formats) {
+    els.chips.textContent = '';
+    formats.forEach((f) => {
+      const chip = el('button', 'chip', f.label);
+      chip.type = 'button';
+      chip.dataset.id = f.id;
+      chip.setAttribute('aria-pressed', selected.has(f.id) ? 'true' : 'false');
+      chip.append(el('small', '', f.bytes ? mb(f.bytes) : ''));
+      chip.addEventListener('click', () => {
+        if (selected.has(f.id)) selected.delete(f.id); else selected.add(f.id);
+        [...els.result.querySelectorAll('.material')].forEach((row) => {
+          if (row.dataset.id === f.id) {
+            const box = row.querySelector('input');
+            box.checked = selected.has(f.id);
+            row.classList.toggle('is-picked', box.checked);
+          }
+        });
+        syncChips();
+        syncActions();
+      });
+      els.chips.append(chip);
+    });
+    els.chips.classList.toggle('hidden', formats.length === 0);
+  }
+
+  function syncChips() {
+    [...els.chips.children].forEach((chip) => {
+      chip.setAttribute('aria-pressed', selected.has(chip.dataset.id) ? 'true' : 'false');
+    });
+  }
+
+  function syncActions() {
+    const go = $('#download');
+    if (!go) return;
+    go.disabled = selected.size === 0;
+    go.textContent = selected.size ? `下载选中 (${selected.size})` : '下载选中';
   }
 
   // ---------------------------------------------------------------- 下载
 
-  async function doDownload() {
-    if (!current || !current.ok || !picked) return;
+  async function submitSelected() {
+    if (!current || !current.ok || selected.size === 0) return;
     const btn = $('#download');
     if (btn) btn.disabled = true;
     try {
@@ -167,16 +255,48 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           url: (current.media && current.media.source_url) || els.url.value.trim(),
-          formatId: picked,
+          formatIds: [...selected],
         }),
       });
-      if (!r.ok) toast((r.error && r.error.message) || '提交失败');
-      else upsertJob(r.job);
+      if (!r.ok) {
+        toast((r.error && r.error.message) || '提交失败');
+      } else {
+        (r.jobs || [r.job]).forEach(upsertJob);
+        toast(`已提交 ${(r.jobs || []).length} 个任务`);
+      }
     } catch (e) {
       toast(`提交失败：${e.message}`);
     } finally {
-      if (btn) btn.disabled = false;
+      if (btn) syncActions();
     }
+  }
+
+  // ---------------------------------------------------------------- 预览
+
+  async function preview(formatId) {
+    const r = await api('/api/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        url: (current.media && current.media.source_url) || els.url.value.trim(),
+        formatId,
+      }),
+    });
+    if (!r.ok) {
+      const e = r.error || {};
+      return toast(`预览失败 [${e.code || 'error'}] ${e.message || ''}`);
+    }
+    els.previewTitle.textContent = `预览 · ${r.formatId}`;
+    els.previewVideo.src = r.url;
+    els.preview.showModal();
+    els.previewVideo.play().catch(() => { /* 自动播放被拦就等用户点 */ });
+  }
+
+  function closePreview() {
+    els.previewVideo.pause();
+    els.previewVideo.removeAttribute('src');
+    els.previewVideo.load();
+    els.preview.close();
   }
 
   // ---------------------------------------------------------------- 任务
@@ -198,16 +318,17 @@
     const foot = el('div', 'job-foot');
     const info = el('span', 'info', '');
     const reveal = el('button', 'link', '打开');
+    reveal.type = 'button';
     reveal.addEventListener('click', () => {
-      const path = node.dataset.path;
-      if (!path) return;
-      api('/api/reveal', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path }),
-      });
+      if (node.dataset.path) {
+        api('/api/reveal', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: node.dataset.path }),
+        });
+      }
     });
-    foot.append(info, spacer, reveal);
+    foot.append(info, reveal);
 
     node.append(head, bar, foot);
     node._refs = { title, state, pct, fill, info, reveal };
@@ -231,19 +352,21 @@
       r.info.textContent = `[${e.code || 'error'}] ${e.message || '失败'}`;
       r.fill.style.background = 'var(--danger)';
     } else if (job.status === 'done') {
-      const size = job.bytes ? mb(job.bytes) : '';
-      r.info.textContent = [size, job.path].filter(Boolean).join(' · ');
+      r.info.textContent = [job.bytes ? mb(job.bytes) : '', job.path]
+        .filter(Boolean).join(' · ');
       r.fill.style.background = 'var(--ok)';
-      r.reveal.classList.remove('hidden');
+      if (node.dataset.state !== 'done') showDoneBanner(job);
     } else {
       const bits = [];
       if (job.bytes) bits.push(job.total ? `${mb(job.bytes)} / ${mb(job.total)}` : mb(job.bytes));
       if (job.speed) bits.push(`${(job.speed / 1048576).toFixed(1)} MB/s`);
-      if (job.eta) bits.push(`剩余 ${fmtEta(job.eta)}`);
+      if (job.eta) bits.push(`剩余 ${job.eta}s`);
       r.info.textContent = bits.join(' · ');
+      r.fill.style.background = 'var(--accent)';
     }
 
     if (job.path) node.dataset.path = job.path;
+    node.dataset.state = job.status;
   }
 
   function upsertJob(job) {
@@ -254,10 +377,20 @@
       els.jobs.prepend(node);
     }
     updateJob(node, job);
-    els.empty.classList.toggle('hidden', jobEls.size > 0);
+    const has = jobEls.size > 0;
+    els.empty.classList.toggle('hidden', has);
+    els.jobsSection.classList.toggle('hidden', !has);
   }
 
-  // ---------------------------------------------------------------- 实时
+  function showDoneBanner(job) {
+    els.doneText.textContent = [job.title, job.bytes ? mb(job.bytes) : '']
+      .filter(Boolean).join(' · ');
+    els.doneBanner.classList.remove('hidden');
+    clearTimeout(showDoneBanner._t);
+    showDoneBanner._t = setTimeout(() => els.doneBanner.classList.add('hidden'), 5000);
+  }
+
+  // ---------------------------------------------------------------- 启动
 
   function connect() {
     const es = new EventSource(`/api/events?token=${encodeURIComponent(token)}`);
@@ -289,10 +422,32 @@
     els.probe.addEventListener('click', doProbe);
     els.url.addEventListener('keydown', (e) => { if (e.key === 'Enter') doProbe(); });
 
+    els.clearDone.addEventListener('click', () => {
+      [...jobEls.entries()].forEach(([id, node]) => {
+        if (node.dataset.state === 'done' || node.dataset.state === 'failed') {
+          node.remove();
+          jobEls.delete(id);
+        }
+      });
+      const has = jobEls.size > 0;
+      els.empty.classList.toggle('hidden', has);
+      els.jobsSection.classList.toggle('hidden', !has);
+    });
+
+    els.previewClose.addEventListener('click', closePreview);
+    els.preview.addEventListener('cancel', (e) => { e.preventDefault(); closePreview(); });
+
     const list = await api('/api/jobs', { method: 'GET' });
     if (list.ok) list.jobs.slice().reverse().forEach(upsertJob);
 
     connect();
+
+    // 深链：?url=... 自动解析（方便测试与分享）
+    const pre = new URLSearchParams(location.search).get('url');
+    if (pre) {
+      els.url.value = pre;
+      doProbe();
+    }
   }
 
   boot();

@@ -46,6 +46,17 @@ Playwright 起一个独立 Edge（独立 profile，不碰你正在用的）
   → 用浏览器上下文下载（自动带 cookie + Referer）
 ```
 
+## Web 界面
+
+`python -m vdl serve` 启动后，用打印出的带 token 地址打开：
+
+- 解析后显示封面 / 标题 / 作者 / 时长，画质 chips 带真实体积；
+- 支持**多选档位同时下载**（文件名带清晰度后缀，不会互相覆盖）；
+- 每个档位可「预览」（同源接口现取直链，不落盘）；
+- 任务进度走 SSE 实时更新，完成后可直接定位到文件。
+
+![界面](docs/design/screenshots/vdl-web-m3.png)
+
 ## 目录说明
 
 ```

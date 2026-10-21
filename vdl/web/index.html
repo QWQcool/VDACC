@@ -14,37 +14,75 @@
       <span class="sub">媒体下载器</span>
     </div>
     <div class="topbar-right">
-      <span class="ver" id="ver">v0.2</span>
+      <span class="ver" id="ver">v0.3</span>
       <button id="theme" class="ghost" title="切换明暗主题" aria-label="切换明暗主题">◐</button>
     </div>
   </header>
 
   <main>
-    <section class="card">
-      <label class="field">
-        <span class="label">视频链接</span>
-        <div class="row">
-          <input id="url" type="text" autocomplete="off" spellcheck="false"
-                 placeholder="粘贴抖音链接 / 短链 / 视频 ID">
-          <button id="probe" class="primary">解析</button>
-        </div>
-      </label>
-      <p class="hint">当前支持抖音。B站 / 网易云已注册引擎，会如实返回“未接入”而不是假装失败。</p>
+    <section class="card input-card">
+      <div class="card-head">
+        <h2>粘贴链接开始</h2>
+        <p>自动识别平台与可选档位。解析后可以一次勾选多个档位一起下载。</p>
+      </div>
+
+      <div class="row">
+        <input id="url" type="text" autocomplete="off" spellcheck="false"
+               placeholder="抖音链接 / 短链 / 视频 ID">
+        <button id="probe" class="primary">解析</button>
+      </div>
+
+      <div id="chips" class="chips hidden" role="group" aria-label="画质快捷选择"></div>
+
+      <div class="input-foot">
+        <label class="switch" title="L2 通用嗅探还没实现，先不假装能用">
+          <input type="checkbox" id="force-generic" disabled>
+          <span>强制使用通用解析</span>
+          <span class="soon">未实现</span>
+        </label>
+        <span class="hint">支持抖音；B站 / 网易云引擎已注册，会如实提示未接入</span>
+      </div>
     </section>
 
     <section id="result" class="card hidden" aria-live="polite"></section>
 
-    <section class="jobs-head">
-      <h2>任务</h2>
-      <span id="jobs-empty" class="hint">还没有任务</span>
+    <section id="jobs-section" class="hidden">
+      <div class="section-head">
+        <h2>任务</h2>
+        <button id="clear-done" class="link">清除已完成</button>
+      </div>
+      <div id="jobs" class="jobs" aria-live="polite"></div>
     </section>
-    <section id="jobs" class="jobs" aria-live="polite"></section>
+
+    <section id="empty" class="card empty">
+      <img src="/assets/pero-stand.png" alt="" class="empty-char">
+      <div class="empty-text">
+        <h3>还没有任务</h3>
+        <p>粘贴一个抖音链接试试。解析后能选清晰度、看体积，多个档位可以一起下。</p>
+      </div>
+    </section>
 
     <footer class="foot">
       <span id="outdir"></span>
-      <span id="status"></span>
+      <span id="status" aria-live="polite"></span>
     </footer>
   </main>
+
+  <div id="done-banner" class="done-banner hidden">
+    <img src="/assets/pero-done.png" alt="">
+    <div>
+      <b>下载完成</b>
+      <span id="done-text"></span>
+    </div>
+  </div>
+
+  <dialog id="preview" class="preview">
+    <div class="preview-head">
+      <b id="preview-title">预览</b>
+      <button id="preview-close" class="ghost" aria-label="关闭预览">✕</button>
+    </div>
+    <video id="preview-video" controls playsinline preload="metadata"></video>
+  </dialog>
 
   <script src="/app.js"></script>
 </body>
