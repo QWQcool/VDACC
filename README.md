@@ -14,7 +14,16 @@
 
 ## 为什么不用 yt-dlp / 那些 GUI
 
-抖音的视频详情接口要求每个请求都带 `a_bogus` 签名，这个签名只有浏览器里的 JS 算得出来。yt-dlp 的抖音提取器发的是裸请求，源码里那行 `# TODO: Run verification challenge code` 至今没做完——所以 ytDownloader、Open Video Downloader、Stacher 这些套壳工具全都下不了抖音，报错永远是 `Fresh cookies needed`。
+> **2026-10-21 更正**：这里原先写"抖音详情接口要求 `a_bogus` 签名，只有浏览器 JS 算得出"——**这条是错的**。
+> 真正的门是 `x-secsdk-web-signature`，算法为 `md5(f"{uifid}_{timestamp}_{SALT}_{query}")`，salt 硬编码，
+> 纯 HTTP 可算，不需要浏览器也不需要 cookie（实测记录见 `Plan.md` 的变更日志）。
+> yt-dlp 的修复在 [PR #17826](https://github.com/yt-dlp/yt-dlp/pull/17826)，尚未合并；
+> 合并前官方版仍报 `Fresh cookies needed`——这是误导性报错，不是真的缺 cookie。
+
+那为什么还留着浏览器方案？理由已经和"签名"无关了：
+
+1. **上游修复未落地时的兜底**：不用等 yt-dlp 发版，页面能播就能下。
+2. **它天然覆盖其它需要真实浏览器的场景**：登录墙、m3u8/DASH 嗅探，以及后续的小红书/快手这类站点。
 
 更不能靠"读浏览器 cookie"这条路，实测有三道墙：
 
@@ -68,7 +77,7 @@ venv\Scripts\python.exe dy_dl.py 链接 --headful    # 显示浏览器窗口，�
 正常。抖音竖屏短视频码率本身就低（这条 9 秒 1080×1440 只有 731kbps / 0.8MB）。脚本已经取了最高档，不是压缩过。
 
 **能下别的平台吗？**
-这个工作空间专治抖音。B 站、YouTube、小红书等可以直接用 venv 里的 yt-dlp（它是好的，只有抖音的提取器坏了）：
+这个工作空间专治抖音。B 站、YouTube、小红书等可以直接用 venv 里的 yt-dlp（除抖音外都是好的；抖音的修复还没合并，见上文）：
 
 ```bash
 venv\Scripts\python.exe -m yt_dlp -F "视频链接"

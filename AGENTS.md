@@ -5,11 +5,22 @@
 
 ## 一、红线（踩过的坑，不要再走回头路）
 
-1. **不要提议换回 yt-dlp 下抖音。**
-   抖音 `aweme/detail` 要求每请求带 `a_bogus` 签名，只有浏览器 JS 算得出。
-   yt-dlp 的 `DouyinIE` 发裸请求，`extractor/tiktok.py` 里那行
-   `# TODO: Run verification challenge code` 至今未完成。
-   报错是误导性的 `Fresh cookies needed`，不是真的缺 cookie。
+1. **抖音签名的旧结论已作废，不要复用。**（2026-10-21 更正）
+
+   旧结论（错）：`aweme/detail` 要求 `a_bogus`，只有浏览器 JS 算得出，所以必须借浏览器。
+
+   实测结论（对）：
+   - 门是 `x-secsdk-web-signature`，算法 `md5(f"{uifid}_{timestamp}_{SALT}_{query}")`，
+     `SALT = A96D855A08C0A9707F8BEF0D9A527E4E`，硬编码；
+   - `ttwid` 可自己 POST `https://www.douyin.com/ttwid/register` 注册，
+     `passport_csrf_token` 随便填，所以**无 cookie 也能下**；
+   - query 必须带 `aid=6383`，否则清晰度被截到 720p；
+   - 对照实验：官方 yt-dlp 2026.08.19 未打补丁 → `HTTP 403` + `Fresh cookies needed`；
+     打上 PR #17826 的 +56/-1 补丁 → 无 cookie 拿到 `h264_1080p`（1080×1920）。
+
+   现状：修复在 PR #17826，未合并、0 条 review。因此两条都别做：
+   - **不要**把抖音引擎删掉换回官方 yt-dlp——未合并前官方版仍然下不了；
+   - **也**不要再用"必须借浏览器算签名"当设计理由——浏览器方案保留是为了兜底和其它站点。
 
 2. **不要提议安装任何第三方 GUI**（ytDownloader / Open Video Downloader / Stacher / BBDown 之类）。
    全部基于 yt-dlp 或需要额外环境，且失去可控性。
@@ -31,10 +42,11 @@
 | 项 | 值 |
 |---|---|
 | 抖音截流方案 | 可用，能拿 `normal_1080_0` 最高档，不依赖用户关闭浏览器 |
-| yt-dlp 版本 | 2026.8.19，**1752** 个提取器 |
+| yt-dlp 版本 | 2026.08.19（本机加载 1744 个提取器） |
 | yt-dlp 的 B站支持 | 完整（BiliBili / Bangumi / Playlist / Live / Intl） |
-| yt-dlp 的抖音支持 | **坏的**，唯一失效的提取器 |
-| ffmpeg | **缺失**，PATH 和 venv 都没有 —— 这是当前最大阻塞 |
+| yt-dlp 的抖音支持 | 官方版仍 403 + 误导性 `Fresh cookies needed`；PR #17826（+56/-1）实测可修 |
+| 抖音签名 | `x-secsdk-web-signature` = `md5(uifid_timestamp_SALT_query)`，纯 HTTP，无需 cookie |
+| ffmpeg | 当前开发机已装 n8.1.2（winget）；换机仍需确认，缺失会让 B站/YouTube 变无声视频 |
 | Playwright | 1.64.0，用 `channel=msedge` 复用系统 Edge，不下载 chromium |
 | venv | Python 3.13.4，必须带 tkinter |
 
