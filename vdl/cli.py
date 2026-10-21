@@ -13,6 +13,7 @@ import json
 import pathlib
 import shutil
 import sys
+import time
 
 import dy_http
 
@@ -20,6 +21,7 @@ from . import __version__
 from .core import router
 from .core.errors import ErrorCode, VdlError
 from .core.models import DownloadResult, ProbeResult
+from .core.paths import auth_dir
 from .engines.base import pick_format
 
 DEFAULT_OUT = '下载'
@@ -116,6 +118,31 @@ def cmd_get(args):
     return 0
 
 
+def cmd_auth(args):
+    from .auth import clear, login, status
+
+    if args.status:
+        rows = status()
+        if args.json:
+            _emit_json({'ok': True, 'sites': rows})
+        else:
+            print('站点登录状态')
+            for r in rows:
+                state = '已登录' if r['loggedIn'] else '未登录'
+                ts = (time.strftime('%Y-%m-%d %H:%M', time.localtime(r['updatedAt']))
+                      if r['updatedAt'] else '-')
+                print(f'  {r["label"]:<8}{state:<6}cookie {r["cookies"]:>2}  {ts}')
+            print(f'\n凭据目录: {auth_dir()}')
+        return 0
+
+    if not args.site:
+        print('用法: vdl auth <bilibili|netease>   |   vdl auth --status')
+        return 2
+    if args.clear:
+        return clear(args.site)
+    return login(args.site, timeout=args.timeout)
+
+
 def cmd_serve(args):
     from .server import serve
 
@@ -149,12 +176,11 @@ def cmd_doctor(args):
         '已安装' if importlib.util.find_spec('yt_dlp') else '未安装', False,
         'B站引擎（P5）需要')
 
-    auth_dir = pathlib.Path.home() / 'AppData' / 'Local' / 'vdl' / 'auth'
-    if not auth_dir.exists():
-        auth_dir = pathlib.Path.home() / '.config' / 'vdl' / 'auth'
-    auths = sorted(p.stem for p in auth_dir.glob('*.json')) if auth_dir.exists() else []
+    auths = sorted(p.stem for p in auth_dir().glob('*.json'))
     add('auth', True, ', '.join(auths) if auths else '未登录任何站点', False,
         'B站/网易云高画质需要 `vdl auth <site>`')
+    add('interpreter', True, sys.executable, False,
+        'auth/浏览器兜底需要装在带 playwright 的解释器里')
 
     out_dir = pathlib.Path(args.out)
     try:
@@ -206,6 +232,14 @@ def build_parser():
     g.add_argument('--force', action='store_true', help='已存在也重下')
     g.add_argument('--json', action='store_true', help='输出结构化 JSON（stdout）')
     g.set_defaults(func=cmd_get)
+
+    a = sub.add_parser('auth', help='扫码登录并导出 cookie')
+    a.add_argument('site', nargs='?', help='bilibili | netease')
+    a.add_argument('--status', action='store_true', help='只看登录状态')
+    a.add_argument('--clear', action='store_true', help='清除该站点凭据')
+    a.add_argument('--timeout', type=int, default=300, help='等待扫码的秒数')
+    a.add_argument('--json', action='store_true')
+    a.set_defaults(func=cmd_auth)
 
     s = sub.add_parser('serve', help='启动本地 Web 界面')
     s.add_argument('--port', type=int, default=8765, help='默认 8765，被占用就换一个')

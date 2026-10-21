@@ -88,6 +88,8 @@ venv\Scripts\python.exe dy_dl.py 链接 --headful    # 显示窗口排错
 - **本地服务的安全约束别松。** `vdl serve` 必须：只绑 `127.0.0.1`、`/api/*` 校验 token、
   带 `Origin` 的请求校验同源、`/api/reveal` 只能打开输出目录内的路径。少任何一条，
   任意网页都能向本机提交任务或拉起程序。
+- **凭据只在用户目录。** `vdl auth` 写 `%LOCALAPPDATA%\vdl\auth\`（`storage_state` 里是 HttpOnly cookie），
+  profile 在 `%LOCALAPPDATA%\vdl\profile`。两者永不入库、永不打印值——日志只报 cookie 名与数量。
 - **提交前脱敏**：确认没有 cookie / 密钥 / 绝对路径 / 机器名进入 diff。
   `browser_profile/`、`cookies.txt` 已在 `.gitignore` 里，不要用 `-f` 强加。
 - 中文注释，函数级说明写清「为什么这么做」，而不只是「做了什么」。

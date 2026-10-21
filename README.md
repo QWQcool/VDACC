@@ -84,6 +84,9 @@ python -m vdl probe "链接" --json              # 只解析：标题/作者/档
 python -m vdl get "链接" --json -o 下载         # 下载（默认推荐档）
 python -m vdl get "链接" --format normal_720_0 -o 下载
 python -m vdl doctor --json                    # 环境体检：ffmpeg / playwright / yt-dlp / 登录态
+python -m vdl auth bilibili                    # 弹独立浏览器扫码，导出 cookie
+python -m vdl auth netease
+python -m vdl auth --status                    # 只看登录状态
 python -m vdl serve                            # 打开本地 Web 界面（默认 8765）
 ```
 
