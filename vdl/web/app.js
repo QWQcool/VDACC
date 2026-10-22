@@ -458,13 +458,39 @@
     };
   }
 
+  function showGate() {
+    const gate = $('#gate');
+    gate.classList.remove('hidden');
+    document.querySelector('.input-card').classList.add('hidden');
+    els.empty.classList.add('hidden');
+    els.jobsSection.classList.add('hidden');
+
+    const input = $('#gate-token');
+    const go = () => {
+      const value = input.value.trim();
+      if (!value) return;
+      localStorage.setItem('vdl-token', value);
+      location.replace('/');
+    };
+    $('#gate-go').addEventListener('click', go);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+    input.focus();
+  }
+
   async function boot() {
+    if (!token) {
+      showGate();
+      return;
+    }
+
     const health = await api('/api/health', { method: 'GET' });
     if (health.ok) {
       els.outdir.textContent = `输出目录：${health.outDir}`;
       els.ver.textContent = `v${health.version}`;
     } else {
-      toast('token 无效：请用启动时打印的完整地址打开');
+      localStorage.removeItem('vdl-token');
+      showGate();
+      return;
     }
 
     // 优先级：用户上次在前端切的主题 > 服务端配置 > 浅色

@@ -23,6 +23,19 @@
   </header>
 
   <main>
+    <section id="gate" class="card hidden">
+      <div class="card-head">
+        <h2>连接本机 VDACC</h2>
+        <p>第一次在手机或新浏览器打开时，需要粘贴启动时打印的 token。只需一次。</p>
+      </div>
+      <div class="row">
+        <input id="gate-token" type="text" autocomplete="off" spellcheck="false"
+               placeholder="粘贴 token">
+        <button id="gate-go" class="primary">进入</button>
+      </div>
+      <p class="hint">在运行 <code>vdl serve</code> 的窗口里找 <code>?token=</code> 后面那串。</p>
+    </section>
+
     <section class="card input-card">
       <div class="card-head">
         <h2>粘贴链接开始</h2>

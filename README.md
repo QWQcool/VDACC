@@ -91,8 +91,11 @@ vdl serve --allow-origin http://localhost:5173   # 允许 infOS 开发源调用
 ```
 
 - 手机和电脑在同一网段时，用打印出的局域网地址直接打开即可（同一套界面，已自适应窄屏）。
+- **首次打开会要求粘贴 token**（存在浏览器本地，只需一次）；之后从主屏幕快捷方式打开也能直接用。
 - 任务卡完成后多一个「下载」按钮，走 `/api/files/<jobId>` 把文件取回手机。
 - 公共 WiFi 下别开 `--lan`：拿到链接的任意设备都能提交任务。
+- 原生壳（Android Capacitor / Harmony ArkWeb）**未构建**：本机没有 JDK / Android SDK / DevEco。
+  三种移动路线的边界与构建前提见 [`integrations/mobile/README.md`](integrations/mobile/README.md)。
 - infOS 的接入方式见 [`integrations/infos/README.md`](integrations/infos/README.md)（薄页面，不改宿主代码）。
 
 ## 做成 Skill（给其它 Agent 用）
