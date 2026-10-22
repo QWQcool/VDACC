@@ -249,4 +249,5 @@ python -m vdl get   "链接"      # 专用引擎没命中会自动落到 yt-dlp 
 代码以 **Apache-2.0** 发布，见 [`LICENSE`](LICENSE)。
 
 角色美术（`vdl/web/assets/`）与第三方组件不在 Apache-2.0 范围内，见 [`NOTICE`](NOTICE)
-与 [`THIRD_PARTY.md`](THIRD_PARTY.md)。路线图见 [`docs/ROADMAP.md`](docs/ROADMAP.md)。
+与 [`THIRD_PARTY.md`](THIRD_PARTY.md)。后续计划见 [`Plan.md`](Plan.md)，
+历史见 [`docs/CHANGELOG.md`](docs/CHANGELOG.md)。
