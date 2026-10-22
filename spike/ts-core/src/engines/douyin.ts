@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { VdlError } from '../core/errors';
 import { CookieJar, request, UA } from '../core/http';
 import { safeName } from '../core/naming';
+import { report } from '../core/progress';
 import { format, type Format, type ProbeResult } from '../core/types';
 
 const HOST = 'https://www.douyin.com';
@@ -218,15 +219,22 @@ async function streamTo(url: string, part: string, referer: string): Promise<num
   if (!res.ok && res.status !== 206) throw new VdlError(`http_${res.status}`, `下载失败: ${res.status}`);
   if (resume && res.status !== 206) resume = 0;
 
+  const total = Number(res.headers.get('content-length') || 0) + resume;
   const fh = await open(part, resume ? 'a' : 'w');
+  let written = resume;
+  let last = 0;
   try {
     if (!res.body) throw new VdlError('no_stream', '响应没有 body');
     for await (const chunk of res.body as any) {
       await fh.write(chunk);
+      written += chunk.length;
+      const now = Date.now();
+      if (now - last > 200) { last = now; report(written, total); }
     }
   } finally {
     await fh.close();
   }
+  report(written, total || written);
   return statSync(part).size;
 }
 

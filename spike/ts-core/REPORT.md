@@ -178,6 +178,27 @@ TS    : 6,281,768 bytes   ← 字节完全一致
 普通视频 `x/player/playurl` 能容忍大包头，番剧 `pgc/.../v2/playurl` 不能。
 实现里已统一改为过滤后的 cookie。
 
+## TS 服务端验证（Bun.serve）
+
+| 接口 | 状态 |
+|---|---|
+| `GET /api/health` | ✅ 返回 version/schema/outDir |
+| `POST /api/probe` | ✅ 番剧返回 197 集 + 4 档 |
+| `POST /api/jobs`（含 `formatIds`） | ✅ 提交后 `running → done` |
+| `GET /api/events`（SSE） | ✅ 收到 `running` + 百分比 |
+| `GET /api/files/<id>` | ✅ 200，127,096,266 字节 |
+| 静态页 | ✅ 现有 `vdl/web` 直接可用 |
+
+实测：番剧 480P 任务 **127,096,266 字节 / 15.7s**；Playwright 打开
+`http://127.0.0.1:8780/?token=t&url=...`，结果卡渲染 4 个档位、197 个分集、
+任务卡显示完成与「下载/打开」——**前端零改动**。
+
+已知问题：
+
+- SSE 的 `total` 只统计单条流（视频 97MB，最终 127MB），百分比会提前到 99.9；
+- 未实现：网易云下载、任务取消/持久化、`/api/settings`、`/api/auth`；
+- 推荐档仍是 4K（1.4GB/20min），批量场景需要「推荐 1080P」的策略。
+
 ## 能否完全抛弃 Python / yt-dlp
 
 - **三个平台（抖音/网易云/B站）在 TS 里都已跑通**，Python 不再是引擎的必需；
