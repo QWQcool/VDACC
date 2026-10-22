@@ -245,7 +245,7 @@ const server = Bun.serve({
 
     if (path === '/api/health') {
       return json({
-        ok: true, version: '3.0.0-beta.4', schema: 2, outDir: OUT,
+        ok: true, version: '3.0.0-beta.5', schema: 2, outDir: OUT,
         jobs: order.length, engine: 'ts',
         theme: (loadConfig().theme || 'light'),
       });
