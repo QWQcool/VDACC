@@ -1,0 +1,98 @@
+import { getDouyin, probeDouyin } from './engines/douyin';
+import { probeNetease } from './engines/netease';
+import { probeBilibili } from './engines/bilibili';
+import { fail } from './core/errors';
+import type { ProbeResult } from './core/types';
+
+const argv = Bun.argv.slice(2);
+const cmd = argv[0] || '';
+const positional = argv.slice(1).filter((a) => !a.startsWith('-'));
+const flag = (name: string, def: string | null = null) => {
+  const i = argv.indexOf(name);
+  return i >= 0 && argv[i + 1] && !argv[i + 1].startsWith('-') ? argv[i + 1] : def;
+};
+const has = (name: string) => argv.includes(name);
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+function platformOf(url: string): string {
+  const raw = (url || '').trim();
+  if (/^\d{15,20}$/.test(raw)) return 'douyin';
+  if (/^BV[0-9A-Za-z]{10}$/.test(raw)) return 'bilibili';
+  if (/^\d{1,12}$/.test(raw)) return 'netease';
+  const host = hostOf(raw);
+  if (host.endsWith('douyin.com')) return 'douyin';
+  if (host.endsWith('music.163.com') || host.endsWith('163cn.tv')) return 'netease';
+  if (host.endsWith('bilibili.com') || host === 'b23.tv') return 'bilibili';
+  return 'unknown';
+}
+
+async function probe(url: string): Promise<ProbeResult> {
+  const platform = platformOf(url);
+  switch (platform) {
+    case 'douyin': return probeDouyin(url);
+    case 'netease': return probeNetease(url);
+    case 'bilibili': return probeBilibili(url);
+    default: throw new Error(`未知平台: ${url}`);
+  }
+}
+
+function human(res: ProbeResult) {
+  if (!res.ok || !res.media) {
+    console.error(`失败 [${res.error?.code}] ${res.error?.message}`);
+    if (res.error?.next_action) console.error(`下一步: ${res.error.next_action}`);
+    return;
+  }
+  const m = res.media;
+  console.log(m.title);
+  console.log(`  ${m.author || '未知作者'} · ${m.platform} / ${res.engine}`);
+  for (const f of res.formats) {
+    const size = f.bytes ? `${(f.bytes / 1048576).toFixed(2)} MB` : '未知';
+    console.log(`  ${f.id.padEnd(14)} ${f.label.padEnd(8)} ${size}${f.recommended ? '  推荐' : ''}`);
+  }
+}
+
+async function main() {
+  const url = positional[0];
+  if (!url || !['probe', 'get'].includes(cmd)) {
+    console.error('用法: bun src/cli.ts probe|get <url> [--format id] [-o dir] [--json]');
+    process.exit(2);
+  }
+
+  try {
+    if (cmd === 'probe') {
+      const res = await probe(url);
+      if (has('--json')) console.log(JSON.stringify(res, null, 2));
+      else human(res);
+      process.exit(res.ok ? 0 : 1);
+    }
+
+    const platform = platformOf(url);
+    if (platform === 'douyin') {
+      const out = await getDouyin(url, flag('--format'), flag('-o', '下载') || '下载');
+      if (has('--json')) {
+        console.log(JSON.stringify({ schema: 2, ok: true, path: out.path, bytes: out.bytes, skipped: out.skipped }, null, 2));
+      } else {
+        console.log(`完成 ${out.path} (${(out.bytes / 1048576).toFixed(2)} MB)`);
+      }
+      process.exit(0);
+    }
+
+    // 其余平台的下载链路本轮不验证：probe 已覆盖“解析是否等价”这个问题
+    console.error(`TS spike 暂未实现 ${platform} 的下载（probe 可用）`);
+    process.exit(3);
+  } catch (err) {
+    const body = fail(platformOf(url), 'ts-spike', err);
+    if (has('--json')) console.log(JSON.stringify(body, null, 2));
+    else console.error(`${(err as Error).message}`);
+    process.exit(1);
+  }
+}
+
+await main();
