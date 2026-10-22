@@ -1,8 +1,14 @@
 name: CI
 
 on:
-  push:
-  pull_request:
+  # 2026-10-22：暂停自动 CI。原因：账号 Free 计划私有仓库 Actions 配额已用 90%
+  #（1,813/2,000 分钟），且本仓库 10 月全部 49 次运行均失败（卡在 Skill 构建校验），
+  # 自动触发既烧额度又没有可信信号。
+  # 改为按需手动触发：
+  #   网页 → Actions → CI → Run workflow → 选择分支 main
+  #   CLI  → gh workflow run CI --repo QWQcool/VDACC --ref main
+  # 恢复自动需把 push / pull_request 加回来，见文末「恢复自动」。
+  workflow_dispatch:
 
 jobs:
   test:
@@ -33,3 +39,15 @@ jobs:
         run: bun test ts/tests
       - name: TS Skill 构建校验
         run: python tools/build_skill_ts.py
+
+# ── 待办（2026-10-22 暂停自动触发时记录）─────────────────────────────
+# 恢复自动触发之前必须先修掉这两处，否则恢复当天就又是全红：
+#   1. tools/build_skill.py --zip 在 CI 环境下失败（本地是否通过需另行确认）
+#   2. tools/build_skill_ts.py 在 CI 环境下失败
+# 排查方向（按可能性排序，不要在本次改动里动手修）：
+#   - --zip 产物路径依赖工作目录 / 写到了不存在的目录
+#   - zip 内含中文文件名在 Windows runner 上的编码问题
+#   - 依赖了 .gitignore 的文件（本地有、CI 没有）
+#   - 依赖本机安装的工具（node/pnpm 版本与 runner 不一致）
+# 修好后再考虑把 runs-on 从 windows-latest 换成 ubuntu-latest（成本对折），
+# 但换镜像和修脚本要分两次提交，否则红了分不清是谁的问题。
