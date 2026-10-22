@@ -38,11 +38,23 @@
           <span class="tag" v-if="result.media.author">{{ result.media.author }}</span>
         </div>
 
-        <select v-if="result.media.parts.length > 1" class="v-part" v-model="partUrl" @change="probePart">
-          <option v-for="p in result.media.parts" :key="p.index" :value="p.url">
-            P{{ p.index }} · {{ p.title }}
-          </option>
-        </select>
+        <div v-if="result.media.parts.length > 1" class="v-batch">
+          <label class="v-check v-all">
+            <input type="checkbox" :checked="allChecked" :indeterminate.prop="someChecked"
+                   @change="toggleAll">
+            <span>{{ t('selectAll') }} · {{ checkedParts.length }}/{{ result.media.parts.length }}</span>
+            <span class="v-num" v-if="estimated">{{ t('estimated') }} {{ size(estimated) }}</span>
+          </label>
+          <p class="hint" v-if="result.media.parts.length > 20">{{ t('limitHint') }}</p>
+          <div class="v-part-list">
+            <label v-for="p in result.media.parts" :key="p.index" class="v-part-item">
+              <input type="checkbox" :checked="checkedParts.includes(p.index)"
+                     @change="togglePart(p.index)">
+              <span class="v-part-title">P{{ p.index }} · {{ p.title }}</span>
+              <span class="v-num">{{ dur(p.duration_ms) }}</span>
+            </label>
+          </div>
+        </div>
 
         <div class="v-chips">
           <button v-for="f in result.formats" :key="f.id"
@@ -58,8 +70,10 @@
             <input type="checkbox" v-model="withCover"> {{ t('cover') }}
           </label>
           <span class="spacer"></span>
-          <button class="primary" :disabled="!selected.length || busy" @click="download">
-            {{ t('download') }} ({{ selected.length }})
+          <button class="primary"
+                  :disabled="!selected.length || busy || (isBatch && !checkedParts.length)"
+                  @click="download">
+            {{ t('download') }} ({{ isBatch ? checkedParts.length : selected.length }})
           </button>
         </div>
       </section>
