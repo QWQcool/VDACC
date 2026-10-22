@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { platformOf } from '../src/core/platform';
 import { safeName } from '../src/core/naming';
+import { parseLimit, setLimitBytesPerSec, throttle } from '../src/core/rate';
 import { format, emptyMedia } from '../src/core/types';
 
 describe('platformOf', () => {
@@ -62,5 +63,48 @@ describe('契约默认值', () => {
     const media = emptyMedia('bilibili');
     expect(media.parts).toEqual([]);
     expect(media.platform).toBe('bilibili');
+  });
+});
+
+describe('限速', () => {
+  test('parseLimit 支持 K/M/G 与纯数字', () => {
+    expect(parseLimit('2M')).toBe(2 * 1024 * 1024);
+    expect(parseLimit('1.5m')).toBe(Math.round(1.5 * 1024 * 1024));
+    expect(parseLimit('300K')).toBe(300 * 1024);
+    expect(parseLimit('2MB')).toBe(2 * 1024 * 1024);
+    expect(parseLimit('1M/s')).toBe(1024 * 1024);
+    expect(parseLimit('1048576')).toBe(1048576);
+    expect(parseLimit('0')).toBe(0);
+  });
+
+  test('parseLimit 不猜非法输入', () => {
+    expect(parseLimit('')).toBeNull();
+    expect(parseLimit('abc')).toBeNull();
+    expect(parseLimit('2X')).toBeNull();
+    expect(parseLimit('-1M')).toBeNull();
+  });
+
+  test('未设置限速时不等待', async () => {
+    setLimitBytesPerSec(0);
+    const started = Date.now();
+    await throttle(10 * 1024 * 1024, Date.now());
+    expect(Date.now() - started).toBeLessThan(50);
+  });
+
+  test('throttle 只补足差额', async () => {
+    setLimitBytesPerSec(1000);
+    try {
+      // 200 字节 @ 1000B/s = 目标 200ms，刚起步就该等满
+      const started = Date.now();
+      await throttle(200, started);
+      expect(Date.now() - started).toBeGreaterThanOrEqual(170);
+
+      // 同样 200 字节，但已经过去 1s，早该超速额度用完，直接放行
+      const quick = Date.now();
+      await throttle(200, Date.now() - 1000);
+      expect(Date.now() - quick).toBeLessThan(50);
+    } finally {
+      setLimitBytesPerSec(0);
+    }
   });
 });

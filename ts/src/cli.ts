@@ -5,6 +5,7 @@ import { getBilibiliApi, probeBilibiliApi } from './engines/bilibili_api';
 import { loadConfig } from './core/config';
 import { VdlError, fail } from './core/errors';
 import { platformOf } from './core/platform';
+import { parseLimit, setLimitBytesPerSec } from './core/rate';
 import { genericInstalled, getGeneric, probeGeneric } from './engines/generic';
 import type { ProbeResult } from './core/types';
 
@@ -81,8 +82,26 @@ async function main() {
 
   const url = positional[0];
   if (!url || !['probe', 'get'].includes(cmd)) {
-    console.error('用法: bun src/cli.ts probe|get <url> [--format id] [-o dir] [--json]');
+    console.error('用法: bun src/cli.ts probe|get <url> [--format id] [-o dir] [--limit 2M] [--json]');
     process.exit(2);
+  }
+
+  // 限速只在下载时有意义；显式 --limit 优先于 config.limitRate
+  if (cmd === 'get') {
+    const limitArg = flag('--limit');
+    if (limitArg) {
+      const parsed = parseLimit(limitArg);
+      if (parsed === null) {
+        console.error(`--limit 格式不对: ${limitArg}（示例: 500K / 2M / 1048576）`);
+        process.exit(2);
+      }
+      setLimitBytesPerSec(parsed);
+    } else if (has('--limit')) {
+      console.error('--limit 后面要跟速率，例如 --limit 2M');
+      process.exit(2);
+    } else {
+      setLimitBytesPerSec(loadConfig().limitRate || 0);
+    }
   }
 
   try {

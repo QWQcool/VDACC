@@ -9,6 +9,7 @@ import { VdlError } from './core/errors';
 import { UA } from './core/http';
 import { platformOf } from './core/platform';
 import { setProgressSink } from './core/progress';
+import { currentLimitBytesPerSec, setLimitBytesPerSec } from './core/rate';
 import { getDouyin, previewDouyin, probeDouyin } from './engines/douyin';
 import { formatUrls, getNetease, probeNetease } from './engines/netease';
 import { getBilibiliApi, previewBilibili, probeBilibiliApi } from './engines/bilibili_api';
@@ -29,6 +30,8 @@ const WEB = join(import.meta.dir, '..', '..', 'web');
 const STORE = process.env.VDL_STORE ||
   join(process.env.LOCALAPPDATA || '', 'vdl', 'ts-jobs.json');
 mkdirSync(OUT, { recursive: true });
+// 限速是进程级全局状态（下载器单 worker 串行），启动时按配置装一次
+setLimitBytesPerSec(CONFIG.limitRate || 0);
 
 interface Job {
   id: string;
@@ -248,6 +251,7 @@ const server = Bun.serve({
         ok: true, version: '3.0.0', schema: 2, outDir: OUT,
         jobs: order.length, engine: 'ts',
         theme: (loadConfig().theme || 'light'),
+        limitRate: currentLimitBytesPerSec(),
       });
     }
 
@@ -373,7 +377,10 @@ const server = Bun.serve({
         for (const key of ['outDir', 'theme', 'concurrency', 'limitRate', 'allowGeneric']) {
           if (body[key] !== undefined) allowed[key] = body[key];
         }
-        return json({ ok: true, settings: saveConfig(allowed) });
+        const next = saveConfig(allowed);
+        // 改完立即生效：否则用户要重启服务才能看到限速变化，会以为设置没保存
+        setLimitBytesPerSec(next.limitRate || 0);
+        return json({ ok: true, settings: next });
       }
       return json({ ok: false, error: { code: 'bad_input', message: '只支持 GET/PATCH' } }, 405);
     }

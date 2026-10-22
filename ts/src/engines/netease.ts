@@ -8,6 +8,7 @@ import { VdlError } from '../core/errors';
 import { UA } from '../core/http';
 import { safeName } from '../core/naming';
 import { report } from '../core/progress';
+import { throttle } from '../core/rate';
 import { format, type Format, type ProbeResult } from '../core/types';
 
 const API = 'https://music.163.com';
@@ -128,12 +129,16 @@ async function streamTo(url: string, part: string): Promise<number> {
   const total = Number(res.headers.get('content-length') || 0) + resume;
   const fh = await open(part, resume ? 'a' : 'w');
   let written = resume;
+  let sinceStart = 0;
+  const startedAt = Date.now();
   let last = 0;
   try {
     for await (const chunk of res.body as any) {
       throwIfCancelled();
       await fh.write(chunk);
       written += chunk.length;
+      sinceStart += chunk.length;
+      await throttle(sinceStart, startedAt);
       const now = Date.now();
       if (now - last > 200) { last = now; report(written, total); }
     }
