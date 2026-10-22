@@ -3,6 +3,18 @@
 > 只记「用户可感知的变化」与「验证结论」。设计与取舍见 `Plan.md`。
 > 每个版本的 GitHub Release 从这里摘取。
 
+## v3.0.0-alpha.3 — 2026-10-22
+
+**TS 版 Skill（单文件）**
+
+- `tools/build_skill_ts.py`：`bun build --compile` 出 `vdl.exe`（91.9 MB），
+  配 `SKILL.md` + `references/engines.md`，zip 42.6 MB
+- 入口 `ts/src/skill_cli.ts` 刻意不含 `auth`/playwright，体积不膨胀
+- 未知站点返回 `unsupported_url`（不再落到 `bad_input`）
+- 实测：抖音 3 档 / 6.28 MB 下载；B站 4 分P + 1080P 推荐；网易云 2 档
+
+待补：测试迁移、yt-dlp 可选组件、设置面板 UI
+
 ## v3.0.0-alpha.2 — 2026-10-22
 
 **TS 服务能力补齐**

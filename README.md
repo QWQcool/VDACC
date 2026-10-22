@@ -10,9 +10,13 @@
 > ```
 >
 > 迁移状态：引擎 ✅（抖音 / 网易云下载 / B站 分P·番剧）、服务 ✅（probe / jobs / SSE / files /
-> settings / cancel / retry / 持久化）、`auth` ✅；待补：Skill 切 TS、测试迁移、yt-dlp 可选组件。
+> settings / cancel / retry / 持久化）、`auth` ✅、**Skill ✅**；
+> 待补：测试迁移、yt-dlp 可选组件、设置面板 UI。
 >
 > 首次运行 `auth` 前需要装依赖：`cd ts && bun install`（只装 `playwright-core`，复用系统 Edge）。
+>
+> TS 版 Skill：`python tools/build_skill_ts.py --zip` → `dist/video-acquire-ts.zip`（约 42.6MB，
+> 内含 91.9MB 的 `vdl.exe`，不需要 Python/Node）。
 
 ## Python legacy（仍可用，不再演进）
 

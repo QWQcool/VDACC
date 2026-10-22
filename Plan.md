@@ -98,7 +98,8 @@ parity 稳定后再决定 Python 是否退化为 yt-dlp helper。
 | yt-dlp | 降为**可选组件**：未知站点按需下载，不内置 |
 | 推荐档 | B站 批量/分P 默认 **1080P**，避免默认 1.4GB/集的 4K |
 | 已补（alpha.2） | 网易云下载（标签/封面/歌词）、`auth`（Node Playwright）、设置、取消/重试、任务持久化 |
-| 待补 | Skill 切 TS、测试迁移、yt-dlp 可选组件 |
+| 已补（alpha.3） | Skill 切 TS：单文件 `vdl.exe`（91.9MB）+ `SKILL.md`，zip 42.6MB |
+| 待补 | 测试迁移、yt-dlp 可选组件、设置面板 UI |
 
 契约不变：仍是 `schema=2`，`ts/src/core/types.ts` 与 `vdl/core/models.py` 字段一致。
 
