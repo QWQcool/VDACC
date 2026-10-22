@@ -25,7 +25,7 @@ const PORT = Number(flag('--port', '8780'));
 const TOKEN = flag('--token', randomBytes(8).toString('hex'));
 const CONFIG = loadConfig();
 const OUT = resolve(flag('-o', CONFIG.outDir || join(process.cwd(), '下载')));
-const WEB = join(import.meta.dir, '..', '..', 'vdl', 'web');
+const WEB = join(import.meta.dir, '..', '..', 'web');
 const STORE = process.env.VDL_STORE ||
   join(process.env.LOCALAPPDATA || '', 'vdl', 'ts-jobs.json');
 mkdirSync(OUT, { recursive: true });

@@ -11,18 +11,6 @@ on:
   workflow_dispatch:
 
 jobs:
-  test:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: 单元测试（不联网、无第三方依赖）
-        run: python -m unittest discover -s tests -t . -v
-      - name: Skill 构建校验
-        run: python tools/build_skill.py --zip
-
   test-ts:
     runs-on: windows-latest
     steps:
