@@ -18,9 +18,8 @@
 > TS 版 Skill：`python tools/build_skill_ts.py --zip` → `dist/video-acquire-ts.zip`（约 42.6MB，
 > 内含 91.9MB 的 `vdl.exe`，不需要 Python/Node）。
 >
-> 前端：`/` 仍是原生界面（含下载前流预览）；`/vue/` 是 Vue 3 迁移版
-> （解析/多选/分P批量/下载/SSE/设置/主题/中英切换，预览支持下载前流与已完成文件）。
-> Vue 目前仍是**可选入口**，下一步切默认。
+> 前端：`/` 是 **Vue 3** 界面（解析/多选/分P批量/下载/SSE/设置/主题/中英切换/下载前预览）；
+> 旧版原生界面保留在 `/legacy/`，仅用于回归，确认无问题后删除。
 
 ## Python legacy（仍可用，不再演进）
 

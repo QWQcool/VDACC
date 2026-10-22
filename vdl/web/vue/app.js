@@ -65,7 +65,7 @@ createApp({
     const compBusy = ref(false);
     const previewUrl = ref('');
     const checkedParts = ref([]);
-    const legacyUrl = computed(() => `/?token=${encodeURIComponent(token)}`);
+    const legacyUrl = computed(() => `/legacy/?token=${encodeURIComponent(token)}`);
     const isBatch = computed(() =>
       !!(result.value && result.value.media.parts.length > 1));
     const allChecked = computed(() =>
