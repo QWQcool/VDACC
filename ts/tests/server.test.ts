@@ -85,6 +85,19 @@ describe('服务端安全边界', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type') || '').toContain('text/html');
   });
+
+  test('Vue 页面可访问（目录自动补 index.html）', async () => {
+    const res = await fetch(`${BASE}/vue/`);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain('vue.global.prod.js');
+  });
+
+  test('Vue 运行时本地托管', async () => {
+    const res = await fetch(`${BASE}/vendor/vue.global.prod.js`);
+    expect(res.status).toBe(200);
+    expect(Number(res.headers.get('content-length') || 0)).toBeGreaterThan(100000);
+  });
 });
 
 describe('设置', () => {

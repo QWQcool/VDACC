@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VDACC</title>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/vue/style.css">
+</head>
+<body>
+  <div id="app" v-cloak>
+    <header class="v-top">
+      <b>VDACC</b>
+      <span class="v-ver" v-if="version">v{{ version }}</span>
+      <span class="spacer"></span>
+      <button class="ghost" @click="toggleLang" :title="t('lang')">{{ lang === 'zh' ? 'EN' : '中' }}</button>
+      <button class="ghost" @click="toggleTheme" :title="t('theme')">◐</button>
+      <a class="ghost" :href="legacyUrl" :title="t('legacy')">旧版</a>
+    </header>
+
+    <main class="v-main">
+      <section class="card">
+        <div class="row">
+          <input v-model="url" :placeholder="t('placeholder')" @keyup.enter="probe">
+          <button class="primary" :disabled="busy || !url.trim()" @click="probe">
+            {{ busy ? t('probing') : t('probe') }}
+          </button>
+        </div>
+        <p class="hint">{{ t('hint') }}</p>
+      </section>
+
+      <section v-if="result" class="card">
+        <div class="v-title">{{ result.media.title }}</div>
+        <div class="tags">
+          <span class="tag accent">{{ result.platform }}</span>
+          <span class="tag">{{ result.engine }}</span>
+          <span class="tag" v-if="result.media.author">{{ result.media.author }}</span>
+        </div>
+
+        <select v-if="result.media.parts.length > 1" class="v-part" v-model="partUrl" @change="probePart">
+          <option v-for="p in result.media.parts" :key="p.index" :value="p.url">
+            P{{ p.index }} · {{ p.title }}
+          </option>
+        </select>
+
+        <div class="v-chips">
+          <button v-for="f in result.formats" :key="f.id"
+                  :class="['v-chip', { on: selected.includes(f.id) }]"
+                  @click="toggleFormat(f.id)">
+            {{ f.label }}
+            <small>{{ size(f.bytes) }}</small>
+          </button>
+        </div>
+
+        <div class="row v-actions">
+          <label class="v-check" v-if="result.media.thumbnail">
+            <input type="checkbox" v-model="withCover"> {{ t('cover') }}
+          </label>
+          <span class="spacer"></span>
+          <button class="primary" :disabled="!selected.length || busy" @click="download">
+            {{ t('download') }} ({{ selected.length }})
+          </button>
+        </div>
+      </section>
+
+      <section v-if="jobs.length" class="card">
+        <div class="v-title">{{ t('jobs') }}</div>
+        <div v-for="j in jobs" :key="j.id" class="v-job">
+          <span class="v-job-id">{{ j.formatId || j.id }}</span>
+          <span :class="['v-state', j.status]">{{ statusLabel(j.status) }}</span>
+          <span class="v-num">{{ j.percent }}%</span>
+          <span class="v-num">{{ size(j.bytes) }}</span>
+          <button v-if="j.status === 'running' || j.status === 'queued'"
+                  class="ghost" @click="cancel(j.id)" :title="t('cancel')">✕</button>
+          <button v-if="j.status === 'failed' || j.status === 'cancelled'"
+                  class="ghost" @click="retry(j.id)" :title="t('retry')">↻</button>
+        </div>
+      </section>
+
+      <p v-if="message" class="hint v-msg">{{ message }}</p>
+    </main>
+  </div>
+
+  <script src="/vendor/vue.global.prod.js"></script>
+  <script src="/vue/app.js"></script>
+</body>
+</html>

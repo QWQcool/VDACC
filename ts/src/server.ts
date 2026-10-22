@@ -230,7 +230,8 @@ const server = Bun.serve({
     // 静态页不需要 token（前端自己带 token 调接口）
     if (!path.startsWith('/api/')) {
       if (req.method !== 'GET') return new Response('method not allowed', { status: 405 });
-      const rel = path === '/' ? '/index.html' : path;
+      let rel = path === '/' ? '/index.html' : path;
+      if (rel.endsWith('/')) rel += 'index.html';
       const file = normalize(join(WEB, rel));
       if (!file.startsWith(WEB) || !existsSync(file) || !statSync(file).isFile()) {
         return new Response('not found', { status: 404 });
@@ -243,7 +244,7 @@ const server = Bun.serve({
 
     if (path === '/api/health') {
       return json({
-        ok: true, version: '3.0.0-beta.1', schema: 2, outDir: OUT,
+        ok: true, version: '3.0.0-beta.2', schema: 2, outDir: OUT,
         jobs: order.length, engine: 'ts',
         theme: (loadConfig().theme || 'light'),
       });
