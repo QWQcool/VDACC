@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync }
 import { open } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import { throwIfCancelled } from '../core/cancel';
 import { VdlError } from '../core/errors';
 import { UA } from '../core/http';
 import { safeName } from '../core/naming';
@@ -253,6 +254,7 @@ async function streamTo(url: string, part: string): Promise<number> {
   let last = 0;
   try {
     for await (const chunk of res.body as any) {
+      throwIfCancelled();
       await fh.write(chunk);
       written += chunk.length;
       const now = Date.now();

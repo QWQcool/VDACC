@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, renameSync, statSync } from 'node:fs';
 import { open } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import { throwIfCancelled } from '../core/cancel';
 import { VdlError } from '../core/errors';
 import { CookieJar, request, UA } from '../core/http';
 import { safeName } from '../core/naming';
@@ -226,6 +227,7 @@ async function streamTo(url: string, part: string, referer: string): Promise<num
   try {
     if (!res.body) throw new VdlError('no_stream', '响应没有 body');
     for await (const chunk of res.body as any) {
+      throwIfCancelled();
       await fh.write(chunk);
       written += chunk.length;
       const now = Date.now();

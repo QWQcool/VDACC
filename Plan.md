@@ -97,7 +97,8 @@ parity 稳定后再决定 Python 是否退化为 yt-dlp helper。
 | 入口 | 根 `package.json`：`bun run serve` / `probe` / `get` |
 | yt-dlp | 降为**可选组件**：未知站点按需下载，不内置 |
 | 推荐档 | B站 批量/分P 默认 **1080P**，避免默认 1.4GB/集的 4K |
-| 待补 | 网易云下载、`auth`、设置/取消/持久化、Skill 切 TS、测试迁移 |
+| 已补（alpha.2） | 网易云下载（标签/封面/歌词）、`auth`（Node Playwright）、设置、取消/重试、任务持久化 |
+| 待补 | Skill 切 TS、测试迁移、yt-dlp 可选组件 |
 
 契约不变：仍是 `schema=2`，`ts/src/core/types.ts` 与 `vdl/core/models.py` 字段一致。
 

@@ -9,8 +9,10 @@
 > bun ts/src/cli.ts get "<url>" -o 下载
 > ```
 >
-> 迁移状态：引擎 ✅（抖音 / 网易云解析 / B站 分P·番剧）、服务 ✅（probe / jobs / SSE / files）；
-> 待补：网易云下载、`auth`、设置 / 取消 / 持久化、Skill 切换。
+> 迁移状态：引擎 ✅（抖音 / 网易云下载 / B站 分P·番剧）、服务 ✅（probe / jobs / SSE / files /
+> settings / cancel / retry / 持久化）、`auth` ✅；待补：Skill 切 TS、测试迁移、yt-dlp 可选组件。
+>
+> 首次运行 `auth` 前需要装依赖：`cd ts && bun install`（只装 `playwright-core`，复用系统 Edge）。
 
 ## Python legacy（仍可用，不再演进）
 

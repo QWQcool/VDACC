@@ -1,12 +1,14 @@
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { join, normalize, resolve } from 'node:path';
 
+import { DownloadCancelled, setCancelCheck } from './core/cancel';
+import { loadConfig, saveConfig } from './core/config';
 import { VdlError } from './core/errors';
 import { setProgressSink } from './core/progress';
 import { probeDouyin, getDouyin } from './engines/douyin';
-import { probeNetease } from './engines/netease';
+import { getNetease, probeNetease } from './engines/netease';
 import { getBilibiliApi, probeBilibiliApi } from './engines/bilibili_api';
 import type { ProbeResult } from './core/types';
 
@@ -18,8 +20,10 @@ const flag = (name: string, def: string) => {
 
 const PORT = Number(flag('--port', '8780'));
 const TOKEN = flag('--token', randomBytes(8).toString('hex'));
-const OUT = resolve(flag('-o', join(process.cwd(), '下载')));
+const CONFIG = loadConfig();
+const OUT = resolve(flag('-o', CONFIG.outDir || join(process.cwd(), '下载')));
 const WEB = join(import.meta.dir, '..', '..', 'vdl', 'web');
+const STORE = join(process.env.LOCALAPPDATA || '', 'vdl', 'ts-jobs.json');
 mkdirSync(OUT, { recursive: true });
 
 interface Job {
@@ -34,6 +38,7 @@ interface Job {
   error?: { code: string; message: string };
   createdAt: number;
   finishedAt?: number;
+  cancelRequested?: boolean;
 }
 
 const jobs = new Map<string, Job>();
@@ -43,6 +48,42 @@ let running = false;
 
 const clients = new Set<ReadableStreamDefaultController>();
 const encoder = new TextEncoder();
+
+function loadStore() {
+  if (!existsSync(STORE)) return;
+  try {
+    const data = JSON.parse(readFileSync(STORE, 'utf8'));
+    for (const job of (data.jobs || []).slice(-100)) {
+      if (!job || !job.id) continue;
+      if (job.status === 'queued' || job.status === 'running') {
+        job.status = 'failed';
+        job.error = { code: 'interrupted', message: '上次会话中断，未完成' };
+        job.finishedAt = Date.now();
+      }
+      jobs.set(job.id, job);
+      order.push(job.id);
+    }
+  } catch {
+    // 坏存档当没有历史
+  }
+}
+
+function saveStore() {
+  try {
+    const payload = { jobs: order.slice(-100).map((id) => jobs.get(id)) };
+    writeFileSync(STORE, JSON.stringify(payload), 'utf8');
+  } catch {
+    // 存档失败不影响下载
+  }
+}
+
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleSave() {
+  if (saveTimer) return;
+  saveTimer = setTimeout(() => { saveTimer = null; saveStore(); }, 500);
+}
+
+loadStore();
 
 function emit(job: Job) {
   const payload = `data: ${JSON.stringify({ type: 'job', job })}\n\n`;
@@ -81,8 +122,8 @@ async function downloadUrl(url: string, formatId: string) {
   if (/douyin\.com/.test(url) || /^\d{15,20}$/.test(url.trim())) {
     return getDouyin(url, formatId, OUT);
   }
-  if (/music\.163\.com/.test(url)) {
-    throw new VdlError('not_implemented', 'TS spike 暂未实现网易云下载（probe 可用）');
+  if (/music\.163\.com/.test(url) || /^\d{1,12}$/.test(url.trim())) {
+    return getNetease(url, formatId, OUT);
   }
   return getBilibiliApi(url, formatId, OUT);
 }
@@ -94,6 +135,7 @@ function createJob(url: string, formatId: string): Job {
   };
   jobs.set(job.id, job);
   order.push(job.id);
+  scheduleSave();
   return job;
 }
 
@@ -103,8 +145,18 @@ async function pump() {
   while (queue.length) {
     const job = jobs.get(queue.shift()!);
     if (!job) continue;
+    if (job.cancelRequested) {
+      job.status = 'cancelled';
+      job.error = { code: 'cancelled', message: '用户取消' };
+      job.finishedAt = Date.now();
+      emit(job);
+      scheduleSave();
+      continue;
+    }
+
     job.status = 'running';
     emit(job);
+    setCancelCheck(() => !!job.cancelRequested);
     setProgressSink((written, total) => {
       job.bytes = written;
       job.total = total;
@@ -118,13 +170,20 @@ async function pump() {
         path: out.path, finishedAt: Date.now(),
       });
     } catch (err) {
-      const e = err as VdlError;
-      job.status = 'failed';
-      job.error = { code: e?.code || 'internal', message: e?.message || String(err) };
+      if (err instanceof DownloadCancelled) {
+        job.status = 'cancelled';
+        job.error = { code: 'cancelled', message: '用户取消' };
+      } else {
+        const e = err as VdlError;
+        job.status = 'failed';
+        job.error = { code: e?.code || 'internal', message: e?.message || String(err) };
+      }
       job.finishedAt = Date.now();
     } finally {
+      setCancelCheck(null);
       setProgressSink(null);
       emit(job);
+      scheduleSave();
     }
   }
   running = false;
@@ -170,8 +229,9 @@ const server = Bun.serve({
 
     if (path === '/api/health') {
       return json({
-        ok: true, version: '3.0.0-alpha.1', schema: 2, outDir: OUT,
+        ok: true, version: '3.0.0-alpha.2', schema: 2, outDir: OUT,
         jobs: order.length, engine: 'ts',
+        theme: (loadConfig().theme || 'light'),
       });
     }
 
@@ -203,6 +263,19 @@ const server = Bun.serve({
       }
     }
 
+    if (path === '/api/settings') {
+      if (req.method === 'GET') return json({ ok: true, settings: loadConfig() });
+      if (req.method === 'PATCH' || req.method === 'POST') {
+        const body = await req.json().catch(() => ({})) as any;
+        const allowed: any = {};
+        for (const key of ['outDir', 'theme', 'concurrency', 'limitRate', 'allowGeneric']) {
+          if (body[key] !== undefined) allowed[key] = body[key];
+        }
+        return json({ ok: true, settings: saveConfig(allowed) });
+      }
+      return json({ ok: false, error: { code: 'bad_input', message: '只支持 GET/PATCH' } }, 405);
+    }
+
     if (path === '/api/jobs' && req.method === 'GET') {
       return json({ ok: true, jobs: order.map((id) => jobs.get(id)) });
     }
@@ -223,6 +296,31 @@ const server = Bun.serve({
     if (jobMatch && req.method === 'GET') {
       const job = jobs.get(jobMatch[1]);
       return job ? json({ ok: true, job }) : json({ ok: false, error: { code: 'not_found' } }, 404);
+    }
+
+    const actionMatch = /^\/api\/jobs\/([0-9a-f]+)\/(cancel|retry)$/.exec(path);
+    if (actionMatch && req.method === 'POST') {
+      const job = jobs.get(actionMatch[1]);
+      if (!job) return json({ ok: false, error: { code: 'not_found', message: '任务不存在' } }, 404);
+
+      if (actionMatch[2] === 'cancel') {
+        if (['done', 'failed', 'cancelled'].includes(job.status)) {
+          return json({ ok: false, error: { code: 'bad_input', message: '任务已结束' } }, 400);
+        }
+        job.cancelRequested = true;
+        if (job.status === 'queued') {
+          job.status = 'cancelled';
+          job.error = { code: 'cancelled', message: '用户取消' };
+          job.finishedAt = Date.now();
+        }
+        emit(job);
+        scheduleSave();
+        return json({ ok: true, job });
+      }
+
+      const next = createJob(job.url, job.formatId);
+      enqueue(next.id);
+      return json({ ok: true, job: next }, 202);
     }
 
     const fileMatch = /^\/api\/files\/([0-9a-f]+)$/.exec(path);

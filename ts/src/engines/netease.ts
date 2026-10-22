@@ -1,8 +1,13 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { open } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import { throwIfCancelled } from '../core/cancel';
 import { VdlError } from '../core/errors';
 import { UA } from '../core/http';
+import { safeName } from '../core/naming';
+import { report } from '../core/progress';
 import { format, type Format, type ProbeResult } from '../core/types';
 
 const API = 'https://music.163.com';
@@ -12,15 +17,14 @@ const LEVELS: Array<[number, string, string]> = [
 ];
 
 export const formatUrls = new Map<string, string>();
+let lastSong: any = null;
 
 function cookieHeader(): string {
   const path = join(process.env.LOCALAPPDATA || '', 'vdl', 'auth', 'netease.json');
   if (!existsSync(path)) return '';
   try {
     const state = JSON.parse(readFileSync(path, 'utf8'));
-    return (state.cookies || [])
-      .map((c: any) => `${c.name}=${c.value}`)
-      .join('; ');
+    return (state.cookies || []).map((c: any) => `${c.name}=${c.value}`).join('; ');
   } catch {
     return '';
   }
@@ -57,23 +61,28 @@ async function headSize(url: string): Promise<number> {
   }
 }
 
+async function getJson(path: string, cookie: string): Promise<any> {
+  const res = await fetch(API + path, { headers: headers(cookie) });
+  if (!res.ok) throw new VdlError('network', `网易云接口 HTTP ${res.status}`);
+  return res.json();
+}
+
 export async function probeNetease(url: string): Promise<ProbeResult> {
   const sid = extractId(url);
   if (!sid) throw new VdlError('bad_input', `识别不出歌曲 ID: ${url}`);
   const cookie = cookieHeader();
+  formatUrls.clear();
+  lastSong = null;
 
-  const detailRes = await fetch(`${API}/api/song/detail/?id=${sid}&ids=%5B${sid}%5D`, {
-    headers: headers(cookie),
-  });
-  const detail = await detailRes.json() as any;
+  const detail = await getJson(`/api/song/detail/?id=${sid}&ids=%5B${sid}%5D`, cookie);
   const song = (detail.songs || [])[0];
   if (!song) throw new VdlError('filtered', `查不到这首歌（id=${sid}）`);
+  lastSong = song;
 
   const formats: Format[] = [];
   for (const [br, level, label] of LEVELS) {
-    const q = new URLSearchParams({ ids: `[${sid}]`, br: String(br) });
-    const res = await fetch(`${API}/api/song/enhance/player/url?${q}`, { headers: headers(cookie) });
-    const data = await res.json() as any;
+    const data = await getJson(
+      `/api/song/enhance/player/url?ids=%5B${sid}%5D&br=${br}`, cookie);
     const item = (data.data || [])[0];
     if (!item || Number(item.code) !== 200 || !item.url) continue;
     const real = await headSize(item.url);
@@ -106,4 +115,129 @@ export async function probeNetease(url: string): Promise<ProbeResult> {
     },
     formats, warnings: [], error: null,
   };
+}
+
+async function streamTo(url: string, part: string): Promise<number> {
+  let resume = existsSync(part) ? statSync(part).size : 0;
+  const headersNext: Record<string, string> = { 'User-Agent': UA, Referer: API + '/' };
+  if (resume) headersNext.Range = `bytes=${resume}-`;
+  const res = await fetch(url, { headers: headersNext });
+  if (!res.ok && res.status !== 206) throw new VdlError(`http_${res.status}`, `下载失败 ${res.status}`);
+  if (resume && res.status !== 206) resume = 0;
+
+  const total = Number(res.headers.get('content-length') || 0) + resume;
+  const fh = await open(part, resume ? 'a' : 'w');
+  let written = resume;
+  let last = 0;
+  try {
+    for await (const chunk of res.body as any) {
+      throwIfCancelled();
+      await fh.write(chunk);
+      written += chunk.length;
+      const now = Date.now();
+      if (now - last > 200) { last = now; report(written, total); }
+    }
+  } finally {
+    await fh.close();
+  }
+  report(written, total || written);
+  return statSync(part).size;
+}
+
+function ffmpeg(args: string[]) {
+  const ff = process.env.VDL_FFMPEG || 'ffmpeg';
+  return spawnSync(ff, args, { encoding: 'utf8', windowsHide: true });
+}
+
+export async function getNetease(input: string, formatId: string | null, outDir: string) {
+  const probe = await probeNetease(input);
+  const fmt = probe.formats.find((f) => f.id === formatId) ||
+    probe.formats.find((f) => f.recommended) || probe.formats[0];
+  const url = formatUrls.get(fmt.id);
+  if (!url) throw new VdlError('no_stream', '该档位没有可用地址');
+  const song = lastSong || {};
+
+  mkdirSync(outDir, { recursive: true });
+  const label = safeName(fmt.label, 14, fmt.id);
+  const dest = join(outDir,
+    `${probe.media!.id}_${safeName(probe.media!.title)}_${label}.${fmt.ext}`);
+  if (existsSync(dest)) {
+    return { path: dest, bytes: statSync(dest).size, skipped: true, warnings: [] };
+  }
+
+  const part = dest + '.part';
+  await streamTo(url, part);
+  if (statSync(part).size < 100 * 1024) {
+    unlinkSync(part);
+    throw new VdlError('bad_payload', '文件过小，多半是试听片段或错误页');
+  }
+
+  // 歌词单独落 .lrc（ID3 的 USLT 各播放器支持不一）
+  try {
+    const lyric = await getJson(
+      `/api/song/lyric?id=${probe.media!.id}&lv=1&kv=1&tv=-1`, cookieHeader());
+    const text = String((lyric.lrc || {}).lyric || '').trim();
+    if (text) writeFileSync(dest.replace(/\.\w+$/, '.lrc'), text + '\n', 'utf8');
+  } catch {
+    // 歌词失败不影响音频
+  }
+
+  const warnings: string[] = [];
+  const rawCover = join(outDir, '__vdl_cover.img');
+  const smallCover = join(outDir, '__vdl_cover.jpg');
+  let coverPath = '';
+
+  const pic = (song.album || {}).picUrl || '';
+  if (pic) {
+    try {
+      const res = await fetch(pic, { headers: { 'User-Agent': UA } });
+      writeFileSync(rawCover, Buffer.from(await res.arrayBuffer()));
+      // 原图常是 1920×1920 PNG（5MB+），缩到 800px JPEG 再内嵌
+      const scaled = ffmpeg(['-y', '-hide_banner', '-loglevel', 'error',
+        '-i', rawCover, '-vf', "scale='min(800,iw)':-2", '-q:v', '3', smallCover]);
+      coverPath = scaled.status === 0 ? smallCover : rawCover;
+    } catch {
+      coverPath = existsSync(rawCover) ? rawCover : '';
+    }
+  }
+
+  const out = dest.replace(/(\.\w+)$/, '.mux$1');
+  const args = ['-y', '-hide_banner', '-loglevel', 'error', '-i', part];
+  if (coverPath) args.push('-i', coverPath);
+  args.push('-map', '0:a');
+  if (coverPath) args.push('-map', '1:v', '-c:v', 'copy', '-disposition:v', 'attached_pic');
+  args.push('-c:a', 'copy');
+
+  const published = Number(song.publishTime || 0);
+  const year = published
+    ? String(new Date(published > 1e11 ? published : published * 1000).getFullYear())
+    : '';
+  const tags: Record<string, string> = {
+    title: song.name || '',
+    artist: (song.artists || []).map((a: any) => a.name || '').join(' / '),
+    album: (song.album || {}).name || '',
+    date: year,
+    comment: 'downloaded by vdl',
+  };
+  for (const [key, value] of Object.entries(tags)) {
+    if (value) args.push('-metadata', `${key}=${value}`);
+  }
+  if (dest.toLowerCase().endsWith('.mp3')) args.push('-id3v2_version', '3');
+  args.push(out);
+
+  const run = ffmpeg(args);
+  for (const temp of [rawCover, smallCover]) {
+    try { unlinkSync(temp); } catch { /* ignore */ }
+  }
+
+  if (run.status === 0 && existsSync(out)) {
+    renameSync(out, dest);
+    try { unlinkSync(part); } catch { /* ignore */ }
+  } else {
+    if (existsSync(out)) { try { unlinkSync(out); } catch { /* ignore */ } }
+    renameSync(part, dest);
+    warnings.push('写入标签失败，已保留音频');
+  }
+
+  return { path: dest, bytes: statSync(dest).size, skipped: false, warnings };
 }

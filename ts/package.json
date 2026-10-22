@@ -1,11 +1,14 @@
 {
   "name": "vdacc-ts",
-  "version": "3.0.0-alpha.1",
+  "version": "3.0.0-alpha.2",
   "private": true,
   "type": "module",
   "scripts": {
     "serve": "bun src/server.ts",
     "probe": "bun src/cli.ts probe",
     "get": "bun src/cli.ts get"
+  },
+  "dependencies": {
+    "playwright-core": "^1.64.1"
   }
 }

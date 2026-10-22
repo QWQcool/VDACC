@@ -3,6 +3,18 @@
 > 只记「用户可感知的变化」与「验证结论」。设计与取舍见 `Plan.md`。
 > 每个版本的 GitHub Release 从这里摘取。
 
+## v3.0.0-alpha.2 — 2026-10-22
+
+**TS 服务能力补齐**
+
+- 网易云下载：FLAC/320K + 800px 封面 + 标签 + `.lrc`（实测 19,066,853 字节）
+- `auth`：Node Playwright 复用同一 profile；只落本站域名 cookie；`--status` / `--clear`
+- 设置 `GET/PATCH /api/settings`（outDir / theme / concurrency / limitRate / allowGeneric）
+- 任务取消（14.1% 实测）、重试（127MB 完成）、持久化（重启恢复，中断标记）
+- 依赖：`playwright-core`（不下载浏览器，复用系统 Edge）
+
+待补：Skill 切 TS、测试迁移、yt-dlp 可选组件
+
 ## v3.0.0-alpha.1 — 2026-10-22
 
 **TS 后端主线（Bun）**

@@ -1,5 +1,5 @@
 import { getDouyin, probeDouyin } from './engines/douyin';
-import { probeNetease } from './engines/netease';
+import { getNetease, probeNetease } from './engines/netease';
 import { probeBilibili } from './engines/bilibili';
 import { getBilibiliApi, probeBilibiliApi } from './engines/bilibili_api';
 import { fail } from './core/errors';
@@ -63,6 +63,34 @@ function human(res: ProbeResult) {
 }
 
 async function main() {
+  if (cmd === 'auth') {
+    const auth = await import('./auth');
+    if (has('--status')) {
+      const rows = auth.status();
+      if (has('--json')) console.log(JSON.stringify({ ok: true, sites: rows }, null, 2));
+      else for (const r of rows) console.log(`${r.label}\t${r.loggedIn ? '已登录' : '未登录'}\t${r.cookies} cookies`);
+      process.exit(0);
+    }
+    const site = positional[0];
+    if (!site) {
+      console.error('用法: bun src/cli.ts auth <bilibili|netease> [--status|--clear]');
+      process.exit(2);
+    }
+    if (has('--clear')) {
+      auth.clear(site);
+      console.log(`已清除 ${site} 凭据`);
+      process.exit(0);
+    }
+    try {
+      const out = await auth.login(site, Number(flag('--timeout', '300')) * 1000);
+      console.log(JSON.stringify(out));
+      process.exit(0);
+    } catch (err) {
+      console.error((err as Error).message);
+      process.exit(1);
+    }
+  }
+
   const url = positional[0];
   if (!url || !['probe', 'get'].includes(cmd)) {
     console.error('用法: bun src/cli.ts probe|get <url> [--format id] [-o dir] [--json]');
@@ -78,10 +106,12 @@ async function main() {
     }
 
     const platform = platformOf(url);
-    if (platform === 'douyin' || platform === 'bilibili') {
+    if (['douyin', 'bilibili', 'netease'].includes(platform)) {
       const out = platform === 'douyin'
         ? await getDouyin(url, flag('--format'), flag('-o', '下载') || '下载')
-        : await getBilibiliApi(url, flag('--format'), flag('-o', '下载') || '下载');
+        : platform === 'netease'
+          ? await getNetease(url, flag('--format'), flag('-o', '下载') || '下载')
+          : await getBilibiliApi(url, flag('--format'), flag('-o', '下载') || '下载');
       if (has('--json')) {
         console.log(JSON.stringify({ schema: 2, ok: true, path: out.path, bytes: out.bytes, skipped: out.skipped }, null, 2));
       } else {
