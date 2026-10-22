@@ -49,25 +49,31 @@ python scripts/vdl_run.py get "<url>" --format bili-1920 --json -o "<输出目�
 3. 下载是幂等的：同视频同档位已存在会返回 `"skipped": true`，不要重复触发。
 4. 单次调用建议 ≤ 3 个链接；B站 大文件可能要几十秒，超时就拆成多次。
 
-## 输出契约（schema = 1）
+## 输出契约（schema = 2）
 
 ```json
 {
   "ok": true,
-  "platform": "douyin",
-  "engine": "douyin-http",
+  "platform": "bilibili",
+  "engine": "bilibili-ytdlp",
   "media": { "id": "...", "title": "...", "author": "...", "duration_ms": 19782,
-             "thumbnail": "...", "source_url": "...", "platform": "douyin" },
+             "thumbnail": "...", "source_url": "...", "platform": "bilibili",
+             "parts": [ { "index": 1, "title": "P1", "duration_ms": 229000,
+                          "url": "...?p=1", "selected": true } ] },
   "formats": [
-    { "id": "normal_1080_0", "label": "1080P", "width": 1080, "height": 1920,
-      "ext": "mp4", "vcodec": "h264", "acodec": "aac", "fps": 30,
-      "bytes": 6281768, "bitrate": 2540397, "watermark": false,
-      "recommended": true, "available": true, "reason": null }
+    { "id": "bili-1920", "label": "1080P", "width": 1920, "height": 816,
+      "ext": "mp4", "vcodec": "h264", "acodec": "mp4a", "fps": 30,
+      "bytes": 145124815, "bitrate": 5600000, "watermark": false,
+      "recommended": true, "available": true, "reason": null,
+      "subtitles": [ { "lang": "zh-CN", "name": "中文（自动生成）" } ] }
   ],
   "warnings": [],
   "error": null
 }
 ```
+
+- `parts` 只在多P/合集时非空；`subtitles` 只在视频有 CC 时非空。
+- 两者都是**新增字段**，只认 schema=1 的消费者可以忽略。
 
 - `bytes` 是真实体积；拿不到就是 `null`，**不要向用户编造数字**。
 - `formats[]` 只包含当前账号真正可用的档位。

@@ -8,9 +8,10 @@
 import unittest
 
 from vdl.core.errors import ErrorCode, VdlError
-from vdl.core.models import Format, Media
+from vdl.core.models import Format, Media, Part
 from vdl.core.naming import safe_name
 from vdl.core.router import build_engines, route
+from vdl.core.subtitle import to_srt
 from vdl.engines.bilibili import BilibiliEngine
 
 
@@ -98,6 +99,44 @@ class NamingTest(unittest.TestCase):
 
     def test_cjk_kept(self):
         self.assertEqual(safe_name('鸟之诗 (八音盒版)'), '鸟之诗 (八音盒版)')
+
+
+class PartsTest(unittest.TestCase):
+    @staticmethod
+    def payload():
+        return {'code': 0, 'data': [
+            {'page': 1, 'part': '开场', 'duration': 61},
+            {'page': 2, 'part': '正片', 'duration': 125.5},
+        ]}
+
+    def test_parts_parsed(self):
+        parts = BilibiliEngine._parts_from(self.payload(), 'BV1j5nj68E48')
+        self.assertEqual([p.index for p in parts], [1, 2])
+        self.assertEqual(parts[1].title, '正片')
+        self.assertEqual(parts[1].duration_ms, 125500)
+        self.assertIn('?p=2', parts[1].url)
+
+    def test_bad_payload(self):
+        self.assertEqual(BilibiliEngine._parts_from({'code': -400}, 'BVx'), [])
+        self.assertEqual(BilibiliEngine._parts_from(None, 'BVx'), [])
+
+    def test_part_serialized(self):
+        part = Part(index=2, title='正片', duration_ms=125500, url='u', selected=True)
+        data = part.to_dict()
+        self.assertEqual(data['index'], 2)
+        self.assertTrue(data['selected'])
+
+
+class SubtitleTest(unittest.TestCase):
+    def test_to_srt(self):
+        text = to_srt([{'from': 1.5, 'to': 3.25, 'content': '你好'},
+                       {'from': 4, 'to': 5, 'content': '  '}])
+        self.assertIn('00:00:01,500 --> 00:00:03,250', text)
+        self.assertIn('你好', text)
+        self.assertNotIn('00:00:04', text)     # 空字幕跳过
+
+    def test_empty(self):
+        self.assertEqual(to_srt([]), '')
 
 
 class ErrorTest(unittest.TestCase):

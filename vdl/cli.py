@@ -123,7 +123,8 @@ def cmd_get(args):
         return 1
 
     try:
-        dl = engine.download(result, fmt.id, _resolve_out(args.out), force=args.force)
+        dl = engine.download(result, fmt.id, _resolve_out(args.out),
+                             force=args.force, with_subs=args.subs)
     except VdlError as e:
         if args.json:
             _emit_json(DownloadResult(ok=False, format_id=fmt.id, error=e.to_dict()).to_dict())
@@ -364,6 +365,7 @@ def build_parser():
     g.add_argument('-o', '--out', default=None,
                    help=f'输出目录（默认配置里的 outDir，再默认 {DEFAULT_OUT}）')
     g.add_argument('--force', action='store_true', help='已存在也重下')
+    g.add_argument('--subs', action='store_true', help='同时下载字幕（B站，中文优先）')
     g.add_argument('--json', action='store_true', help='输出结构化 JSON（stdout）')
     g.set_defaults(func=cmd_get)
 

@@ -5,7 +5,8 @@
 CLI、Web GUI、Skill 都是它的壳，不允许在壳里写业务逻辑。
 """
 
-__version__ = '1.1.0'
+__version__ = '1.2.0'
 
 # 契约版本。字段增删要改这里，壳按它决定怎么解析。
-SCHEMA_VERSION = 1
+# v2：Media 增加 parts[]，Format 增加 subtitles[]（均为新增字段，v1 消费者不受影响）
+SCHEMA_VERSION = 2

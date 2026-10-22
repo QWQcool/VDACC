@@ -134,6 +134,23 @@
     tags.append(el('span', 'tag', r.engine));
     tags.append(el('span', 'tag', m.id));
     meta.append(tags);
+
+    // 多P/合集：切换后重新解析（URL 带 ?p=N）
+    if (m.parts && m.parts.length > 1) {
+      const picker = el('select', 'part-select');
+      m.parts.forEach((p) => {
+        const opt = el('option', '', `P${p.index} ${p.title}`);
+        opt.value = p.url;
+        opt.selected = !!p.selected;
+        picker.append(opt);
+      });
+      picker.addEventListener('change', () => {
+        els.url.value = picker.value;
+        doProbe();
+      });
+      meta.append(picker);
+    }
+
     media.append(meta);
     els.result.append(media);
 
@@ -194,6 +211,16 @@
       syncChips();
       syncActions();
     });
+
+    if (r.formats.some((f) => (f.subtitles || []).length)) {
+      const lab = el('label', 'subs');
+      const box = el('input');
+      box.type = 'checkbox';
+      box.id = 'subs-box';
+      box.checked = true;
+      lab.append(box, el('span', '', '字幕'));
+      actions.append(lab);
+    }
 
     const spacer = el('span', 'spacer');
     const go = el('button', 'primary', '下载选中');
@@ -256,6 +283,7 @@
         body: JSON.stringify({
           url: (current.media && current.media.source_url) || els.url.value.trim(),
           formatIds: [...selected],
+          subs: !!(document.getElementById('subs-box') || {}).checked,
         }),
       });
       if (!r.ok) {

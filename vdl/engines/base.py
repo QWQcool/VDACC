@@ -21,11 +21,12 @@ class Engine(ABC):
 
     @abstractmethod
     def download(self, probe, format_id, dest_dir, force=False, progress=None,
-                 should_cancel=None):
+                 should_cancel=None, with_subs=False):
         """按档位下载到 dest_dir，返回 DownloadResult。
 
         progress(written, total) 可选：给 Web UI 的 SSE 用，CLI 可传 None。
         should_cancel() 返回 True 时应尽快中断，并保留 .part 以便续传。
+        with_subs=True 时尝试把字幕落到视频旁边（不支持字幕的引擎忽略）。
         """
 
 

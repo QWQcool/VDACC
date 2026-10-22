@@ -213,7 +213,7 @@ class NeteaseEngine(Engine):
     # ------------------------------------------------------------ 下载
 
     def download(self, probe, format_id, dest_dir, force=False, progress=None,
-                 should_cancel=None):
+                 should_cancel=None, with_subs=False):
         fmt = next((f for f in probe.formats if f.id == format_id), None)
         if fmt is None:
             raise VdlError(ErrorCode.BAD_INPUT, f'没有这个档位: {format_id}',

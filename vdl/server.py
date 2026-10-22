@@ -133,10 +133,11 @@ class JobStore:
 
     # -- 对外
 
-    def submit(self, url, format_id=None, force=False):
+    def submit(self, url, format_id=None, force=False, subs=False):
         jid = secrets.token_hex(4)
         job = {
             'id': jid, 'url': url, 'formatId': format_id or '', 'force': bool(force),
+            'subs': bool(subs),
             'status': 'queued', 'percent': 0, 'bytes': 0, 'total': None,
             'speed': 0, 'eta': None, 'path': '', 'title': '', 'platform': '',
             'error': None, 'createdAt': time.time(), 'finishedAt': None,
@@ -233,7 +234,8 @@ class JobStore:
 
             dl = engine.download(probe, fmt.id, self.out_dir, force=job['force'],
                                  progress=on_progress,
-                                 should_cancel=lambda: bool(job.get('cancelRequested')))
+                                 should_cancel=lambda: bool(job.get('cancelRequested')),
+                                 with_subs=bool(job.get('subs')))
             job.update(status='done', path=dl.path, bytes=dl.bytes, percent=100,
                        speed=0, eta=0, formatId=dl.format_id,
                        finishedAt=time.time())
@@ -424,14 +426,15 @@ def make_handler(cfg):
                 if not url:
                     return self._err('bad_input', '缺少 url')
                 force = bool(payload.get('force'))
+                subs = bool(payload.get('subs'))
                 ids = payload.get('formatIds')
                 if isinstance(ids, list) and ids:
-                    jobs = [cfg.jobs.submit(url, fid, force)
+                    jobs = [cfg.jobs.submit(url, fid, force, subs)
                             for fid in ids if isinstance(fid, str) and fid]
                     if not jobs:
                         return self._err('bad_input', 'formatIds 里没有有效档位')
                     return self._json({'ok': True, 'jobs': jobs, 'job': jobs[0]}, 202)
-                job = cfg.jobs.submit(url, payload.get('formatId'), force)
+                job = cfg.jobs.submit(url, payload.get('formatId'), force, subs)
                 return self._json({'ok': True, 'job': job, 'jobs': [job]}, 202)
 
             if path.startswith('/api/jobs/'):

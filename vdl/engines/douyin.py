@@ -142,7 +142,7 @@ class DouyinEngine(Engine):
     # ------------------------------------------------------------ 下载
 
     def download(self, probe, format_id, dest_dir, force=False, progress=None,
-                 should_cancel=None):
+                 should_cancel=None, with_subs=False):
         import pathlib
 
         fmt = next((f for f in probe.formats if f.id == format_id), None)

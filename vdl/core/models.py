@@ -27,6 +27,8 @@ class Format:
     recommended: bool = False
     available: bool = True
     reason: str = ''
+    # 字幕列表：只给 lang/name，真实地址留在 extra（会过期）
+    subtitles: list = field(default_factory=list)
     # 内部字段：真实可下载地址（可能多条 CDN 镜像），不序列化
     urls: list = field(default_factory=list, repr=False)
     # 内部字段：引擎私有信息（如 B站 的 video_id/audio_id），不序列化
@@ -48,6 +50,26 @@ class Format:
             'recommended': self.recommended,
             'available': self.available,
             'reason': self.reason or None,
+            'subtitles': self.subtitles,
+        }
+
+
+@dataclass
+class Part:
+    """多P / 合集里的一个分P。"""
+    index: int
+    title: str = ''
+    duration_ms: int = 0
+    url: str = ''
+    selected: bool = False
+
+    def to_dict(self):
+        return {
+            'index': self.index,
+            'title': self.title,
+            'duration_ms': self.duration_ms or None,
+            'url': self.url,
+            'selected': self.selected,
         }
 
 
@@ -60,6 +82,7 @@ class Media:
     thumbnail: str = ''
     source_url: str = ''
     platform: str = ''
+    parts: list = field(default_factory=list)      # 多P/合集；单视频为空
 
     def to_dict(self):
         return {
@@ -70,6 +93,7 @@ class Media:
             'thumbnail': self.thumbnail,
             'source_url': self.source_url,
             'platform': self.platform,
+            'parts': [p.to_dict() for p in self.parts],
         }
 
 

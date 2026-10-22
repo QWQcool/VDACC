@@ -9,9 +9,11 @@ B站 和「未知站点兜底」共用这套逻辑，差别只在：
 要改「一个清晰度一行 / 音视频成对合并 / 两条流进度聚合」，改这里一处即可。
 """
 
+import json
 import os
 import pathlib
 import urllib.parse
+import urllib.request
 
 from .base import Engine
 from ..core.download import DownloadCancelled
@@ -20,6 +22,10 @@ from ..core.errors import ErrorCode, VdlError
 from ..core.models import DownloadResult, Format, Media, ProbeResult
 from ..core.naming import safe_name
 from ..core.paths import cookies_file
+from ..core.subtitle import to_srt
+
+UA = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+      '(KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36')
 
 # 按**宽度**归档：B站 有不少 2.35:1 宽银幕（1920×816、4096×1740），
 # 按高度会整体下移一档（实测把 4K 判成 2K、1080P 判成 720P）。
@@ -177,6 +183,15 @@ class YtdlpBase(Engine):
             raise VdlError(ErrorCode.NO_STREAM, '没有解析到可下载的音视频轨',
                            '可能是直播/受限内容；先在浏览器里确认能播放')
 
+        # 字幕：JSON 里只暴露 lang/name，真实地址放在 extra（会过期）
+        subs = info.get('subtitles') or []
+        brief = [{'lang': s.get('lang') or '', 'name': s.get('name') or ''}
+                 for s in subs if s.get('url')]
+        if brief:
+            for fmt in out:
+                fmt.subtitles = list(brief)
+                fmt.extra['subtitles'] = subs
+
         out[0].recommended = True
         media = Media(
             id=str(info.get('id') or ''),
@@ -194,7 +209,7 @@ class YtdlpBase(Engine):
     # ------------------------------------------------------------ 下载
 
     def download(self, probe, format_id, dest_dir, force=False, progress=None,
-                 should_cancel=None):
+                 should_cancel=None, with_subs=False):
         fmt = next((f for f in probe.formats if f.id == format_id), None)
         if fmt is None or not (fmt.extra.get('video_id') or fmt.extra.get('audio_id')):
             raise VdlError(ErrorCode.BAD_INPUT, f'没有这个档位: {format_id}',
@@ -255,5 +270,30 @@ class YtdlpBase(Engine):
             raise VdlError(ErrorCode.DOWNLOAD_FAILED, '下载完成但找不到落地文件',
                            '检查输出目录权限')
 
+        if with_subs:
+            self._save_subs(fmt, path)
+
         return DownloadResult(ok=True, path=str(path), bytes=path.stat().st_size,
                               format_id=fmt.id, media=probe.media)
+
+    @staticmethod
+    def _save_subs(fmt, video_path):
+        """字幕失败不影响视频：拿不到就静默跳过（用户要的是视频）。"""
+        subs = fmt.extra.get('subtitles') or []
+        if not subs:
+            return
+        pick = next((s for s in subs
+                     if str(s.get('lang') or '').lower().startswith('zh')), subs[0])
+        url = pick.get('url')
+        if not url:
+            return
+        try:
+            req = urllib.request.Request(url, headers={'User-Agent': UA})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read().decode('utf-8', 'replace'))
+            text = to_srt(data.get('body') or [])
+            if text:
+                pathlib.Path(video_path).with_suffix('.srt').write_text(
+                    text, encoding='utf-8')
+        except Exception:                        # noqa: BLE001
+            pass
