@@ -12,7 +12,7 @@
 | 每个版本改了什么 | `docs/CHANGELOG.md` |
 | 不能违反的红线、已验证事实 | `AGENTS.md` |
 | 怎么用（安装、命令、界面） | `README.md` |
-| 给其它 Agent 的契约 | `skill/SKILL.md` |
+| 给其它 Agent 的契约 | `ts/skill/SKILL.md`（legacy：`legacy/python/skill/SKILL.md`） |
 | UI 参考、视觉基线、概念图 | `docs/design/` |
 | 第三方来源与授权 | `NOTICE` / `THIRD_PARTY.md` |
 
@@ -87,12 +87,12 @@ parity 稳定后再决定 Python 是否退化为 yt-dlp helper。
 
 ### 3.5 TS 主线（3.0，2026-10-22）
 
-**决策：后端主线切到 TypeScript（Bun），`vdl/` 冻结为 legacy。**
+**决策：后端主线切到 TypeScript（Bun），Python 的 `vdl/` 冻结并归档到 `legacy/python/vdl/`。**
 
 | 项 | 状态 |
 |---|---|
 | 引擎 | ✅ 抖音、网易云解析、B站（分P / 番剧，playurl + DASH + ffmpeg） |
-| 服务 | ✅ `ts/src/server.ts`：probe / jobs / SSE / files / 静态页，现有 `vdl/web` 零改动可用 |
+| 服务 | ✅ `ts/src/server.ts`：probe / jobs / SSE / files / 静态页；界面（原 `vdl/web`）已提到仓库根 `web/`，现在是 Vue |
 | 性能 | B站 probe 305ms（Python 1.6s）；分P 下载与 Python 字节一致 |
 | 入口 | 根 `package.json`：`bun run serve` / `probe` / `get` |
 | yt-dlp | 降为**可选组件**：未知站点按需下载，不内置 |
@@ -108,10 +108,10 @@ parity 稳定后再决定 Python 是否退化为 yt-dlp helper。
 | 已补（beta.6） | 默认入口切 Vue；旧版移到 `/legacy/`；SW 导航网络优先 |
 | 已补（3.1） | 限速：`core/rate.ts`，三引擎流式落盘接入；CLI `--limit 2M`；服务端读 `config.limitRate` |
 | 3.0.0 | 正式版：Vue 默认、B站 进度聚合、4K avc 兼容优先、CI 手动 |
-| 3.0.1 | 待办：Python 物理归档 `legacy/python/`、删 `/legacy/` 路由与旧 UI |
+| 3.0.1 | ✅ 已完成：Python 物理归档 `legacy/python/`、删 `/legacy/` 路由与旧 UI（Vue 唯一入口） |
 | 已知边界 | SSE 百分比按单条流；番剧 4K 选流与 yt-dlp 有差异 |
 
-契约不变：仍是 `schema=2`，`ts/src/core/types.ts` 与 `vdl/core/models.py` 字段一致。
+契约不变：仍是 `schema=2`，`ts/src/core/types.ts` 与 `legacy/python/vdl/core/models.py` 字段一致。
 
 ---
 
@@ -373,7 +373,7 @@ P3 之后的每一段都应能独立失败而不影响下载器。
 
 | # | 决策 | 影响 |
 |---|---|---|
-| 1 | **ffmpeg：优先便携版**，`ffmpeg.exe` + `ffprobe.exe` 放 `venv\Scripts\`；找不到再回落系统 PATH | 运行时查找顺序以 `vdl/core/env.py` 为准：`venv\Scripts` → `PATH` → 报 `ffmpeg_missing`。二进制不入库（venv 已 gitignore）。**本机现状**：n8.1.2 由 winget 安装、走 PATH 分支——功能等同，但不符合"不污染系统"的初衷；换机时按便携版放进 `venv\Scripts\` 即符合决策 |
+| 1 | **ffmpeg：优先便携版**，`ffmpeg.exe` + `ffprobe.exe` 放 `venv\Scripts\`；找不到再回落系统 PATH | 运行时查找顺序以 `legacy/python/vdl/core/env.py` 为准：`venv\Scripts` → `PATH` → 报 `ffmpeg_missing`。二进制不入库（venv 已 gitignore）。**本机现状**：n8.1.2 由 winget 安装、走 PATH 分支——功能等同，但不符合"不污染系统"的初衷；换机时按便携版放进 `venv\Scripts\` 即符合决策 |
 | 2 | ~~分析侧走云端 API（DeepSeek key）~~ **暂缓（2026-10-21）** | 目标 C 整体暂缓，本决策随之搁置。原遗留风险仍未验证：DeepSeek 公开 API 是否支持**图像输入**。重启时第一步先验模型能力，再决定云端 VLM（Qwen-VL / GLM-4V / Gemini）或本地方案 |
 | 3 | **B站 V1 就登录** | `vdl auth bilibili`：独立 profile 扫码 → `storage_state()` 导出 cookie → yt-dlp 用。不登录只到 720P |
 | 4 | GUI 壳 = **本地 Web UI**（`vdl serve`），tkinter 仅过渡 | 端口固定 `8765` + 一次性 token；SSE 推进度 |
@@ -397,7 +397,7 @@ P3 之后的每一段都应能独立失败而不影响下载器。
 - 2026-10-21：**M5 完成（B站引擎）**。`engines/bilibili.py`：yt-dlp 解析（cookie 来自 `vdl auth bilibili`），按**宽度**归档清晰度（宽银幕 1920×816 / 4096×1740 按高度会整体下移一档，实测踩到并修正），同档位优先 H.264，音视频成对合并，两条流的进度按文件名累计后聚合成单条进度。实测 5 档（4K/1080P/720P/480P/标清）；720P 31.2MB 4.5 秒完成，产物 h264+aac、206.5s；服务端任务 480P 21.15MB `done`。`server.py` 的百分比加了 99.9 上限（`filesize_approx` 可能偏小）。
 - 2026-10-21：**M6 完成（Skill 打包）**。`skill/SKILL.md`（frontmatter + 前置检查 + 契约 + 错误码→下一步 + 时间预期 + 红线）、`skill/references/engines.md`（三站点差异与失效模式）、`skill/scripts/vdl_run.py`（入口，调整 sys.path 以找到 `dy_http`）、`tools/build_skill.py`（校验 frontmatter → 组装 `dist/video-acquire` → 可选 zip）。产物 23 文件 / 89.8KB / zip 41.8KB，刻意排除 `vdl/web` 与 `vdl/server.py`（Agent 不需要，且含授权受限插画；Skill 版 `serve` 会明确拒绝并 exit 2）。实测：包内 `doctor` 全绿；抖音/网易云/B站（含裸 BV 号）三引擎解析正常；包内下载抖音 1080P 成功。
 - 2026-10-21：**R1 完成（测试与验收）**。`tests/` 25 个用例（路由/B站宽度归档/命名/错误码/序列化 + 服务端 token/Origin/路径越界/静态页 + 任务持久化），`make_server()` 构造与启动分离；版本号统一 0.3.0；`doctor` 改回只读（不再创建下载目录）；新增 `tools/accept_ui.py`（等**最新**任务完成，避免被上一条已完成任务骗过）。界面验收：网易云 18.18MB FLAC、B站 480P 21.15MB 均在 UI 内完成。
-- 2026-10-21：**R2 完成（可交付）**。`vdl/core/config.py`（`%LOCALAPPDATA%\vdl\config.json`，`vdl config --set`）；任务历史落盘 `jobs.json`（最近 100 条，`running` 重启后标 `interrupted`）；`doctor --fix` 只补 pip 依赖（ffmpeg 不自动下载）；`VDACC.bat` 一键启动；`.github/workflows/ci.yml`（unittest + Skill 构建校验）。legacy `dy_dl.py`/`dy_gui.pyw` 冻结：不迁移 tkinter（浏览器兜底不在 vdl 里），新能力只加 vdl。
+- 2026-10-21：**R2 完成（可交付）**。`vdl/core/config.py`（`%LOCALAPPDATA%\vdl\config.json`，`vdl config --set`）；任务历史落盘 `jobs.json`（最近 100 条，`running` 重启后标 `interrupted`）；`doctor --fix` 只补 pip 依赖（ffmpeg 不自动下载）；`VDACC.bat` 一键启动；`.github/workflows/ci.yml`（unittest + Skill 构建校验）。legacy `dy_dl.py`/`dy_gui.pyw` 冻结：不迁移 tkinter（浏览器兜底不在 vdl 里），新能力只加 vdl。（v2 时代口径；3.0 起 `vdl/` 已冻结并归档到 `legacy/python/vdl/`，新能力只加 `ts/`）
 - 2026-10-21：**R3 完成（通用兜底）**。抽出 `engines/_ytdlp.py`：档位折叠（按宽度）、音视频成对合并、两条流进度聚合只写一处；`bilibili.py` 瘦身为 50 行薄封装（保留 `bili-*` 档位 id）；新增 `engines/generic.py`（`ytdlp-generic`，任意 http(s) 链接兜底，失败返回 yt-dlp 原始报错并清洗 `ERROR:` 前缀）。路由顺序固定为「专用引擎 → 通用兜底」。测试 26 个全绿。**分P 与字幕 sidecar 推迟**：前者要改契约（`parts[]`），后者价值低，留到有真实需求时做。
 - 2026-10-21：**R4 完成（局域网与宿主接入）**。`vdl serve --lan` 绑 `0.0.0.0` 并打印局域网地址与风险提示；新增 `--allow-origin`（可重复）与配置里的 `allowedOrigins`；新增 `/api/files/<jobId>` 流式回传（仅 done 任务、仅输出目录内）；Web UI 的完成任务多一个「下载」按钮；`integrations/infos/` 提供薄页面参考（Vue 3 SFC + 接入说明），不改 infOS 仓库。测试 28 个。
 - 2026-10-21：**R5 完成（1.0.0）**。补齐 Apache-2.0 `LICENSE`（官方原文）、`NOTICE`（infOS 角色素材、yt-dlp、FFmpeg、MediaGrabber 参考范围）、`docs/ROADMAP.md`、`docs/RELEASE-1.0.0.md`；版本号统一 1.0.0；构建 `dist/video-acquire.zip` 作为 Release 资产。

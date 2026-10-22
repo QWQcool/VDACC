@@ -55,7 +55,7 @@
 | B站清晰度归档 | 必须按**宽度**（3840/2560/1920/1280/854）；宽银幕（1920×816、4096×1740）按高度会整体下移一档 |
 | B站格式结构 | 全部是 video-only + audio-only，必须成对合并；带 cookie 才看得到 4K/1080P |
 | 路由顺序 | 专用引擎（抖音/网易云/B站）→ `ytdlp-generic` 兜底。抖音裸 ID 规则最宽，必须排最前 |
-| ffmpeg | 本机 n8.1.2（winget，走 PATH）。运行时查找顺序 `venv\Scripts` → `PATH`（`vdl/core/env.py`）；换机优先放便携版进 `venv\Scripts`。缺失会让 B站/YouTube 变无声视频 |
+| ffmpeg | 本机 n8.1.2（winget，走 PATH）。TS 主线用 `VDL_FFMPEG` 或 PATH；legacy 的查找顺序 `venv\Scripts` → `PATH`（`legacy/python/vdl/core/env.py`）。缺失会让 B站/YouTube 变无声视频 |
 | Playwright | 1.64.0，用 `channel=msedge` 复用系统 Edge，不下载 chromium |
 | venv | 本机实际 **Python 3.12.0**（计划里写的 3.13.4 未复现）；必须带 tkinter |
 
@@ -66,49 +66,58 @@ ffmpeg 为什么是硬前提：B站/YouTube 全是 DASH 音视频分离，yt-dlp
 ## 三、目录与运行
 
 ```
-├─ dy_dl.py          入口 + 浏览器引擎（Playwright 截流）+ 命令行入口
-├─ dy_http.py        纯 HTTP 引擎（只用标准库，自己算签名；默认优先）
-├─ vdl/              core 契约层：models / errors / router / engines / cli / server / web
-├─ skill/            SKILL.md + references + 入口脚本（Skill 打包源）
-├─ tools/build_skill.py  组装 dist/video-acquire(.zip)
-├─ dy_gui.pyw        tkinter 界面，worker 在子线程调 download()
-├─ 抖音下载器.bat    start pythonw 启动 GUI，无命令行窗口
-├─ browser_profile/  独立 Edge 配置（不入库，删了会自动重建）
+├─ ts/src/           主线（Bun）：cli.ts / server.ts / auth.ts / skill_cli.ts
+│  ├─ core/          契约层：types / platform / config / http / progress / cancel / rate / naming / errors
+│  └─ engines/       douyin / netease / bilibili(_api) / generic(yt-dlp) / music(骨架，未注册)
+├─ ts/tests/         bun test（当前 22 个）
+├─ web/              Vue 3 界面（默认入口 /）+ vendor / assets / manifest
+├─ ts/skill/         TS Skill 源（SKILL.md + references），由 tools/build_skill_ts.py 组装
+├─ legacy/python/    Python 归档：vdl / skill / tests / tools / dy_* / VDACC.bat（冻结，仅参考）
+├─ docs/             CHANGELOG.md、music-channels.md、design/
+├─ tools/            构建脚本（build_skill.py / build_skill_ts.py / build_portable.py）
 ├─ 下载/             输出目录（不入库）
-└─ venv/             独立 Python 环境（不入库）
+└─ venv/             Python 环境（只给 legacy 用，不入库）
 ```
 
 ```bash
-venv\Scripts\python.exe dy_dl.py "https://v.douyin.com/xxxx/"
-venv\Scripts\python.exe dy_dl.py 7601899463951770978 --force
-venv\Scripts\python.exe dy_dl.py 链接 --headful    # 显示窗口排错
+bun ts/src/cli.ts probe "<url>" --json
+bun ts/src/cli.ts get "<url>" -o 下载 --limit 2M     # --limit 可选（K/M 后缀）
+bun ts/src/server.ts --port 8765 --token <token>
+cd ts && bun install          # auth 需要 playwright-core（复用系统 Edge）
+bun test ts/tests
 ```
 
 ## 四、工程约定
 
-- **代码里不写绝对路径。** 一律用 `pathlib.Path(__file__).resolve().parent` 派生，
-  输出目录可用参数覆盖。
-- **GUI 与 CLI 共用同一后端。** 不许把业务逻辑写进 `dy_gui.pyw`。
-  这个后端未来要给 agent 调用，输出必须是结构化数据而非只给人看的日志。
-- **单例约束**：`browser_profile` 同时只能被一个进程使用，并发会崩。
-  多任务必须串行或加文件锁。
-- **纯 HTTP 引擎只用标准库。** `dy_http.py` 故意不依赖 requests / playwright：
-  换台机器 clone 下来就能跑，以后塞进 Skill 也不用先 bootstrap 依赖。别为省事引入新依赖。
-- **契约优先。** 对外字段只加在 `vdl/core/models.py`，错误码只加在 `vdl/core/errors.py`；
-  CLI、Web GUI、Skill 都吃这两份。不许在壳里自己拼字段名，也不许把已知失败写成"下载失败"了事。
-- **本地服务的安全约束别松。** `vdl serve` 必须：默认只绑 `127.0.0.1`、`/api/*` 校验 token、
-  带 `Origin` 的请求校验同源（`--allow-origin` 才放行宿主）、`/api/reveal` 与 `/api/files`
-  只能访问输出目录内的路径。少任何一条，任意网页都能向本机提交任务或读走文件。
-- `--lan` 会把服务暴露到局域网，命令里必须打印醒目警告；不要在公共网络下默认开启。
-- **凭据只在用户目录。** `vdl auth` 写 `%LOCALAPPDATA%\vdl\auth\`（`storage_state` 里是 HttpOnly cookie），
-  profile 在 `%LOCALAPPDATA%\vdl\profile`。两者永不入库、永不打印值——日志只报 cookie 名与数量。
-- **Skill 只能由构建脚本组装。** 别手工把 `vdl/` 拷进 `dist/`；改代码只改仓库再 `build_skill.py`。
-  Skill 包刻意排除 `vdl/web` 与 `vdl/server.py`（Agent 不需要，且含授权受限的插画）。
-- **legacy 已冻结。** `dy_dl.py` / `dy_gui.pyw` 只保留抖音的浏览器兜底，不再加新能力；
-  新功能一律加在 `vdl/`。**不要**把 tkinter 迁到 vdl——浏览器引擎不在 vdl 里，迁过去会丢能力。
-- **3.0 起新能力只加 `ts/`。** 解析/服务的主线是 `ts/src`（Bun），`vdl/` 只修
+- **代码里不写绝对路径。** TS 用 `import.meta.dir` + `path.join` 派生；legacy 用
+  `pathlib.Path(__file__).resolve().parent`。输出目录可用参数覆盖。
+- **服务端与 CLI 共用同一批引擎。** 业务逻辑只写在 `ts/src/engines/`，`cli.ts` / `server.ts` /
+  `skill_cli.ts` 都只是壳。这个后端要给 agent 调用，输出必须是结构化数据而非只给人看的日志。
+- **单例约束**：`%LOCALAPPDATA%\vdl\profile` 同时只能被一个进程使用（Playwright 会锁），
+  TS `auth` 与 legacy 共用同一目录，所以两边也不能同时跑。
+- **纯 HTTP 引擎只用标准库（legacy）。** `legacy/python/dy_http.py` 故意不依赖 requests / playwright：
+  换台机器 clone 下来就能跑。别为省事给它添新依赖。
+- **契约优先。** 对外字段只加在 `ts/src/core/types.ts`（schema=2），错误码由 `core/errors.ts` 统一；
+  legacy 对应 `legacy/python/vdl/core/models.py`、`errors.py`，两边字段名必须一致。
+  不许在壳里自己拼字段名，也不许把已知失败写成"下载失败"了事。
+- **本地服务的安全约束别松。** `ts/src/server.ts` 必须：默认只绑 `127.0.0.1`、`/api/*` 校验 token、
+  带 `Origin` 的请求校验同源（`VDL_ALLOW_ORIGIN` 才放行宿主）、`/api/reveal` 与 `/api/files`
+  只能访问输出目录内的路径、`/api/stream` 只代理白名单域名。少任何一条，任意网页都能向本机提交任务或读走文件。
+- `--lan` 只在 legacy（`legacy/python/vdl`）里有；TS 主线固定只绑 `127.0.0.1`，
+  要暴露到局域网必须自己加，并且打印醒目警告、不要在公共网络下默认开启。
+- **凭据只在用户目录。** `bun ts/src/cli.ts auth`（legacy：`python -m vdl auth`）写
+  `%LOCALAPPDATA%\vdl\auth\`（`storage_state` 里是 HttpOnly cookie），profile 在
+  `%LOCALAPPDATA%\vdl\profile`。两者永不入库、永不打印值——日志只报 cookie 名与数量。
+- **Skill 只能由构建脚本组装。** TS 版：`python tools/build_skill_ts.py --zip`（单文件 `vdl.exe`
+  + `ts/skill/SKILL.md`）；legacy 版：`tools/build_skill.py`。别手工往 `dist/` 拷代码。
+  legacy 包刻意排除 `legacy/python/vdl/web` 与 `server.py`（Agent 不需要，且含授权受限的插画）；
+  TS 包只含 `skill_cli.ts`。
+- **legacy 已冻结。** `legacy/python/`（`dy_dl.py` / `dy_gui.pyw` / `vdl/` / `skill/` / `tests/`）
+  只保留抖音浏览器兜底与历史参考，不再加新能力、不接新站点；新功能一律加在 `ts/`。
+  **不要**把 tkinter 迁到 TS——浏览器引擎在 legacy 里，迁过去会丢能力。
+- **3.0 起新能力只加 `ts/`。** 解析/服务的主线是 `ts/src`（Bun），`legacy/python/vdl/` 只修
   会让 legacy 彻底不可用的 bug，不接新站点、不改契约。对外契约仍是 `schema=2`，
-  两边字段名必须一致（`ts/src/core/types.ts` ↔ `vdl/core/models.py`）。
+  两边字段名必须一致（`ts/src/core/types.ts` ↔ `legacy/python/vdl/core/models.py`）。
 - **TS 引擎的 Cookie 必须过滤。** B站 番剧接口对超大 Cookie 头返回 400；
   只带域名匹配且未过期的（约 27 条/1.7KB），不要直接把 `storage_state` 全拼进去。
 - **提交前脱敏**：确认没有 cookie / 密钥 / 绝对路径 / 机器名进入 diff。

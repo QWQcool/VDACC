@@ -5,15 +5,15 @@
 > 冻结为参考实现。需要 **Bun 1.2+**。
 >
 > ```bash
-> bun ts/src/server.ts --port 8765 --token <token>   # Web 界面（复用 vdl/web）
+> bun ts/src/server.ts --port 8765 --token <token>   # Web 界面（仓库根 web/，Vue）
 > bun ts/src/cli.ts probe "<url>" --json
 > bun ts/src/cli.ts get "<url>" -o 下载
 > bun ts/src/cli.ts get "<url>" -o 下载 --limit 2M  # 可选限速（K/M 后缀）
 > ```
 >
 > 迁移状态：引擎 ✅（抖音 / 网易云下载 / B站 分P·番剧）、服务 ✅（probe / jobs / SSE / files /
-> settings / cancel / retry / 持久化）、`auth` ✅、**Skill ✅**、**TS 测试 16 个 ✅**、
-> **yt-dlp 可选组件 ✅**、**设置面板 ✅**。
+> settings / cancel / retry / 持久化）、`auth` ✅、**Skill ✅**、**TS 测试 22 个 ✅**、
+> **yt-dlp 可选组件 ✅**、**设置面板 ✅**、**限速 ✅**（`--limit 2M`）。
 >
 > 首次运行 `auth` 前需要装依赖：`cd ts && bun install`（只装 `playwright-core`，复用系统 Edge）。
 >
@@ -21,7 +21,7 @@
 > 内含 91.9MB 的 `vdl.exe`，不需要 Python/Node）。
 >
 > 前端：`/` 是 **Vue 3** 界面（解析/多选/分P批量/下载/SSE/设置/主题/中英切换/下载前预览）；
-> 旧版原生界面保留在 `/legacy/`，仅用于回归，确认无问题后删除。
+> 旧版原生界面已删除，Vue 是唯一入口。
 
 ## Python legacy（仍可用，不再演进）
 
