@@ -107,6 +107,7 @@ parity 稳定后再决定 Python 是否退化为 yt-dlp helper。
 | 已补（beta.5） | 下载前流预览（`/api/preview` + `/api/stream` 代理，含 Range） |
 | 已补（beta.6） | 默认入口切 Vue；旧版移到 `/legacy/`；SW 导航网络优先 |
 | 已补（3.1） | 限速：`core/rate.ts`，三引擎流式落盘接入；CLI `--limit 2M`；服务端读 `config.limitRate` |
+| 已补（3.1） | QQ 音乐引擎骨架：匿名 `probe`（仅接口真放行的档位），**未接路由**、无下载 |
 | 3.0.0 | 正式版：Vue 默认、B站 进度聚合、4K avc 兼容优先、CI 手动 |
 | 3.0.1 | ✅ 已完成：Python 物理归档 `legacy/python/`、删 `/legacy/` 路由与旧 UI（Vue 唯一入口） |
 | 已知边界 | SSE 百分比按单条流；番剧 4K 选流与 yt-dlp 有差异 |

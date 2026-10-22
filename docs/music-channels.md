@@ -47,8 +47,19 @@
 4. 有账号后再补 320k/FLAC 与 cookie 过期提示；
 5. **不做**：歌单/专辑批量（后续单独评估）、DRM、客户端私有加密容器。
 
-## 当前状态
+## 当前状态（2026-10-22）
 
-- 骨架已建，**未注册到路由**（`musicEngines` 为空）；
-- 缺 QQ/酷狗/酷我 cookie，下载链路未验证；
+- **QQ 音乐骨架已实现**：`ts/src/engines/qq.ts` 的 `canHandle` / `probeQQ`，**未注册到路由**
+  （`platformOf` / `server` / `cli` 都不引用，`musicEngines` 仍为空）。没有账号，下载链路验证不了。
+- 匿名实测（2026-10-22）：
+  - 单曲详情 `c.y.qq.com/v8/fcg-bin/fcg_play_single_song.fcg?songmid=<mid>&platform=yqq&format=json` 可用；
+  - 播放地址走 `u.y.qq.com/cgi-bin/musicu.fcg` 的 `vkey.GetVkeyServer` / `CgiGetVkey`，
+    返回 `sip[]` + `midurlinfo[].purl`；`songmid` 与 `filename` 按下标配对，一个 mid 多档位要重复写；
+  - 匿名只对**部分免费曲**放行：实测《轻轻》拿到 `M500`（3,529,853 字节）与 `C400`（2,703,704 字节），
+    分别等于 `file.size_128mp3` / `file.size_96aac`；其余档位 `result=104003`（需登录），
+    320K/FLAC 匿名一律拿不到；
+  - 搜索匿名不可用：`musicu.fcg` 的 `DoSearchForQQMusicDesktop` 返回 `req_1.code=2001` +
+    `feedbackURL`（登录页），`c.y.qq.com/soso/...` 返回空列表。所以只吃 songmid / 分享链接，不做关键词搜索。
+- 未做（不假装支持）：cookie 登录（`uin` / `qm_keyst`）、`download()`、标签与封面写入、歌单/专辑。
+- 酷我 / 酷狗：未开始。
 - 服务端设置页后续加「音乐账号」页签（与 B站/网易云并列）。
