@@ -9,8 +9,10 @@ import pathlib
 import sys
 
 BASE = pathlib.Path(__file__).resolve().parent
-if str(BASE) not in sys.path:
-    sys.path.insert(0, str(BASE))
+# 源码树里 vdl/ 在 legacy/python/vdl；构建产物里与 scripts/ 同级
+for candidate in (BASE, BASE.parents[1] if len(BASE.parents) > 1 else BASE):
+    if str(candidate) not in sys.path:
+        sys.path.insert(0, str(candidate))
 
 from vdl.cli import main  # noqa: E402  (必须先调整 sys.path)
 
