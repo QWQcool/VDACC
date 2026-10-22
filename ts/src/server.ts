@@ -231,9 +231,7 @@ const server = Bun.serve({
     // 静态页不需要 token（前端自己带 token 调接口）
     if (!path.startsWith('/api/')) {
       if (req.method !== 'GET') return new Response('method not allowed', { status: 405 });
-      // 默认入口是 Vue；旧版保留在 /legacy/
       let rel = path === '/' ? '/vue/index.html' : path;
-      if (rel === '/legacy' || rel === '/legacy/') rel = '/index.html';
       if (rel.endsWith('/')) rel += 'index.html';
       const file = normalize(join(WEB, rel));
       if (!file.startsWith(WEB) || !existsSync(file) || !statSync(file).isFile()) {
@@ -247,7 +245,7 @@ const server = Bun.serve({
 
     if (path === '/api/health') {
       return json({
-        ok: true, version: '3.0.0-beta.6', schema: 2, outDir: OUT,
+        ok: true, version: '3.0.0', schema: 2, outDir: OUT,
         jobs: order.length, engine: 'ts',
         theme: (loadConfig().theme || 'light'),
       });

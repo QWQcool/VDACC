@@ -106,7 +106,8 @@ parity 稳定后再决定 Python 是否退化为 yt-dlp helper。
 | 已补（beta.4） | Vue 批量三态全选（分P/合集、上限 20、整批统一清晰度） |
 | 已补（beta.5） | 下载前流预览（`/api/preview` + `/api/stream` 代理，含 Range） |
 | 已补（beta.6） | 默认入口切 Vue；旧版移到 `/legacy/`；SW 导航网络优先 |
-| 待补 | 番剧 4K 选流对齐、删 legacy、3.0 正式版收口 |
+| 3.0.0 | 正式版：Vue 默认、B站 进度聚合、4K avc 兼容优先、CI 手动 |
+| 3.0.1 | 待办：Python 物理归档 `legacy/python/`、删 `/legacy/` 路由与旧 UI |
 | 已知边界 | SSE 百分比按单条流；番剧 4K 选流与 yt-dlp 有差异 |
 
 契约不变：仍是 `schema=2`，`ts/src/core/types.ts` 与 `vdl/core/models.py` 字段一致。

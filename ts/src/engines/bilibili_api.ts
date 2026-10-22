@@ -246,7 +246,8 @@ async function probeBangumi(target: Target): Promise<ProbeResult> {
            formats, warnings: [], error: null };
 }
 
-async function streamTo(url: string, part: string): Promise<number> {
+async function streamTo(url: string, part: string,
+                        onProgress: (w: number, t: number) => void = report): Promise<number> {
   let resume = existsSync(part) ? statSync(part).size : 0;
   const headers: Record<string, string> = { 'User-Agent': UA, Referer: 'https://www.bilibili.com/' };
   if (resume) headers.Range = `bytes=${resume}-`;
@@ -263,12 +264,12 @@ async function streamTo(url: string, part: string): Promise<number> {
       await fh.write(chunk);
       written += chunk.length;
       const now = Date.now();
-      if (now - last > 200) { last = now; report(written, total); }
+      if (now - last > 200) { last = now; onProgress(written, total); }
     }
   } finally {
     await fh.close();
   }
-  report(written, total || written);
+  onProgress(written, total || written);
   return statSync(part).size;
 }
 
@@ -289,8 +290,17 @@ export async function getBilibiliApi(input: string, formatId: string | null, out
 
   const vPart = dest + '.video.m4s';
   const aPart = dest + '.audio.m4s';
-  await streamTo(urls.video, vPart);
-  if (urls.audio) await streamTo(urls.audio, aPart);
+
+  // 视频+音频两条流，按「已完成字节 + 当前流」聚合，避免百分比到 99.9 后卡住
+  const expected = fmt.bytes || 0;
+  let base = 0;
+  const sink = (written: number, total: number) => {
+    if (expected) report(base + written, expected);
+    else report(base + written, total ? base + total : 0);
+  };
+  await streamTo(urls.video, vPart, sink);
+  base = statSync(vPart).size;
+  if (urls.audio) await streamTo(urls.audio, aPart, sink);
 
   const ff = process.env.VDL_FFMPEG || 'ffmpeg';
   const args = urls.audio
