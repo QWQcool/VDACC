@@ -95,6 +95,53 @@ TS    : 6,281,768 bytes   ← 字节完全一致
 - B站 继续留在 Python（进程内 yt-dlp 明显更快）；
 - 等桌面壳（Electron/Tauri）成为硬需求时，再考虑整体迁移。
 
+## B+ 验证：常驻 Python helper
+
+同一进程内复用 `yt_dlp.YoutubeDL`，避免每次启动 exe：
+
+| 方式 | 第 1 次 | 第 2 次 | 第 3 次 |
+|---|---|---|---|
+| `yt-dlp.exe` 子进程 | 3,520ms | 3,416ms | 3,391ms |
+| 常驻 helper（stdio JSON） | 1,417ms | **862ms** | **646ms** |
+
+- 首调用含 Python 启动 + import（约 0.7s），之后稳定在 0.65–0.86s；
+- 比纯 Python CLI（1.34–1.59s）还快，因为省掉了进程重启；
+- 比 exe 快 **4–5 倍**。
+
+实现：`helper/ytdlp_helper.py`（按行 JSON）+ `src/core/helper.ts`；
+`VDL_TS_HELPER=1` 启用。B+ 可行，但**仍然需要 Python**。
+
+## 参考实现：鸿蒙版的 B站 是纯 JS，没有 yt-dlp
+
+| 项 | 事实 |
+|---|---|
+| 架构 | ArkTS 壳 + WebView；`app.js`(UI) + `mg-core.bundle.js`(逻辑，CommonJS) + ArkTS 桥，**没有独立后端进程** |
+| B站模块 | `src/platforms/bilibili.js`（在 bundle 内） |
+| 普通视频 | `api.bilibili.com/x/player/playurl?bvid&cid&qn&fnval&fourk=1` |
+| 番剧 | `api.bilibili.com/pgc/player/web/playurl?ep_id=...` |
+| 清晰度 | `qn`：720P=64 / 1080P=80 / 2K=112 / 4K=120 |
+| 合并 | DASH 音轨 `fnval=16`，用 **mp4box.js** 在 JS 里 remux（`src/core/remux.js`，上限 1.5GB） |
+| yt-dlp | **完全没有**（bundle 里 0 处引用） |
+| WBI | **没有**（`wbi` 只出现在构建工具 `hvigorw.js`） |
+
+含义：**B站 完全可以在 TS 里自实现，不需要 Python，也不需要 yt-dlp。**
+
+## 结论更新
+
+- B+ 证明「TS + 常驻 helper」可行，B站 甚至比纯 Python 快，但它**仍需要 Python**；
+- 参考实现证明 B站 可以**纯 TS**（playurl + DASH + mp4box/ffmpeg 合并）。
+
+所以如果走 TS，优先级应是：
+
+| 方案 | 内容 | B站 | 是否要 Python | 体积 |
+|---|---|---|---|---|
+| A | 纯 Python | 1.6s | 要 | 20–30MB |
+| B+ | TS + 常驻 helper | 0.65–0.86s | **要** | 92+20MB |
+| **B++** | B站 也纯 TS（playurl + DASH + 合并） | 预期 0.3–0.6s | **不要** | ~92MB |
+
+**推荐 B++**（若确定走 TS）：B站 用 `playurl` + `ffmpeg` 合并（桌面）或 `mp4box.js`（移动端），
+彻底去掉 Python 依赖；B+ 只作为过渡方案。
+
 ## 复现
 
 ```powershell

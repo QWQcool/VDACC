@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { VdlError } from '../core/errors';
+import { probeViaHelper } from '../core/helper';
 import { format, type Format, type ProbeResult } from '../core/types';
 
 const BUCKETS: Array<[number, string]> = [
@@ -25,9 +26,13 @@ function score(f: any): number {
   return pref * 1e9 + Number(f.tbr || 0);
 }
 
-export function probeBilibili(url: string): ProbeResult {
+export async function probeBilibili(url: string): Promise<ProbeResult> {
   if (/^BV[0-9A-Za-z]{10}$/.test((url || '').trim())) {
     url = `https://www.bilibili.com/video/${url.trim()}`;
+  }
+  if (process.env.VDL_TS_HELPER === '1') {
+    const info = await probeViaHelper(url);
+    return buildResult(info, url, 'bilibili-helper');
   }
   const exe = ytdlpPath();
   if (!existsSync(exe)) throw new VdlError('engine_unavailable', `找不到 yt-dlp: ${exe}`);
@@ -53,6 +58,10 @@ export function probeBilibili(url: string): ProbeResult {
   }
   if (info.entries?.length) info = info.entries[0];
 
+  return buildResult(info, url, 'bilibili-ytdlp');
+}
+
+function buildResult(info: any, url: string, engine: string): ProbeResult {
   const formats: any[] = info.formats || [];
   const videos = formats.filter((f) => f.vcodec && f.vcodec !== 'none' && f.width);
   const audios = formats.filter((f) => f.acodec && f.acodec !== 'none' && (!f.vcodec || f.vcodec === 'none'));
@@ -88,7 +97,7 @@ export function probeBilibili(url: string): ProbeResult {
   out[0].recommended = true;
 
   return {
-    schema: 2, ok: true, platform: 'bilibili', engine: 'bilibili-ytdlp',
+    schema: 2, ok: true, platform: 'bilibili', engine,
     media: {
       id: String(info.id || ''),
       title: info.title || 'B站视频',
