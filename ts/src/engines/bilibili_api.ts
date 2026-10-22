@@ -117,7 +117,10 @@ function foldDash(dash: any, durationMs: number): Format[] {
       audio: bestAudio ? (bestAudio.baseUrl || bestAudio.base_url) : '',
     });
   }
-  if (out.length) out[0].recommended = true;
+  // 推荐 1080P：批量/分P 默认勾 4K 会变成 1.4GB/集，用户一次误点就是几十 GB
+  const preferred = out.find((f) => f.width === 1920) ||
+    out.find((f) => f.width <= 1920) || out[0];
+  if (preferred) preferred.recommended = true;
   return out;
 }
 

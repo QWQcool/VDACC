@@ -85,6 +85,22 @@ parity 稳定后再决定 Python 是否退化为 yt-dlp helper。
 **明确不做**：DRM / 付费绕过 / 私密视频 / 直播；站点广度竞赛；收藏夹批量抓取；
 端上跑 B站（依赖 yt-dlp，不可移植）；QQ/酷狗/酷我之外的音乐平台。
 
+### 3.5 TS 主线（3.0，2026-10-22）
+
+**决策：后端主线切到 TypeScript（Bun），`vdl/` 冻结为 legacy。**
+
+| 项 | 状态 |
+|---|---|
+| 引擎 | ✅ 抖音、网易云解析、B站（分P / 番剧，playurl + DASH + ffmpeg） |
+| 服务 | ✅ `ts/src/server.ts`：probe / jobs / SSE / files / 静态页，现有 `vdl/web` 零改动可用 |
+| 性能 | B站 probe 305ms（Python 1.6s）；分P 下载与 Python 字节一致 |
+| 入口 | 根 `package.json`：`bun run serve` / `probe` / `get` |
+| yt-dlp | 降为**可选组件**：未知站点按需下载，不内置 |
+| 推荐档 | B站 批量/分P 默认 **1080P**，避免默认 1.4GB/集的 4K |
+| 待补 | 网易云下载、`auth`、设置/取消/持久化、Skill 切 TS、测试迁移 |
+
+契约不变：仍是 `schema=2`，`ts/src/core/types.ts` 与 `vdl/core/models.py` 字段一致。
+
 ---
 
 ## 4. 设计存档（2026-10-19 讨论）

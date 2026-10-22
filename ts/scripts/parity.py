@@ -10,8 +10,8 @@ import pathlib
 import subprocess
 import sys
 
-ROOT = pathlib.Path(__file__).resolve().parents[3]
-SPIKE = ROOT / 'spike' / 'ts-core'
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+SPIKE = ROOT / 'ts'
 BUN = pathlib.Path.home() / 'AppData' / 'Local' / 'Temp' / 'vdacc-ts' / 'bun' / 'bun-windows-x64' / 'bun.exe'
 
 CASES = [
@@ -20,8 +20,10 @@ CASES = [
     ('bilibili', 'BV1j5nj68E48'),
 ]
 
+# 不比 recommended：TS 主线把 B站 的默认档改成 1080P（批量场景策略），
+# 与 Python 的「最高档推荐」故意不同。
 FIELDS = ('id', 'label', 'width', 'height', 'ext', 'vcodec', 'acodec',
-          'fps', 'bytes', 'bitrate', 'watermark', 'recommended')
+          'fps', 'bytes', 'bitrate', 'watermark')
 MEDIA = ('id', 'title', 'author', 'duration_ms', 'platform')
 
 

@@ -1,5 +1,19 @@
 # VDACC —— 多平台视频 / 音频下载器
 
+> **3.0 起后端主线为 TypeScript（Bun）**：抖音 / B站（含分P、番剧）/ 网易云的解析与本地服务
+> 已迁移，Python 版本（`vdl/`、`dy_dl.py`）冻结为 legacy 参考。需要 **Bun 1.2+**。
+>
+> ```bash
+> bun ts/src/server.ts --port 8765 --token <token>   # Web 界面（复用 vdl/web）
+> bun ts/src/cli.ts probe "<url>" --json
+> bun ts/src/cli.ts get "<url>" -o 下载
+> ```
+>
+> 迁移状态：引擎 ✅（抖音 / 网易云解析 / B站 分P·番剧）、服务 ✅（probe / jobs / SSE / files）；
+> 待补：网易云下载、`auth`、设置 / 取消 / 持久化、Skill 切换。
+
+## Python legacy（仍可用，不再演进）
+
 支持抖音（纯 HTTP 签名，浏览器兜底）、B站（含 4K，需登录）、网易云音乐（无损），
 其它 http(s) 站点交给 yt-dlp 兜底。三种用法：**Web 界面**（`vdl serve`）、**命令行**（`vdl`）、
 **Agent Skill**（`video-acquire`）。

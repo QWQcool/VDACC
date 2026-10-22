@@ -33,3 +33,7 @@ desktop.ini
 
 # Skill 构建产物
 dist/
+
+# TS 依赖与产物
+ts/node_modules/
+ts/dist/

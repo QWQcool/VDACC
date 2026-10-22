@@ -9,8 +9,8 @@ const pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) 
 let buffer = '';
 
 function repoRoot(): string {
-  // spike/ts-core/src/core -> 仓库根
-  return join(import.meta.dir, '..', '..', '..', '..');
+  // ts/src/core -> 仓库根
+  return join(import.meta.dir, '..', '..', '..');
 }
 
 function pythonPath(): string {

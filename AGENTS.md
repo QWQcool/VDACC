@@ -106,6 +106,11 @@ venv\Scripts\python.exe dy_dl.py 链接 --headful    # 显示窗口排错
   Skill 包刻意排除 `vdl/web` 与 `vdl/server.py`（Agent 不需要，且含授权受限的插画）。
 - **legacy 已冻结。** `dy_dl.py` / `dy_gui.pyw` 只保留抖音的浏览器兜底，不再加新能力；
   新功能一律加在 `vdl/`。**不要**把 tkinter 迁到 vdl——浏览器引擎不在 vdl 里，迁过去会丢能力。
+- **3.0 起新能力只加 `ts/`。** 解析/服务的主线是 `ts/src`（Bun），`vdl/` 只修
+  会让 legacy 彻底不可用的 bug，不接新站点、不改契约。对外契约仍是 `schema=2`，
+  两边字段名必须一致（`ts/src/core/types.ts` ↔ `vdl/core/models.py`）。
+- **TS 引擎的 Cookie 必须过滤。** B站 番剧接口对超大 Cookie 头返回 400；
+  只带域名匹配且未过期的（约 27 条/1.7KB），不要直接把 `storage_state` 全拼进去。
 - **提交前脱敏**：确认没有 cookie / 密钥 / 绝对路径 / 机器名进入 diff。
   `browser_profile/`、`cookies.txt` 已在 `.gitignore` 里，不要用 `-f` 强加。
 - 中文注释，函数级说明写清「为什么这么做」，而不只是「做了什么」。

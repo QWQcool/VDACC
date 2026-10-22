@@ -19,7 +19,7 @@ const flag = (name: string, def: string) => {
 const PORT = Number(flag('--port', '8780'));
 const TOKEN = flag('--token', randomBytes(8).toString('hex'));
 const OUT = resolve(flag('-o', join(process.cwd(), '下载')));
-const WEB = join(import.meta.dir, '..', '..', '..', 'vdl', 'web');
+const WEB = join(import.meta.dir, '..', '..', 'vdl', 'web');
 mkdirSync(OUT, { recursive: true });
 
 interface Job {
@@ -170,7 +170,7 @@ const server = Bun.serve({
 
     if (path === '/api/health') {
       return json({
-        ok: true, version: '2.2.0-ts-spike', schema: 2, outDir: OUT,
+        ok: true, version: '3.0.0-alpha.1', schema: 2, outDir: OUT,
         jobs: order.length, engine: 'ts',
       });
     }

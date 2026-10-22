@@ -1,4 +1,4 @@
-# TS 可行性验证报告（spike/ts-core）
+# TS 可行性验证报告（ts/，已并入主线）
 
 > 结论先行：**解析层可以等价替换，但不建议现在整体重写。**
 > 单文件 exe 体积 91.9MB、冷启动 + probe 3.9s、B站 probe 慢 3.3 倍——这三项是硬伤。
@@ -30,7 +30,7 @@ Python: 6,281,768 bytes
 TS    : 6,281,768 bytes   ← 字节完全一致
 ```
 
-复跑命令：`python spike/ts-core/scripts/parity.py`
+复跑命令：`python ts/scripts/parity.py`
 
 ## Q2 yt-dlp 怎么用
 
@@ -214,8 +214,8 @@ bun.exe                      # %TEMP%\vdacc-ts\bun\bun-windows-x64\bun.exe
 yt-dlp.exe                   # %TEMP%\vdacc-ts\yt-dlp.exe
 
 # 对等性
-python spike/ts-core/scripts/parity.py
+python ts/scripts/parity.py
 
 # 单文件
-bun build --compile --outfile vdl-ts.exe spike/ts-core/src/cli.ts
+bun build --compile --outfile vdl-ts.exe ts/src/cli.ts
 ```

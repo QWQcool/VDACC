@@ -1,9 +1,0 @@
-{
-  "name": "vdl-ts-spike",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "probe": "bun src/cli.ts probe",
-    "parity": "bun scripts/parity.mjs"
-  }
-}
