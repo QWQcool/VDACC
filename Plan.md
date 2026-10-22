@@ -102,7 +102,8 @@ parity 稳定后再决定 Python 是否退化为 yt-dlp helper。
 | 已补（alpha.4） | TS 测试 16 个 + CI `test-ts`；平台识别抽成 `core/platform.ts` |
 | 已补（beta.1） | yt-dlp 可选组件（安装 + `allowGeneric` + 通用引擎）、设置面板 UI |
 | 已补（beta.2） | Vue 3 切片（`/vue/`，解析/多选/分P/下载/SSE/取消重试/主题）+ 中英 i18n |
-| 待补 | 设置/预览/批量迁 Vue、旧版切默认入口、番剧 4K 选流对齐 |
+| 已补（beta.3） | Vue 设置面板（目录/主题/并发/组件）+ 完成任务本地预览 |
+| 待补 | 批量三态全选、下载前流预览、旧版切默认入口、番剧 4K 选流对齐 |
 | 已知边界 | SSE 百分比按单条流；番剧 4K 选流与 yt-dlp 有差异 |
 
 契约不变：仍是 `schema=2`，`ts/src/core/types.ts` 与 `vdl/core/models.py` 字段一致。

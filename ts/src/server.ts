@@ -313,6 +313,14 @@ const server = Bun.serve({
       }
     }
 
+    if (path === '/api/preview' && req.method === 'GET') {
+      const target = resolve(url.searchParams.get('path') || '');
+      if (!target.startsWith(OUT) || !existsSync(target) || !statSync(target).isFile()) {
+        return json({ ok: false, error: { code: 'bad_input', message: '路径不在输出目录内' } }, 403);
+      }
+      return new Response(Bun.file(target));
+    }
+
     if (path === '/api/settings') {
       if (req.method === 'GET') return json({ ok: true, settings: loadConfig() });
       if (req.method === 'PATCH' || req.method === 'POST') {

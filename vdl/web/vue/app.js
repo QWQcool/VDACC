@@ -6,6 +6,11 @@ const I18N = {
     hint: 'B站 分P / 番剧会自动列出集数；下载默认 1080P。',
     download: '下载选中', cover: '封面',
     jobs: '任务', cancel: '取消', retry: '重试',
+    settings: '设置', outDir: '输出目录', defaultHint: '留空使用默认',
+    light: '浅色', dark: '深色', concurrency: '并发', generic: '启用通用解析',
+    install: '下载组件', downloading: '下载中…', save: '保存', preview: '预览',
+    installed: '组件已安装', notInstalled: '组件未安装', saved: '设置已保存',
+    notSupported: '当前后端不支持设置',
     lang: '切换语言', theme: '切换主题', legacy: '旧版界面',
     queued: '已提交', needToken: '缺少 token：请用启动时打印的 ?token=... 打开',
     empty: '没有可下载档位', failed: '失败',
@@ -17,6 +22,11 @@ const I18N = {
     hint: 'Multi-part videos and seasons are listed automatically. Default quality is 1080P.',
     download: 'Download', cover: 'Cover',
     jobs: 'Jobs', cancel: 'Cancel', retry: 'Retry',
+    settings: 'Settings', outDir: 'Output folder', defaultHint: 'Leave empty for default',
+    light: 'Light', dark: 'Dark', concurrency: 'Concurrency', generic: 'Enable generic parser',
+    install: 'Download component', downloading: 'Downloading…', save: 'Save', preview: 'Preview',
+    installed: 'Component installed', notInstalled: 'Component not installed', saved: 'Settings saved',
+    notSupported: 'This backend does not support settings',
     lang: 'Language', theme: 'Theme', legacy: 'Legacy UI',
     queued: 'Queued', needToken: 'Missing token: open the URL printed with ?token=...',
     empty: 'No downloadable format', failed: 'Failed',
@@ -44,6 +54,14 @@ createApp({
     const message = ref('');
     const version = ref('');
     const withCover = ref(true);
+    const settingsOpen = ref(false);
+    const sOutDir = ref('');
+    const sTheme = ref('light');
+    const sConcurrency = ref(1);
+    const sGeneric = ref(false);
+    const compStatus = ref('');
+    const compBusy = ref(false);
+    const previewUrl = ref('');
     const legacyUrl = computed(() => `/?token=${encodeURIComponent(token)}`);
 
     const size = (bytes) => {
@@ -144,6 +162,58 @@ createApp({
       if (data.ok) upsert(data.job);
     }
 
+    async function refreshComponents() {
+      const data = await api('/api/components');
+      if (!data.ok) { compStatus.value = t('notSupported'); return; }
+      const y = data.components.ytdlp;
+      compStatus.value = y.installed
+        ? `${t('installed')}（${(y.bytes / 1048576).toFixed(1)} MB）`
+        : t('notInstalled');
+    }
+
+    async function openSettings() {
+      const data = await api('/api/settings');
+      if (!data.ok) { message.value = t('notSupported'); return; }
+      const s = data.settings || {};
+      sOutDir.value = s.outDir || '';
+      sTheme.value = s.theme || 'light';
+      sConcurrency.value = s.concurrency || 1;
+      sGeneric.value = !!s.allowGeneric;
+      await refreshComponents();
+      settingsOpen.value = true;
+    }
+
+    async function saveSettings() {
+      const data = await api('/api/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: {
+          outDir: sOutDir.value.trim(), theme: sTheme.value,
+          concurrency: sConcurrency.value, allowGeneric: sGeneric.value,
+        },
+      });
+      if (!data.ok) { message.value = (data.error && data.error.message) || 'failed'; return; }
+      document.documentElement.dataset.theme = sTheme.value;
+      localStorage.setItem('vdl-theme', sTheme.value);
+      settingsOpen.value = false;
+      message.value = t('saved');
+    }
+
+    async function installComponent() {
+      compBusy.value = true;
+      const data = await api('/api/components/ytdlp/install', { method: 'POST' });
+      compBusy.value = false;
+      if (data.ok) sGeneric.value = true;
+      message.value = data.ok ? t('installed') : ((data.error && data.error.message) || 'failed');
+      await refreshComponents();
+    }
+
+    function previewJob(job) {
+      if (!job.path) return;
+      previewUrl.value = `/api/preview?token=${encodeURIComponent(token)}&path=${encodeURIComponent(job.path)}`;
+    }
+    function closePreview() { previewUrl.value = ''; }
+
     let events = null;
     onMounted(async () => {
       document.documentElement.dataset.theme =
@@ -177,7 +247,9 @@ createApp({
     return {
       t, lang, url, partUrl, result, selected, jobs, busy, message, version,
       withCover, legacyUrl, size, statusLabel,
+      settingsOpen, sOutDir, sTheme, sConcurrency, sGeneric, compStatus, compBusy, previewUrl,
       toggleLang, toggleTheme, toggleFormat, probe, probePart, download, cancel, retry,
+      openSettings, saveSettings, installComponent, previewJob, closePreview,
     };
   },
 }).mount('#app');

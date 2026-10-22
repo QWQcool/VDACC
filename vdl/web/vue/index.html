@@ -13,6 +13,7 @@
       <b>VDACC</b>
       <span class="v-ver" v-if="version">v{{ version }}</span>
       <span class="spacer"></span>
+      <button class="ghost" @click="openSettings" :title="t('settings')">⚙</button>
       <button class="ghost" @click="toggleLang" :title="t('lang')">{{ lang === 'zh' ? 'EN' : '中' }}</button>
       <button class="ghost" @click="toggleTheme" :title="t('theme')">◐</button>
       <a class="ghost" :href="legacyUrl" :title="t('legacy')">旧版</a>
@@ -74,11 +75,53 @@
                   class="ghost" @click="cancel(j.id)" :title="t('cancel')">✕</button>
           <button v-if="j.status === 'failed' || j.status === 'cancelled'"
                   class="ghost" @click="retry(j.id)" :title="t('retry')">↻</button>
+          <button v-if="j.status === 'done'" class="ghost"
+                  @click="previewJob(j)" :title="t('preview')">▶</button>
         </div>
       </section>
 
       <p v-if="message" class="hint v-msg">{{ message }}</p>
     </main>
+
+    <div v-if="settingsOpen" class="v-modal" @click.self="settingsOpen = false">
+      <div class="v-dialog">
+        <div class="v-dialog-head">
+          <b>{{ t('settings') }}</b>
+          <button class="ghost" @click="settingsOpen = false">✕</button>
+        </div>
+        <label>{{ t('outDir') }}<input v-model="sOutDir" :placeholder="t('defaultHint')"></label>
+        <label>{{ t('theme') }}
+          <select v-model="sTheme">
+            <option value="light">{{ t('light') }}</option>
+            <option value="dark">{{ t('dark') }}</option>
+          </select>
+        </label>
+        <label>{{ t('concurrency') }}
+          <select v-model.number="sConcurrency">
+            <option v-for="n in [1, 2, 3, 4]" :key="n" :value="n">{{ n }}</option>
+          </select>
+        </label>
+        <label class="v-check"><input type="checkbox" v-model="sGeneric"> {{ t('generic') }}</label>
+        <p class="hint">{{ compStatus }}</p>
+        <div class="v-actions">
+          <button class="ghost" :disabled="compBusy" @click="installComponent">
+            {{ compBusy ? t('downloading') : t('install') }}
+          </button>
+          <span class="spacer"></span>
+          <button class="primary" @click="saveSettings">{{ t('save') }}</button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="previewUrl" class="v-modal" @click.self="closePreview">
+      <div class="v-dialog">
+        <div class="v-dialog-head">
+          <b>{{ t('preview') }}</b>
+          <button class="ghost" @click="closePreview">✕</button>
+        </div>
+        <video :src="previewUrl" controls autoplay style="width:100%;border-radius:8px"></video>
+      </div>
+    </div>
   </div>
 
   <script src="/vendor/vue.global.prod.js"></script>
