@@ -3,7 +3,10 @@
 (() => {
   'use strict';
 
-  const token = new URLSearchParams(location.search).get('token') || '';
+  // PWA 从桌面图标启动时没有 ?token=，所以首次带 token 打开后要记住
+  const queryToken = new URLSearchParams(location.search).get('token') || '';
+  const token = queryToken || localStorage.getItem('vdl-token') || '';
+  if (token) localStorage.setItem('vdl-token', token);
   const $ = (s) => document.querySelector(s);
 
   const els = {
@@ -502,6 +505,11 @@
     if (list.ok) list.jobs.slice().reverse().forEach(upsertJob);
 
     connect();
+
+    // PWA：只在 https / localhost 生效（局域网 http 下浏览器会拒绝）
+    if ('serviceWorker' in navigator && window.isSecureContext) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    }
 
     // 深链：?url=... 自动解析（方便测试与分享）
     const pre = new URLSearchParams(location.search).get('url');

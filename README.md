@@ -61,6 +61,28 @@ Playwright 起一个独立 Edge（独立 profile，不碰你正在用的）
 
 ![界面](docs/design/screenshots/vdl-web-m3.png)
 
+## 安装成桌面应用（PWA）
+
+用 Chrome/Edge 打开 `vdl serve` 打印的地址，地址栏会出现「安装」，装完可从开始菜单启动。
+
+- 首次带 token 打开后，token 会存进浏览器本地，之后从图标启动不用再带参数；
+- Service Worker **只缓存界面外壳**，任务与进度始终走网络；
+- 用局域网 IP（http）打开时浏览器不允许注册 SW，所以手机上不能"安装"，只能直接访问。
+
+## 浏览器扩展
+
+`integrations/chrome-extension/`：右键「用 VDACC 下载此页面」把链接发给本机。
+它不抓页面内容、不申请 host 权限，只做转发——安装与设置见该目录 README。
+
+## 便携包
+
+```bash
+python tools/build_portable.py --zip   # dist/VDACC-portable.zip（约 370 KB）
+```
+
+解压后双击 `VDACC.bat`。**仍需系统有 Python 3.9+**——不打包 Python 本体，
+避免杀毒软件误报和体积翻倍。
+
 ## 手机 / 局域网 / infOS
 
 ```bash

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>VDACC 扩展设置</title>
+  <style>
+    body { font: 14px/1.6 "Segoe UI", "Microsoft YaHei", sans-serif; margin: 24px; width: 340px; }
+    label { display: block; margin: 12px 0 4px; color: #596174; font-size: 12px; }
+    input { width: 100%; height: 34px; padding: 0 10px; border: 1px solid #cdd5e3; border-radius: 8px; }
+    button { margin-top: 16px; height: 36px; padding: 0 18px; border: 0; border-radius: 8px;
+             background: #ec4899; color: #fff; font-weight: 600; cursor: pointer; }
+    p { color: #8b93a7; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h3>VDACC 扩展设置</h3>
+  <p>先运行 <code>vdl serve</code>，把它打印的 token 填进来。</p>
+  <label>端口</label>
+  <input id="port" type="number" value="8765">
+  <label>Token</label>
+  <input id="token" type="text" placeholder="启动时打印的 token">
+  <button id="save">保存</button>
+  <p id="status"></p>
+  <script src="options.js"></script>
+</body>
+</html>

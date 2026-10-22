@@ -37,6 +37,10 @@ from .engines.base import pick_format
 MAX_BODY = 1 << 20
 WEB_DIR = pathlib.Path(__file__).resolve().parent / 'web'
 
+# Windows 的注册表不一定认识这两个类型，缺了 PWA / SW 会加载失败
+mimetypes.add_type('application/manifest+json', '.webmanifest')
+mimetypes.add_type('text/javascript', '.js')
+
 
 # ---------------------------------------------------------------- 事件总线
 

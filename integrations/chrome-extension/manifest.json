@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "VDACC 发送到本机",
+  "version": "1.0.0",
+  "description": "右键把当前页面链接发送到本机 VDACC（需先运行 vdl serve）",
+  "permissions": ["contextMenus", "tabs", "storage"],
+  "background": { "service_worker": "background.js" },
+  "options_page": "options.html",
+  "action": { "default_title": "发送到 VDACC" }
+}
