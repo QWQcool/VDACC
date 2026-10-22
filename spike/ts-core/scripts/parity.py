@@ -56,8 +56,14 @@ def diff(py, ts):
         out.append(f'formats 数量: py={len(py["formats"])} ts={len(ts["formats"])}')
     for a, b in zip(py['formats'], ts['formats']):
         for key in FIELDS:
-            if a.get(key) != b.get(key):
-                out.append(f'format[{a.get("id")}].{key}: py={a.get(key)!r} ts={b.get(key)!r}')
+            left, right = a.get(key), b.get(key)
+            if left == right:
+                continue
+            # 体积是估算（码率 × 时长），允许 2% 误差；其它字段必须严格相等
+            if key == 'bytes' and isinstance(left, int) and isinstance(right, int) and left:
+                if abs(left - right) / left <= 0.02:
+                    continue
+            out.append(f'format[{a.get("id")}].{key}: py={left!r} ts={right!r}')
     return out
 
 

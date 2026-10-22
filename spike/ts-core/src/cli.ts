@@ -1,6 +1,7 @@
 import { getDouyin, probeDouyin } from './engines/douyin';
 import { probeNetease } from './engines/netease';
 import { probeBilibili } from './engines/bilibili';
+import { getBilibiliApi, probeBilibiliApi } from './engines/bilibili_api';
 import { fail } from './core/errors';
 import type { ProbeResult } from './core/types';
 
@@ -38,7 +39,10 @@ async function probe(url: string): Promise<ProbeResult> {
   switch (platform) {
     case 'douyin': return probeDouyin(url);
     case 'netease': return probeNetease(url);
-    case 'bilibili': return probeBilibili(url);
+    case 'bilibili':
+      return process.env.VDL_BILI_ENGINE === 'ytdlp'
+        ? probeBilibili(url)
+        : probeBilibiliApi(url);
     default: throw new Error(`未知平台: ${url}`);
   }
 }
@@ -74,8 +78,10 @@ async function main() {
     }
 
     const platform = platformOf(url);
-    if (platform === 'douyin') {
-      const out = await getDouyin(url, flag('--format'), flag('-o', '下载') || '下载');
+    if (platform === 'douyin' || platform === 'bilibili') {
+      const out = platform === 'douyin'
+        ? await getDouyin(url, flag('--format'), flag('-o', '下载') || '下载')
+        : await getBilibiliApi(url, flag('--format'), flag('-o', '下载') || '下载');
       if (has('--json')) {
         console.log(JSON.stringify({ schema: 2, ok: true, path: out.path, bytes: out.bytes, skipped: out.skipped }, null, 2));
       } else {

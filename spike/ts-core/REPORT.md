@@ -142,6 +142,33 @@ TS    : 6,281,768 bytes   ← 字节完全一致
 **推荐 B++**（若确定走 TS）：B站 用 `playurl` + `ffmpeg` 合并（桌面）或 `mp4box.js`（移动端），
 彻底去掉 Python 依赖；B+ 只作为过渡方案。
 
+## B++ 验证：B站 纯 TS（无 Python、无 yt-dlp）
+
+| 指标 | 结果 | 对比 |
+|---|---|---|
+| probe | **305–319ms** | Python 1,627ms / yt-dlp.exe 3,400ms / helper 646–862ms |
+| 档位 | 5 个，与 yt-dlp 逐字段一致 | 体积允许 2% 估算误差 |
+| 480P 下载 | **21,154,992 字节** | 与 Python **完全相同** |
+| 产物 | h264 854×362 + aac，206.464s | ffprobe 校验可播放 |
+| 下载耗时 | 1.6s | — |
+| 依赖 | 无 Python、无 yt-dlp、无 WBI（带 cookie 直接调 playurl） | — |
+
+实现 `src/engines/bilibili_api.ts`：
+
+1. `x/web-interface/view` → cid / title / pages / season；
+2. `x/player/playurl?fnval=4048&qn=120&fourk=1` → DASH 视频 18 条 + 音频 3 条；
+3. 按宽度桶挑「avc 优先、再比带宽」，体积用「码率 × 时长」估算（与 yt-dlp 的 filesize_approx 同源）；
+4. 视频/音频分别下载（支持 Range），ffmpeg `-c copy` 合并。
+
+未覆盖：番剧（`pgc/player/web/playurl`）、分P 选择、字幕、WBI 兜底。
+
+## 能否完全抛弃 Python / yt-dlp
+
+- **三个平台（抖音/网易云/B站）在 TS 里都已跑通**，Python 不再是引擎的必需；
+- 仍留在 Python 的只有外围：`serve`/SSE/任务队列、`auth`（Playwright）、网易云标签写入、Skill 入口、37 个测试；
+- **yt-dlp 只剩「未知站点兜底」一个用途**，可以做成可选依赖（不打包、按需下载）；
+- 打包：Bun 单文件 92MB（含运行时）；Python 便携包 370KB + 系统 Python。
+
 ## 复现
 
 ```powershell
