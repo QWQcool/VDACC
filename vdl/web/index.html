@@ -18,6 +18,7 @@
     </div>
     <div class="topbar-right">
       <span class="ver" id="ver"></span>
+      <button id="settings" class="ghost" title="设置" aria-label="设置">⚙</button>
       <button id="theme" class="ghost" title="切换明暗主题" aria-label="切换明暗主题">◐</button>
     </div>
   </header>
@@ -91,6 +92,25 @@
       <span id="done-text"></span>
     </div>
   </div>
+
+  <dialog id="settings-dialog" class="settings-dialog">
+    <div class="preview-head">
+      <b>设置</b>
+      <button id="settings-close" class="ghost" aria-label="关闭">✕</button>
+    </div>
+    <div class="settings-body">
+      <label>输出目录<input id="set-out" type="text" placeholder="留空使用默认"></label>
+      <label>主题<select id="set-theme"><option value="light">浅色</option><option value="dark">深色</option></select></label>
+      <label>并发<select id="set-concurrency"><option>1</option><option>2</option><option>3</option><option>4</option></select></label>
+      <label class="subs"><input id="set-generic" type="checkbox"> 启用通用解析（yt-dlp 组件）</label>
+      <p id="comp-status" class="hint"></p>
+      <div class="settings-actions">
+        <button id="comp-install" class="ghost" type="button">下载组件</button>
+        <span class="spacer"></span>
+        <button id="set-save" class="primary" type="button">保存</button>
+      </div>
+    </div>
+  </dialog>
 
   <dialog id="preview" class="preview">
     <div class="preview-head">

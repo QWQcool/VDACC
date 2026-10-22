@@ -2,8 +2,10 @@ import { getDouyin, probeDouyin } from './engines/douyin';
 import { getNetease, probeNetease } from './engines/netease';
 import { probeBilibili } from './engines/bilibili';
 import { getBilibiliApi, probeBilibiliApi } from './engines/bilibili_api';
+import { loadConfig } from './core/config';
 import { VdlError, fail } from './core/errors';
 import { platformOf } from './core/platform';
+import { genericInstalled, getGeneric, probeGeneric } from './engines/generic';
 import type { ProbeResult } from './core/types';
 
 const argv = Bun.argv.slice(2);
@@ -24,9 +26,12 @@ async function probe(url: string): Promise<ProbeResult> {
       return process.env.VDL_BILI_ENGINE === 'ytdlp'
         ? probeBilibili(url)
         : probeBilibiliApi(url);
-    default:
-      throw new VdlError('unsupported_url', `不支持的站点: ${url}`,
-        '只支持抖音 / B站 / 网易云；长尾站点用桌面版的可选组件');
+    default: {
+      if (loadConfig().allowGeneric && genericInstalled()) return probeGeneric(url);
+      throw new VdlError('engine_unavailable', `不支持的站点: ${url}`,
+        genericInstalled() ? '启用通用解析后重试：bun ts/src/cli.ts config? 或设置 allowGeneric'
+          : '下载通用组件：bun ts/src/server.ts 然后在设置里安装');
+    }
   }
 }
 
@@ -103,8 +108,19 @@ async function main() {
       process.exit(0);
     }
 
-    // 其余平台的下载链路本轮不验证：probe 已覆盖“解析是否等价”这个问题
-    console.error(`TS spike 暂未实现 ${platform} 的下载（probe 可用）`);
+    if (platform === 'unsupported' && loadConfig().allowGeneric && genericInstalled()) {
+      const out = await getGeneric(url, flag('--format'), flag('-o', '下载') || '下载');
+      if (has('--json')) {
+        console.log(JSON.stringify({
+          schema: 2, ok: true, path: out.path, bytes: out.bytes, skipped: out.skipped,
+        }, null, 2));
+      } else {
+        console.log(`完成 ${out.path} (${(out.bytes / 1048576).toFixed(2)} MB)`);
+      }
+      process.exit(0);
+    }
+
+    console.error(`不支持的站点：${url}（可在设置里启用通用解析）`);
     process.exit(3);
   } catch (err) {
     const body = fail(platformOf(url), 'ts-spike', err);

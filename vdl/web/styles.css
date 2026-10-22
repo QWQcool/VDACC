@@ -261,6 +261,36 @@ button:disabled { cursor: default; opacity: .55; }
 }
 .subs input { accent-color: var(--accent); }
 
+.settings-dialog {
+  width: min(460px, 94vw);
+  border: 0;
+  padding: 0;
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-lg);
+}
+.settings-dialog::backdrop { background: rgba(15, 23, 42, .45); }
+.settings-body { padding: 16px 18px 18px; display: grid; gap: 12px; }
+.settings-body label {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.settings-body label.subs { display: flex; align-items: center; gap: 6px; }
+.settings-body input[type="text"],
+.settings-body select {
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-soft);
+  color: var(--text);
+  font: inherit;
+}
+.settings-actions { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+
 .tags { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
 .tag {
   font-size: 11px;

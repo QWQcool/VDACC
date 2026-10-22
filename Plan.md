@@ -100,7 +100,8 @@ parity 稳定后再决定 Python 是否退化为 yt-dlp helper。
 | 已补（alpha.2） | 网易云下载（标签/封面/歌词）、`auth`（Node Playwright）、设置、取消/重试、任务持久化 |
 | 已补（alpha.3） | Skill 切 TS：单文件 `vdl.exe`（91.9MB）+ `SKILL.md`，zip 42.6MB |
 | 已补（alpha.4） | TS 测试 16 个 + CI `test-ts`；平台识别抽成 `core/platform.ts` |
-| 待补 | yt-dlp 可选组件、设置面板 UI |
+| 已补（beta.1） | yt-dlp 可选组件（安装 + `allowGeneric` + 通用引擎）、设置面板 UI |
+| 已知边界 | SSE 百分比按单条流；番剧 4K 选流与 yt-dlp 有差异 |
 
 契约不变：仍是 `schema=2`，`ts/src/core/types.ts` 与 `vdl/core/models.py` 字段一致。
 

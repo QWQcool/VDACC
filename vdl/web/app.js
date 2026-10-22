@@ -556,5 +556,74 @@
     }
   }
 
+  // ---- 设置面板（TS 后端才有 /api/settings；legacy 会 404） ----
+  const settingsBtn = document.getElementById('settings');
+  const settingsDlg = document.getElementById('settings-dialog');
+  if (settingsBtn && settingsDlg) {
+    const ref = (id) => document.getElementById(id);
+
+    const refreshComponents = async () => {
+      const box = ref('comp-status');
+      const r = await api('/api/components', { method: 'GET' });
+      if (!r.ok) { box.textContent = '当前后端不支持组件管理'; return; }
+      const y = r.components.ytdlp;
+      box.textContent = y.installed
+        ? `通用组件已安装（${(y.bytes / 1048576).toFixed(1)} MB）`
+        : '通用组件未安装';
+      ref('comp-install').textContent = y.installed ? '重新下载' : '下载组件';
+    };
+
+    settingsBtn.addEventListener('click', async () => {
+      const r = await api('/api/settings', { method: 'GET' });
+      if (!r.ok) { toast('当前后端不支持设置（legacy Python）'); return; }
+      const s = r.settings || {};
+      ref('set-out').value = s.outDir || '';
+      ref('set-theme').value = s.theme || 'light';
+      ref('set-concurrency').value = String(s.concurrency || 1);
+      ref('set-generic').checked = !!s.allowGeneric;
+      settingsDlg.showModal();
+      refreshComponents();
+    });
+
+    ref('settings-close').addEventListener('click', () => settingsDlg.close());
+
+    ref('set-save').addEventListener('click', async () => {
+      const theme = ref('set-theme').value;
+      const r = await api('/api/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          outDir: ref('set-out').value.trim(),
+          theme,
+          concurrency: Number(ref('set-concurrency').value),
+          allowGeneric: ref('set-generic').checked,
+        }),
+      });
+      if (r.ok) {
+        document.documentElement.dataset.theme = theme;
+        localStorage.setItem('vdl-theme', theme);
+        toast('设置已保存');
+        settingsDlg.close();
+      } else {
+        toast(r.error?.message || '保存失败');
+      }
+    });
+
+    ref('comp-install').addEventListener('click', async () => {
+      const btn = ref('comp-install');
+      btn.disabled = true;
+      btn.textContent = '下载中…';
+      const r = await api('/api/components/ytdlp/install', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      });
+      btn.disabled = false;
+      toast(r.ok ? `组件已安装（${(r.bytes / 1048576).toFixed(1)} MB）`
+        : (r.error?.message || '下载失败'));
+      refreshComponents();
+    });
+  }
+
   boot();
 })();

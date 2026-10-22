@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
-import { join, normalize, resolve } from 'node:path';
+import { dirname, join, normalize, resolve } from 'node:path';
 
 import { DownloadCancelled, setCancelCheck } from './core/cancel';
 import { loadConfig, saveConfig } from './core/config';
@@ -11,6 +11,7 @@ import { setProgressSink } from './core/progress';
 import { probeDouyin, getDouyin } from './engines/douyin';
 import { getNetease, probeNetease } from './engines/netease';
 import { getBilibiliApi, probeBilibiliApi } from './engines/bilibili_api';
+import { componentPath, genericInstalled, getGeneric, probeGeneric } from './engines/generic';
 import type { ProbeResult } from './core/types';
 
 const argv = process.argv.slice(2);
@@ -118,9 +119,11 @@ async function probeUrl(url: string): Promise<ProbeResult> {
     case 'douyin': return probeDouyin(url);
     case 'netease': return probeNetease(url);
     case 'bilibili': return probeBilibiliApi(url);
-    default:
-      throw new VdlError('unsupported_url', `不支持的站点: ${url}`,
-        '桌面版可在设置里启用通用解析组件');
+    default: {
+      if (loadConfig().allowGeneric && genericInstalled()) return probeGeneric(url);
+      throw new VdlError('engine_unavailable', `暂不支持这个站点: ${url}`,
+        genericInstalled() ? '在设置里启用「通用解析」后重试' : '在设置里下载 yt-dlp 组件');
+    }
   }
 }
 
@@ -129,8 +132,13 @@ async function downloadUrl(url: string, formatId: string) {
     case 'douyin': return getDouyin(url, formatId, OUT);
     case 'netease': return getNetease(url, formatId, OUT);
     case 'bilibili': return getBilibiliApi(url, formatId, OUT);
-    default:
-      throw new VdlError('unsupported_url', `不支持的站点: ${url}`);
+    default: {
+      if (loadConfig().allowGeneric && genericInstalled()) {
+        return getGeneric(url, formatId, OUT);
+      }
+      throw new VdlError('engine_unavailable', `暂不支持这个站点: ${url}`,
+        '在设置里启用通用解析并下载组件');
+    }
   }
 }
 
@@ -266,6 +274,41 @@ const server = Bun.serve({
         return json(await probeUrl(target));
       } catch (err) {
         return json(failBody('ts', err));
+      }
+    }
+
+    if (path === '/api/components') {
+      const installed = genericInstalled();
+      return json({
+        ok: true,
+        components: {
+          ytdlp: {
+            installed,
+            path: componentPath(),
+            bytes: installed ? statSync(componentPath()).size : 0,
+          },
+        },
+      });
+    }
+
+    if (path === '/api/components/ytdlp/install' && req.method === 'POST') {
+      const url = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe';
+      try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const target = componentPath();
+        mkdirSync(dirname(target), { recursive: true });
+        const tmp = target + '.part';
+        await Bun.write(tmp, await res.arrayBuffer());
+        const { renameSync } = await import('node:fs');
+        renameSync(tmp, target);
+        saveConfig({ allowGeneric: true });
+        return json({ ok: true, installed: true, bytes: statSync(target).size });
+      } catch (err) {
+        return json({
+          ok: false,
+          error: { code: 'download_failed', message: `组件下载失败: ${(err as Error).message}` },
+        }, 500);
       }
     }
 

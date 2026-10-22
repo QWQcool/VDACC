@@ -3,6 +3,17 @@
 > 只记「用户可感知的变化」与「验证结论」。设计与取舍见 `Plan.md`。
 > 每个版本的 GitHub Release 从这里摘取。
 
+## v3.0.0-beta.1 — 2026-10-22
+
+**可选通用组件 + 设置面板**
+
+- `GET /api/components` / `POST /api/components/ytdlp/install`：按需下载 `yt-dlp.exe`（17.9MB，3s）
+- `allowGeneric` 开关 + `engines/generic.ts`：未知站点 probe/get，直链实测 1,128,375 字节
+- 设置面板 UI：输出目录 / 主题 / 并发 / 通用解析开关 + 组件安装状态
+- 实测：组件安装、通用 probe、通用下载、设置弹窗（Playwright）均通过
+
+已知边界：SSE 进度按单条流统计；番剧 4K 选流与 yt-dlp 有差异。
+
 ## v3.0.0-alpha.4 — 2026-10-22
 
 **TS 测试与 CI**
