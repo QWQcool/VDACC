@@ -1,7 +1,8 @@
 # VDACC —— 多平台视频 / 音频下载器
 
 > **3.0 起后端主线为 TypeScript（Bun）**：抖音 / B站（含分P、番剧）/ 网易云的解析与本地服务
-> 已迁移，Python 版本（`vdl/`、`dy_dl.py`）冻结为 legacy 参考。需要 **Bun 1.2+**。
+> 已迁移，Python 版本已归档到 `legacy/python/`（`vdl/`、`skill/`、`tests/`、`tools/`），
+> 冻结为参考实现。需要 **Bun 1.2+**。
 >
 > ```bash
 > bun ts/src/server.ts --port 8765 --token <token>   # Web 界面（复用 vdl/web）
