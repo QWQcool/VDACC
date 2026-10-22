@@ -57,7 +57,7 @@
 | 路由顺序 | 专用引擎（抖音/网易云/B站）→ `ytdlp-generic` 兜底。抖音裸 ID 规则最宽，必须排最前 |
 | ffmpeg | 本机 n8.1.2（winget，走 PATH）。运行时查找顺序 `venv\Scripts` → `PATH`（`vdl/core/env.py`）；换机优先放便携版进 `venv\Scripts`。缺失会让 B站/YouTube 变无声视频 |
 | Playwright | 1.64.0，用 `channel=msedge` 复用系统 Edge，不下载 chromium |
-| venv | Python 3.13.4，必须带 tkinter |
+| venv | 本机实际 **Python 3.12.0**（计划里写的 3.13.4 未复现）；必须带 tkinter |
 
 ffmpeg 为什么是硬前提：B站/YouTube 全是 DASH 音视频分离，yt-dlp 下完会得到
 `.fXXX.mp4` + `.fXXX.m4a` 两个文件然后警告 ffmpeg 不存在，结果是**无声视频**。
