@@ -207,6 +207,8 @@ python -m vdl get   "https://www.bilibili.com/video/BV1j5nj68E48" --format bili-
   用 `...?p=2` 选分P（UI 里有下拉框）。
 - **字幕**：`vdl get <url> --subs` 落同名 `.srt`。前提是**该视频本身有 CC 且已登录**；
   没有字幕时静默跳过，不影响视频。
+- **封面**：`vdl get <url> --cover` 把封面存成同名图片（`.jpg` / `.png` / `.webp`，
+  按实际类型定）。Web 界面在下载按钮旁有「封面」勾选框，默认勾上。
 
 **其它站点**会自动交给 yt-dlp 兜底（引擎名 `ytdlp-generic`）：抖音/B站/网易云之外的
 http(s) 链接会被尝试一次，失败时返回 yt-dlp 的原始报错，而不是一句「不支持」。

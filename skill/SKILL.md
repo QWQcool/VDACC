@@ -39,6 +39,9 @@ python scripts/vdl_run.py get "<url>" --json -o "<输出目录>"
 
 # 3) 指定档位（id 来自上一步的 formats[].id）
 python scripts/vdl_run.py get "<url>" --format bili-1920 --json -o "<输出目录>"
+
+# 4) 附带字幕 / 封面（B站字幕需登录且视频有 CC；失败不影响视频）
+python scripts/vdl_run.py get "<url>" --subs --cover --json -o "<输出目录>"
 ```
 
 规则：

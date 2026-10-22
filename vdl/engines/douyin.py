@@ -142,7 +142,7 @@ class DouyinEngine(Engine):
     # ------------------------------------------------------------ 下载
 
     def download(self, probe, format_id, dest_dir, force=False, progress=None,
-                 should_cancel=None, with_subs=False):
+                 should_cancel=None, with_subs=False, with_cover=False):
         import pathlib
 
         fmt = next((f for f in probe.formats if f.id == format_id), None)
@@ -186,5 +186,10 @@ class DouyinEngine(Engine):
                                                 should_cancel=should_cancel)
         except dy_http.HttpEngineError as e:
             raise _wrap(e) from None
+
+        if with_cover:
+            from ..core.sidecar import save_cover
+            save_cover(probe.media.thumbnail, str(dest), probe.media.source_url)
+
         return DownloadResult(ok=True, path=str(dest), bytes=size,
                               format_id=fmt.id, media=probe.media)

@@ -22,6 +22,7 @@ from ..core.errors import ErrorCode, VdlError
 from ..core.models import DownloadResult, Format, Media, ProbeResult
 from ..core.naming import safe_name
 from ..core.paths import cookies_file
+from ..core.sidecar import save_cover
 from ..core.subtitle import to_srt
 
 UA = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
@@ -209,7 +210,7 @@ class YtdlpBase(Engine):
     # ------------------------------------------------------------ 下载
 
     def download(self, probe, format_id, dest_dir, force=False, progress=None,
-                 should_cancel=None, with_subs=False):
+                 should_cancel=None, with_subs=False, with_cover=False):
         fmt = next((f for f in probe.formats if f.id == format_id), None)
         if fmt is None or not (fmt.extra.get('video_id') or fmt.extra.get('audio_id')):
             raise VdlError(ErrorCode.BAD_INPUT, f'没有这个档位: {format_id}',
@@ -272,6 +273,8 @@ class YtdlpBase(Engine):
 
         if with_subs:
             self._save_subs(fmt, path)
+        if with_cover:
+            save_cover(probe.media.thumbnail, path, probe.media.source_url)
 
         return DownloadResult(ok=True, path=str(path), bytes=path.stat().st_size,
                               format_id=fmt.id, media=probe.media)

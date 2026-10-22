@@ -225,6 +225,16 @@
       actions.append(lab);
     }
 
+    if (m.thumbnail) {
+      const lab = el('label', 'subs');
+      const box = el('input');
+      box.type = 'checkbox';
+      box.id = 'cover-box';
+      box.checked = true;
+      lab.append(box, el('span', '', '封面'));
+      actions.append(lab);
+    }
+
     const spacer = el('span', 'spacer');
     const go = el('button', 'primary', '下载选中');
     go.id = 'download';
@@ -287,6 +297,7 @@
           url: (current.media && current.media.source_url) || els.url.value.trim(),
           formatIds: [...selected],
           subs: !!(document.getElementById('subs-box') || {}).checked,
+          cover: !!(document.getElementById('cover-box') || {}).checked,
         }),
       });
       if (!r.ok) {
