@@ -261,6 +261,20 @@ createApp({
       await refreshComponents();
     }
 
+    async function previewSelected() {
+      if (!result.value || !selected.value.length) return;
+      const data = await api('/api/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: {
+          url: result.value.media.source_url || url.value,
+          formatId: selected.value[0],
+        },
+      });
+      if (data.ok) previewUrl.value = data.url;
+      else message.value = (data.error && data.error.message) || 'failed';
+    }
+
     function previewJob(job) {
       if (!job.path) return;
       previewUrl.value = `/api/preview?token=${encodeURIComponent(token)}&path=${encodeURIComponent(job.path)}`;
@@ -303,7 +317,7 @@ createApp({
       settingsOpen, sOutDir, sTheme, sConcurrency, sGeneric, compStatus, compBusy, previewUrl,
       checkedParts, isBatch, allChecked, someChecked, estimated, toggleAll, togglePart,
       toggleLang, toggleTheme, toggleFormat, probe, probePart, download, cancel, retry,
-      openSettings, saveSettings, installComponent, previewJob, closePreview,
+      openSettings, saveSettings, installComponent, previewSelected, previewJob, closePreview,
     };
   },
 }).mount('#app');

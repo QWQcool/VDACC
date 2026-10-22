@@ -17,6 +17,11 @@ const BUCKETS: Array<[number, string]> = [
 
 const urlCache = new Map<string, { video: string; audio: string }>();
 
+/** 供下载前预览：只取视频轨（浏览器预览不需要音轨）。 */
+export function previewBilibili(formatId: string): string {
+  return urlCache.get(formatId)?.video || '';
+}
+
 /** 关键：不能把所有 cookie 拼进去（实测 64 条 / 8.9KB 会被 WAF 判 400），
  *  只带 bilibili 域名下、未过期的，约 27 条 / 1.7KB。 */
 function cookieHeader(): string {

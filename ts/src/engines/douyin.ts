@@ -24,6 +24,11 @@ const RES_RE = /(\d{3,4})/;
 
 const urlCache = new Map<string, string[]>();
 
+/** 供下载前预览：取该档位的第一条 CDN 地址。 */
+export function previewDouyin(formatId: string): string {
+  return (urlCache.get(formatId) || [])[0] || '';
+}
+
 interface Candidate {
   rate: number; label: string; url: string;
   width: number; height: number; bytes: number;

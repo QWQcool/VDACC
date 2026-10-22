@@ -6,11 +6,12 @@ import { dirname, join, normalize, resolve } from 'node:path';
 import { DownloadCancelled, setCancelCheck } from './core/cancel';
 import { loadConfig, saveConfig } from './core/config';
 import { VdlError } from './core/errors';
+import { UA } from './core/http';
 import { platformOf } from './core/platform';
 import { setProgressSink } from './core/progress';
-import { probeDouyin, getDouyin } from './engines/douyin';
-import { getNetease, probeNetease } from './engines/netease';
-import { getBilibiliApi, probeBilibiliApi } from './engines/bilibili_api';
+import { getDouyin, previewDouyin, probeDouyin } from './engines/douyin';
+import { formatUrls, getNetease, probeNetease } from './engines/netease';
+import { getBilibiliApi, previewBilibili, probeBilibiliApi } from './engines/bilibili_api';
 import { componentPath, genericInstalled, getGeneric, probeGeneric } from './engines/generic';
 import type { ProbeResult } from './core/types';
 
@@ -311,6 +312,49 @@ const server = Bun.serve({
           error: { code: 'download_failed', message: `组件下载失败: ${(err as Error).message}` },
         }, 500);
       }
+    }
+
+    if (path === '/api/preview' && req.method === 'POST') {
+      const body = await req.json().catch(() => ({})) as any;
+      const target = String(body.url || '').trim();
+      if (!target) return json({ ok: false, error: { code: 'bad_input', message: '缺少 url' } }, 400);
+      try { await probeUrl(target); } catch { /* 缓存可能已有 */ }
+      const formatId = String(body.formatId || '');
+      let src = '';
+      let ref = '';
+      switch (platformOf(target)) {
+        case 'douyin': src = previewDouyin(formatId); ref = 'https://www.douyin.com/'; break;
+        case 'bilibili': src = previewBilibili(formatId); ref = 'https://www.bilibili.com/'; break;
+        case 'netease': src = formatUrls.get(formatId) || ''; ref = 'https://music.163.com/'; break;
+        default: break;
+      }
+      if (!src) {
+        return json({ ok: false, error: { code: 'no_stream', message: '没有可预览的地址' } });
+      }
+      const q = new URLSearchParams({ token: TOKEN, src, ref });
+      return json({ ok: true, formatId, url: `/api/stream?${q}` });
+    }
+
+    if (path === '/api/stream') {
+      const src = url.searchParams.get('src') || '';
+      const ref = url.searchParams.get('ref') || '';
+      let host = '';
+      try { host = new URL(src).hostname.toLowerCase(); } catch { /* 非法 URL */ }
+      const allow = ['douyin.com', 'douyinvod.com', 'byteicdn.com',
+        'bilivideo.com', 'bilivideo.cn', '126.net', '127.net'];
+      if (!src.startsWith('https://') || !allow.some((h) => host === h || host.endsWith(`.${h}`))) {
+        return json({ ok: false, error: { code: 'forbidden', message: '不允许的流地址' } }, 403);
+      }
+      const headers: Record<string, string> = { 'User-Agent': UA, Referer: ref || src };
+      const range = req.headers.get('range');
+      if (range) headers.Range = range;
+      const remote = await fetch(src, { headers });
+      const out = new Headers();
+      for (const key of ['content-type', 'content-length', 'content-range', 'accept-ranges']) {
+        const value = remote.headers.get(key);
+        if (value) out.set(key, value);
+      }
+      return new Response(remote.body, { status: remote.status, headers: out });
     }
 
     if (path === '/api/preview' && req.method === 'GET') {

@@ -3,6 +3,17 @@
 > 只记「用户可感知的变化」与「验证结论」。设计与取舍见 `Plan.md`。
 > 每个版本的 GitHub Release 从这里摘取。
 
+## v3.0.0-beta.5 — 2026-10-22
+
+**下载前流预览（Vue）**
+
+- `POST /api/preview`：解析并返回代理地址；引擎直链缓存在进程内
+- `GET /api/stream`：带 UA/Referer 代理（CDN 有防盗链），透传 Range 与 206
+- 白名单限制：douyinvod / bilivideo / 126.net 等，避免 SSRF
+- Vue 下载前「预览」按钮；实测抖音 `src=/api/stream`，HEAD 200
+
+待补：切默认入口、番剧 4K 选流对齐
+
 ## v3.0.0-beta.4 — 2026-10-22
 
 **Vue 批量三态全选**
