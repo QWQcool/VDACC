@@ -3,6 +3,7 @@ import { getDouyin, probeDouyin } from './engines/douyin';
 import { getNetease, probeNetease } from './engines/netease';
 import { getBilibiliApi, probeBilibiliApi } from './engines/bilibili_api';
 import { fail, VdlError } from './core/errors';
+import { platformOf } from './core/platform';
 import type { ProbeResult } from './core/types';
 
 const argv = Bun.argv.slice(2);
@@ -12,14 +13,6 @@ const flag = (name: string, def: string | null = null) => {
   const i = argv.indexOf(name);
   return i >= 0 && argv[i + 1] && !argv[i + 1].startsWith('-') ? argv[i + 1] : def;
 };
-
-function platformOf(url: string): string {
-  const raw = (url || '').trim();
-  if (/^\d{15,20}$/.test(raw) || /douyin\.com/.test(raw)) return 'douyin';
-  if (/^\d{1,12}$/.test(raw) || /music\.163\.com|163cn\.tv/.test(raw)) return 'netease';
-  if (/^BV[0-9A-Za-z]{10}$/.test(raw) || /bilibili\.com|b23\.tv/.test(raw)) return 'bilibili';
-  return 'unsupported';
-}
 
 async function probe(url: string): Promise<ProbeResult> {
   const platform = platformOf(url);

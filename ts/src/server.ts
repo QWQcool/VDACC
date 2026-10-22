@@ -6,6 +6,7 @@ import { join, normalize, resolve } from 'node:path';
 import { DownloadCancelled, setCancelCheck } from './core/cancel';
 import { loadConfig, saveConfig } from './core/config';
 import { VdlError } from './core/errors';
+import { platformOf } from './core/platform';
 import { setProgressSink } from './core/progress';
 import { probeDouyin, getDouyin } from './engines/douyin';
 import { getNetease, probeNetease } from './engines/netease';
@@ -23,7 +24,8 @@ const TOKEN = flag('--token', randomBytes(8).toString('hex'));
 const CONFIG = loadConfig();
 const OUT = resolve(flag('-o', CONFIG.outDir || join(process.cwd(), '下载')));
 const WEB = join(import.meta.dir, '..', '..', 'vdl', 'web');
-const STORE = join(process.env.LOCALAPPDATA || '', 'vdl', 'ts-jobs.json');
+const STORE = process.env.VDL_STORE ||
+  join(process.env.LOCALAPPDATA || '', 'vdl', 'ts-jobs.json');
 mkdirSync(OUT, { recursive: true });
 
 interface Job {
@@ -112,20 +114,24 @@ function failBody(platform: string, err: unknown) {
 }
 
 async function probeUrl(url: string): Promise<ProbeResult> {
-  const raw = url.trim();
-  if (/^\d{15,20}$/.test(raw) || /douyin\.com/.test(raw)) return probeDouyin(raw);
-  if (/^\d{1,12}$/.test(raw) || /music\.163\.com|163cn\.tv/.test(raw)) return probeNetease(raw);
-  return probeBilibiliApi(raw);
+  switch (platformOf(url)) {
+    case 'douyin': return probeDouyin(url);
+    case 'netease': return probeNetease(url);
+    case 'bilibili': return probeBilibiliApi(url);
+    default:
+      throw new VdlError('unsupported_url', `不支持的站点: ${url}`,
+        '桌面版可在设置里启用通用解析组件');
+  }
 }
 
 async function downloadUrl(url: string, formatId: string) {
-  if (/douyin\.com/.test(url) || /^\d{15,20}$/.test(url.trim())) {
-    return getDouyin(url, formatId, OUT);
+  switch (platformOf(url)) {
+    case 'douyin': return getDouyin(url, formatId, OUT);
+    case 'netease': return getNetease(url, formatId, OUT);
+    case 'bilibili': return getBilibiliApi(url, formatId, OUT);
+    default:
+      throw new VdlError('unsupported_url', `不支持的站点: ${url}`);
   }
-  if (/music\.163\.com/.test(url) || /^\d{1,12}$/.test(url.trim())) {
-    return getNetease(url, formatId, OUT);
-  }
-  return getBilibiliApi(url, formatId, OUT);
 }
 
 function createJob(url: string, formatId: string): Job {
@@ -229,7 +235,7 @@ const server = Bun.serve({
 
     if (path === '/api/health') {
       return json({
-        ok: true, version: '3.0.0-alpha.3', schema: 2, outDir: OUT,
+        ok: true, version: '3.0.0-alpha.4', schema: 2, outDir: OUT,
         jobs: order.length, engine: 'ts',
         theme: (loadConfig().theme || 'light'),
       });

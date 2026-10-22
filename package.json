@@ -1,12 +1,13 @@
 {
   "name": "vdacc",
-  "version": "3.0.0-alpha.3",
+  "version": "3.0.0-alpha.4",
   "private": true,
   "type": "module",
   "scripts": {
     "serve": "bun ts/src/server.ts",
     "probe": "bun ts/src/cli.ts probe",
     "get": "bun ts/src/cli.ts get",
+    "test": "bun test ts/tests",
     "parity": "python ts/scripts/parity.py"
   }
 }

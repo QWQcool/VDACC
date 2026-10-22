@@ -3,6 +3,17 @@
 > 只记「用户可感知的变化」与「验证结论」。设计与取舍见 `Plan.md`。
 > 每个版本的 GitHub Release 从这里摘取。
 
+## v3.0.0-alpha.4 — 2026-10-22
+
+**TS 测试与 CI**
+
+- `bun test`：16 个用例（平台识别 / 命名 / 契约默认值 / 服务端 401·403·404·静态页 / 设置）
+- 平台识别抽成 `core/platform.ts`，CLI / Skill / 服务端共用，避免三处正则漂移
+- 服务端测试用子进程 + 随机端口 + `VDL_STORE` 隔离，不污染真实历史
+- CI 新增 `test-ts` job（Bun + Python 构建校验），与 Python legacy 并行
+
+待补：yt-dlp 可选组件、设置面板 UI
+
 ## v3.0.0-alpha.3 — 2026-10-22
 
 **TS 版 Skill（单文件）**

@@ -2,7 +2,8 @@ import { getDouyin, probeDouyin } from './engines/douyin';
 import { getNetease, probeNetease } from './engines/netease';
 import { probeBilibili } from './engines/bilibili';
 import { getBilibiliApi, probeBilibiliApi } from './engines/bilibili_api';
-import { fail } from './core/errors';
+import { VdlError, fail } from './core/errors';
+import { platformOf } from './core/platform';
 import type { ProbeResult } from './core/types';
 
 const argv = Bun.argv.slice(2);
@@ -14,26 +15,6 @@ const flag = (name: string, def: string | null = null) => {
 };
 const has = (name: string) => argv.includes(name);
 
-function hostOf(url: string): string {
-  try {
-    return new URL(url).hostname.toLowerCase();
-  } catch {
-    return '';
-  }
-}
-
-function platformOf(url: string): string {
-  const raw = (url || '').trim();
-  if (/^\d{15,20}$/.test(raw)) return 'douyin';
-  if (/^BV[0-9A-Za-z]{10}$/.test(raw)) return 'bilibili';
-  if (/^\d{1,12}$/.test(raw)) return 'netease';
-  const host = hostOf(raw);
-  if (host.endsWith('douyin.com')) return 'douyin';
-  if (host.endsWith('music.163.com') || host.endsWith('163cn.tv')) return 'netease';
-  if (host.endsWith('bilibili.com') || host === 'b23.tv') return 'bilibili';
-  return 'unknown';
-}
-
 async function probe(url: string): Promise<ProbeResult> {
   const platform = platformOf(url);
   switch (platform) {
@@ -43,7 +24,9 @@ async function probe(url: string): Promise<ProbeResult> {
       return process.env.VDL_BILI_ENGINE === 'ytdlp'
         ? probeBilibili(url)
         : probeBilibiliApi(url);
-    default: throw new Error(`未知平台: ${url}`);
+    default:
+      throw new VdlError('unsupported_url', `不支持的站点: ${url}`,
+        '只支持抖音 / B站 / 网易云；长尾站点用桌面版的可选组件');
   }
 }
 

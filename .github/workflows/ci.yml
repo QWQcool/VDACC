@@ -16,3 +16,20 @@ jobs:
         run: python -m unittest discover -s tests -t . -v
       - name: Skill 构建校验
         run: python tools/build_skill.py --zip
+
+  test-ts:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 安装 TS 依赖
+        run: cd ts && bun install --frozen-lockfile
+      - name: TS 单测 + 服务端安全用例
+        run: bun test ts/tests
+      - name: TS Skill 构建校验
+        run: python tools/build_skill_ts.py
