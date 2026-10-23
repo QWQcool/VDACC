@@ -55,9 +55,10 @@
 | B站清晰度归档 | 必须按**宽度**（3840/2560/1920/1280/854）；宽银幕（1920×816、4096×1740）按高度会整体下移一档 |
 | B站格式结构 | 全部是 video-only + audio-only，必须成对合并；带 cookie 才看得到 4K/1080P |
 | 路由顺序 | 专用引擎（抖音/网易云/QQ/酷我/酷狗/B站）→ L2 直链/m3u8（`sniff`）→ `ytdlp-generic` 兜底。抖音裸 ID 规则最宽，必须排最前；QQ/酷我/酷狗 只认域名（裸串不路由）；L2 只认媒体扩展名，不跑页面 JS |
-| ffmpeg | 本机 n8.1.2（winget，走 PATH）。TS 主线用 `VDL_FFMPEG` 或 PATH；legacy 的查找顺序 `venv\Scripts` → `PATH`（`legacy/python/vdl/core/env.py`）。缺失会让 B站/YouTube 变无声视频 |
+| ffmpeg | 本机 **9.0.2-full_build**（`winget install Gyan.FFmpeg`，shim 在 `%LOCALAPPDATA%\Microsoft\WinGet\Links`，在用户 PATH）。TS 主线用 `VDL_FFMPEG` 或 PATH；legacy 的查找顺序 `venv\Scripts` → `PATH`（`legacy/python/vdl/core/env.py`）。缺失会让 B站/YouTube 变无声视频 |
+| Bun | 本机 **1.4.4**（`winget install Oven-sh.Bun`，shim 同目录）。装在用户 PATH 的目录里，**已开着的终端不会刷新**，新装后 `where bun` 报找不到属正常，新开窗口或直接探 `%LOCALAPPDATA%\Microsoft\WinGet\Links\bun.exe` 即可 |
 | Playwright | 1.64.0，用 `channel=msedge` 复用系统 Edge，不下载 chromium |
-| venv | 本机实际 **Python 3.12.0**（计划里写的 3.13.4 未复现）；必须带 tkinter |
+| venv | `venv\Scripts\python.exe` = **3.13.4**（系统 `python` = 3.13.14），已装 playwright 1.64.0 + yt-dlp 2026.8.19，legacy 可直接跑 |
 
 ffmpeg 为什么是硬前提：B站/YouTube 全是 DASH 音视频分离，yt-dlp 下完会得到
 `.fXXX.mp4` + `.fXXX.m4a` 两个文件然后警告 ffmpeg 不存在，结果是**无声视频**。
@@ -88,6 +89,25 @@ bun ts/src/server.ts --port 8765 --token <token>
 cd ts && bun install          # auth 需要 playwright-core（复用系统 Edge）
 bun test ts/tests
 ```
+
+**环境准备（新机器 / 重装）**
+
+```bash
+winget install Oven-sh.Bun Gyan.FFmpeg    # 都装到用户目录；装完必须新开终端，旧窗口 PATH 不刷新
+cd ts && bun install                       # 只装 playwright-core（复用系统 Edge，不下载浏览器）
+venv\Scripts\python.exe -m pip install playwright yt-dlp   # 仅 legacy 需要
+```
+
+验收（缺一不可）：
+
+```bash
+bun --version                              # 1.4.x
+ffmpeg -version                            # 9.x；缺了 B站/音乐/m3u8 全废
+bun test ts/tests                          # 53 pass
+bun ts/src/cli.ts probe "<抖音或B站链接>" --json
+```
+
+`vdl auth`（扫码登录）依赖 `cd ts && bun install`，否则报 playwright-core 缺失。
 
 ## 四、工程约定
 

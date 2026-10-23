@@ -49,7 +49,7 @@
 
 | 项 | 现状 | 验收 |
 |---|---|---|
-| 运行时决策 | ✅ 已解决（2026-10-23）：本机 `bun` 命令修好（`@oven/bun-windows-x64` 1.4.3 + 指向它的 shim），实测 `bun --version` / `bun test` / `bun ts/src/server.ts` 均通过。64 处无 `.ts` 后缀的相对 import 由 Bun 直接解析，不需要为 Node ESM 改扩展名 | `bun run probe "<url>"` 或等效 Node 入口可用 |
+| 运行时决策 | ✅ 已解决（2026-10-23，winget 实装）：`winget install Oven-sh.Bun` → **Bun 1.4.4**，shim 在 `%LOCALAPPDATA%\Microsoft\WinGet\Links`（该目录已在用户 PATH，但**已开着的终端不会刷新**，需新开窗口——这正是上一轮"记录说装好、实际 `where bun` 找不到"的原因）。`VDACC.bat` 已加 fallback 直接探该路径。实测：`bun --version` / `bun test`（53 绿）/ `bun install`（playwright-core 1.64.1）/ server 起来后 `/` 200 且 `/api/*` 401 / 真实抖音 probe 成功。59 处无 `.ts` 后缀的相对 import 由 Bun 直接解析 | `bun run probe "<url>"` 可用 |
 | 启动器 | ✅ 已解决（2026-10-23）：`抖音下载器.bat` 已删，改为 `VDACC.bat`（起服务 + `--open` 打开浏览器）；实测双击后 `/` 200、无 token 的 `/api/health` 401 | 双击起 Web 界面并自动打开浏览器 |
 | 版本号 | ✅ 已解决（2026-10-23）：两个 `package.json` 与 `/api/health` 均为 3.1.0，`server.test.ts` 断言同步改为 3.1.0，CHANGELOG 补 v3.1.0，tag `v3.1.0` | 3.1.0 + tag + CHANGELOG 对齐 |
 
@@ -403,7 +403,7 @@ P3 之后的每一段都应能独立失败而不影响下载器。
 
 | # | 决策 | 影响 |
 |---|---|---|
-| 1 | **ffmpeg：优先便携版**，`ffmpeg.exe` + `ffprobe.exe` 放 `venv\Scripts\`；找不到再回落系统 PATH | 运行时查找顺序以 `legacy/python/vdl/core/env.py` 为准：`venv\Scripts` → `PATH` → 报 `ffmpeg_missing`。二进制不入库（venv 已 gitignore）。**本机现状**：n8.1.2 由 winget 安装、走 PATH 分支——功能等同，但不符合"不污染系统"的初衷；换机时按便携版放进 `venv\Scripts\` 即符合决策 |
+| 1 | **ffmpeg：优先便携版**，`ffmpeg.exe` + `ffprobe.exe` 放 `venv\Scripts\`；找不到再回落系统 PATH | 运行时查找顺序以 `legacy/python/vdl/core/env.py` 为准：`venv\Scripts` → `PATH` → 报 `ffmpeg_missing`；TS 侧认 `VDL_FFMPEG` 或 PATH。二进制不入库（venv 已 gitignore）。**本机现状（2026-10-23 实装）**：`winget install Gyan.FFmpeg` → **ffmpeg/ffprobe 9.0.2-full_build**，shim 在 `%LOCALAPPDATA%\Microsoft\WinGet\Links`（在用户 PATH）。功能等同，但不符合"不污染系统"的初衷；换机时按便携版放进 `venv\Scripts\` 即符合决策 |
 | 2 | ~~分析侧走云端 API（DeepSeek key）~~ **暂缓（2026-10-21）** | 目标 C 整体暂缓，本决策随之搁置。原遗留风险仍未验证：DeepSeek 公开 API 是否支持**图像输入**。重启时第一步先验模型能力，再决定云端 VLM（Qwen-VL / GLM-4V / Gemini）或本地方案 |
 | 3 | **B站 V1 就登录** | `vdl auth bilibili`：独立 profile 扫码 → `storage_state()` 导出 cookie → yt-dlp 用。不登录只到 720P |
 | 4 | GUI 壳 = **本地 Web UI**（`vdl serve`），tkinter 仅过渡 | 端口固定 `8765` + 一次性 token；SSE 推进度 |
