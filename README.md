@@ -31,8 +31,8 @@
 > TS 版 Skill：`python tools/build_skill_ts.py --zip` → `dist/video-acquire-ts.zip`（约 42.6MB，
 > 内含 91.9MB 的 `vdl.exe`，不需要 Python/Node）。
 >
-> 前端：`/` 是 **Vue 3** 界面（解析/多选/分P批量/下载/SSE/设置/主题/中英切换/下载前预览）；
-> 旧版原生界面已删除，Vue 是唯一入口。
+> 前端：`/` 是 **Vue 3** 界面，已按 **infOS 风格 V2** 重做（侧栏 + 双栏、浅槽画质、开关、Slide-over 设置）；
+> 解析/多选/分P批量/专辑/下载/SSE/主题/中英切换/下载前预览都在。旧版原生界面已删除，Vue 是唯一入口。
 
 ## Python legacy（仍可用，不再演进）
 
@@ -92,14 +92,16 @@ Playwright 起一个独立 Edge（独立 profile，不碰你正在用的）
 
 ## Web 界面
 
-`python -m vdl serve` 启动后，用打印出的带 token 地址打开：
+`bun ts/src/server.ts --port 8765 --token <token>`（或双击 `VDACC.bat`）后用打印出的带 token 地址打开：
 
-- 解析后显示封面 / 标题 / 作者 / 时长，画质 chips 带真实体积；
+- **V2 布局（infOS 风格）**：左侧栏 + 双栏内容（左：解析 / 结果 / 任务，右：运行状态 / 待处理 / 组件），窄屏自动收起侧栏；
+- 解析后显示封面 / 标题 / 作者 / 时长，画质用「浅槽 + 白色选中 pill」，带真实体积；
 - 支持**多选档位同时下载**（文件名带清晰度后缀，不会互相覆盖）；
-- 每个档位可「预览」（同源接口现取直链，不落盘）；
-- 任务进度走 SSE 实时更新，完成后可直接定位到文件。
+- 每个档位可「预览」（同源接口现取直链，不落盘）；B站 可勾选字幕 / 弹幕；
+- 任务进度走 SSE 实时更新，完成后可直接预览；
+- 设置以右侧 Slide-over 打开；主题 / 语言即时切换。
 
-![界面](docs/design/screenshots/vdl-web-m3.png)
+![界面](docs/design/screenshots/vdl-web-v2.png)
 
 ## 桌面快捷方式
 

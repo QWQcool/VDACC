@@ -1,10 +1,21 @@
 /* Vue 3 迁移切片：无构建，直接由服务端托管。与旧版共用 /api 契约。 */
 const I18N = {
   zh: {
-    placeholder: '粘贴抖音 / B站 / 网易云链接',
+    placeholder: '粘贴抖音 / B站 / 网易云 / 音乐链接',
     probe: '解析', probing: '解析中…',
-    hint: 'B站 分P / 番剧会自动列出集数；下载默认 1080P。',
-    download: '下载选中', cover: '封面', subs: '字幕', danmaku: '弹幕', sidecar: '字幕/弹幕',
+    hint: 'B站 分P / 番剧会自动列出集数；专辑链接直接列出曲目（前 20 首）。',
+    sources: '粘贴链接', platformCount: '支持 6 个平台 + 直链',
+    author: '作者', parts: '分P', quality: '画质',
+    runtime: '运行状态', limit: '限速', version: '版本', engine: '引擎',
+    notice: '待处理', none: '暂无需要注意的', component: '通用组件',
+    connected: '已连接', offline: '未连接',
+    outDirHelp: '留空使用默认 下载\\；路径只保存在本机。',
+    genericHelp: '只在你点「下载组件」时联网；官网直链 + SHA256 校验。',
+    unlimited: '不限速',
+    emptyTitle: '粘贴一个链接开始',
+    emptyBody: '支持抖音、B站（分P/番剧）、网易云、QQ 音乐、酷我/酷狗、m3u8 与直链；专辑会先列出曲目。',
+    download: '下载选中', cover: '封面', subs: '字幕', danmaku: '弹幕',
+    sidecar: '字幕/弹幕', sidecars: '附属产物',
     album: '专辑', tracks: '曲目', albumDropped: '超过 20 首，本次只列前 20，略过',
     sidecarHint: '同目录会额外写入 .srt / .danmaku.xml（仅 B站，字幕优先中文 / AI 中文字幕）',
     jobs: '任务', cancel: '取消', retry: '重试',
@@ -20,10 +31,21 @@ const I18N = {
     queued_s: '排队', running: '下载中', done: '完成', cancelled: '已取消',
   },
   en: {
-    placeholder: 'Paste a Douyin / Bilibili / NetEase link',
+    placeholder: 'Paste a Douyin / Bilibili / NetEase / music link',
     probe: 'Probe', probing: 'Probing…',
-    hint: 'Multi-part videos and seasons are listed automatically. Default quality is 1080P.',
-    download: 'Download', cover: 'Cover', subs: 'Subtitles', danmaku: 'Danmaku', sidecar: 'Subs/Danmaku',
+    hint: 'Multi-part videos and seasons are listed automatically. Album links list up to 20 tracks.',
+    sources: 'Source', platformCount: '6 platforms + direct URLs',
+    author: 'Author', parts: 'Parts', quality: 'Quality',
+    runtime: 'Runtime', limit: 'Limit', version: 'Version', engine: 'Engine',
+    notice: 'Notice', none: 'Nothing to report', component: 'Add-on',
+    connected: 'Connected', offline: 'Offline',
+    outDirHelp: 'Leave empty for the default 下载\\ folder; stored on this machine only.',
+    genericHelp: 'Only downloads when you click Install; official URL + SHA256 check.',
+    unlimited: 'Unlimited',
+    emptyTitle: 'Paste a link to start',
+    emptyBody: 'Douyin, Bilibili (multi-part/seasons), NetEase, QQ Music, Kuwo/Kugou, m3u8 and direct URLs. Albums list tracks first.',
+    download: 'Download', cover: 'Cover', subs: 'Subtitles', danmaku: 'Danmaku',
+    sidecar: 'Subs/Danmaku', sidecars: 'Sidecars',
     album: 'Album', tracks: 'tracks', albumDropped: 'More than 20 tracks; only the first 20 are listed, skipped',
     sidecarHint: 'Writes .srt / .danmaku.xml next to the video (Bilibili only, Chinese subtitles preferred)',
     jobs: 'Jobs', cancel: 'Cancel', retry: 'Retry',
@@ -59,6 +81,10 @@ createApp({
     const busy = ref(false);
     const message = ref('');
     const version = ref('');
+    const connected = ref(false);
+    // 右栏「运行状态」用：/api/health 里已经带了 outDir 与 limitRate
+    const outDir = ref('');
+    const limitRate = ref(0);
     const withCover = ref(true);
     // 附属产物开关：只对 B站 生效，持久化免得每次重开都要勾
     const withSubs = ref(localStorage.getItem('vdl-subs') === '1');
@@ -99,6 +125,27 @@ createApp({
       if (!ms) return '';
       const total = Math.round(ms / 1000);
       return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+    };
+
+    const rateText = computed(() => {
+      if (!limitRate.value) return t('unlimited');
+      const mb = limitRate.value / 1048576;
+      return mb >= 1 ? `${mb.toFixed(1)} MB/s` : `${Math.round(limitRate.value / 1024)} KB/s`;
+    });
+
+    // 平台标签的语义色：B站粉、抖音蓝、音乐紫、嗅探/其它中性
+    const platformClass = (p) => ({
+      bilibili: 'accent', douyin: 'sky',
+      netease: 'purple', qq: 'purple', kuwo: 'purple', kugou: 'purple',
+      sniff: 'sky',
+    }[p] || 'neutral');
+
+    // 任务标题：优先用落盘文件名（去掉目录与扩展名），没有就退回清晰度/ID
+    const jobName = (j) => {
+      const p = j && j.path ? String(j.path) : '';
+      if (!p) return (j && (j.formatId || j.id)) || '';
+      const base = p.split(/[\\/]/).pop() || p;
+      return base.replace(/\.[a-z0-9]{2,5}$/i, '');
     };
 
     function toggleAll() {
@@ -371,12 +418,17 @@ createApp({
       const health = await api('/api/health');
       if (health.ok) {
         version.value = health.version;
+        connected.value = true;
+        outDir.value = health.outDir || '';
+        limitRate.value = health.limitRate || 0;
         document.documentElement.dataset.theme =
           localStorage.getItem('vdl-theme') || health.theme || 'light';
       } else {
         message.value = t('needToken');
         return;
       }
+      // 右栏要显示组件状态，挂载时就查一次（不必等用户打开设置）
+      refreshComponents();
       const list = await api('/api/jobs');
       if (list.ok) jobs.value = (list.jobs || []).slice().reverse();
       events = new EventSource(`/api/events?token=${encodeURIComponent(token)}`);
@@ -393,6 +445,7 @@ createApp({
     return {
       t, lang, url, partUrl, result, selected, jobs, busy, message, version,
       withCover, withSubs, withDanmaku, size, statusLabel, dur,
+      connected, outDir, limitRate, rateText, platformClass, jobName,
       settingsOpen, sOutDir, sTheme, sConcurrency, sGeneric, compStatus, compBusy, previewUrl,
       checkedParts, isBatch, allChecked, someChecked, estimated, toggleAll, togglePart,
       album, albumTracks, checkedTracks, allTracks, toggleTrack, toggleAllTracks,
