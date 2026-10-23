@@ -1,6 +1,6 @@
 # Plan.md —— 计划、架构与决策（唯一计划来源）
 
-> 状态：**3.2.0 已发布**（tag `v3.2.0`，2026-10-23）。后端主线已是 TypeScript（Bun），
+> 状态：**3.3.0 已发布**（tag `v3.3.0`，2026-10-23）。后端主线已是 TypeScript（Bun），
 > Python 冻结并归档在 `legacy/python/`。硬性约束见 `AGENTS.md`，使用说明见 `README.md`，
 > 逐版本历史见 `docs/CHANGELOG.md`，后续计划见 §2.2。
 
@@ -138,6 +138,7 @@ parity 稳定后再决定 Python 是否退化为 yt-dlp helper。
 | 3.0.1 | ✅ 已完成：Python 物理归档 `legacy/python/`、删 `/legacy/` 路由与旧 UI（Vue 唯一入口） |
 | 3.1.0 | 限速 + QQ 音乐探测骨架（未接路由）+ 双击启动 + 版本/文档对齐（tag `v3.1.0`） |
 | 3.2.0 | B站字幕/弹幕 + 进度真实分母、QQ 全链路（下载/歌词/预览）、专辑批量、酷我/酷狗、L2 嗅探、auth 在线校验（tag `v3.2.0`） |
+| 3.3.0 | Web UI V2（infOS 风格）、限速进设置、并发诚实化、浮层 Esc/滚动锁/焦点、任务分组（tag `v3.3.0`） |
 | 已知边界 | 番剧 4K 选流与 yt-dlp 有差异；B站 合并后的 mp4 比两条流之和大一点（容器索引，实测 61KB/21MB） |
 
 契约不变：仍是 `schema=2`，`ts/src/core/types.ts` 与 `legacy/python/vdl/core/models.py` 字段一致。
@@ -388,7 +389,7 @@ def route(url) -> Engine: ...  # 域名 → 引擎
 | **P0** | 装 ffmpeg | **完成**（本机 n8.1.2） | `yt-dlp -F` 不再警告 ffmpeg not found | — |
 | **P0.5** | 抖音纯 HTTP 签名引擎（`dy_http.py`） | **完成 2026-10-21** | 无 cookie 拿 1080p，浏览器方案降为兜底 | P0 |
 | **P1** | 引擎路由重构 + B站跑通 | **完成**（M1 + M5） | B站视频下有声音有画面，1080P | P0 |
-| **P2** | 通用兜底 | **部分完成**：`ytdlp-generic` 已做（R3）；L2 通用嗅探（m3u8/直链）未做，见 §2.4 | 任找一个 yt-dlp 不支持的站点下成功 | P1 |
+| **P2** | 通用兜底 | **完成**：`ytdlp-generic`（R3）+ L2 直链/`m3u8` 嗅探（3.2.0，`ts/src/engines/sniff.ts`；不跑页面 JS、不做 blob/MSE） | 任找一个 yt-dlp 不支持的站点下成功 | P1 |
 | ~~P3~~ | ~~分析链路（抽帧 + 转写）~~ | **暂缓 2026-10-21** | — | — |
 | ~~P4~~ | ~~生成侧（三视图 / 提示词）~~ | **暂缓 2026-10-21** | — | — |
 | **P5** | Skill 化封装（`video-acquire`） | **完成**（M6） | agent 能一句话调通 | P1 |

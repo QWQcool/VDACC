@@ -58,7 +58,7 @@ describe('服务端安全边界', () => {
     expect(res.status).toBe(200);
     const data = await res.json() as any;
     expect(data.ok).toBe(true);
-    expect(data.version).toStartWith('3.2.0');
+    expect(data.version).toStartWith('3.3.0');
   });
 
   test('伪造 Origin 403', async () => {
