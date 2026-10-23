@@ -12,6 +12,7 @@ import { setProgressSink } from './core/progress';
 import { currentLimitBytesPerSec, setLimitBytesPerSec } from './core/rate';
 import { getDouyin, previewDouyin, probeDouyin } from './engines/douyin';
 import { formatUrls, getNetease, probeNetease } from './engines/netease';
+import { getQQ, probeQQ } from './engines/qq';
 import { getBilibiliApi, previewBilibili, probeBilibiliApi } from './engines/bilibili_api';
 import { componentPath, genericInstalled, getGeneric, probeGeneric } from './engines/generic';
 import type { ProbeResult } from './core/types';
@@ -124,6 +125,7 @@ async function probeUrl(url: string): Promise<ProbeResult> {
   switch (platformOf(url)) {
     case 'douyin': return probeDouyin(url);
     case 'netease': return probeNetease(url);
+    case 'qq': return probeQQ(url);
     case 'bilibili': return probeBilibiliApi(url);
     default: {
       if (loadConfig().allowGeneric && genericInstalled()) return probeGeneric(url);
@@ -137,6 +139,7 @@ async function downloadUrl(url: string, formatId: string) {
   switch (platformOf(url)) {
     case 'douyin': return getDouyin(url, formatId, OUT);
     case 'netease': return getNetease(url, formatId, OUT);
+    case 'qq': return getQQ(url, formatId, OUT);
     case 'bilibili': return getBilibiliApi(url, formatId, OUT);
     default: {
       if (loadConfig().allowGeneric && genericInstalled()) {

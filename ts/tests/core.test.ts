@@ -25,6 +25,13 @@ describe('platformOf', () => {
     expect(platformOf('https://b23.tv/x')).toBe('bilibili');
   });
 
+  test('QQ 音乐：只认域名，裸 mid 不参与路由', () => {
+    expect(platformOf('https://y.qq.com/n/ryqq/songDetail/003OUlho2HcRHC')).toBe('qq');
+    expect(platformOf('https://i.y.qq.com/v8/playsong.html?songmid=003OUlho2HcRHC')).toBe('qq');
+    // 14 位 base62 裸串太容易和普通文本撞车，裸 mid 请用分享链接
+    expect(platformOf('003OUlho2HcRHC')).toBe('unsupported');
+  });
+
   test('未知与空值', () => {
     expect(platformOf('https://example.com/x')).toBe('unsupported');
     expect(platformOf('随便一段话')).toBe('unsupported');

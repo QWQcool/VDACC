@@ -1,24 +1,28 @@
 /**
- * QQ 音乐引擎骨架（3.1）。
+ * QQ 音乐引擎（3.1）。
  *
- * 范围（刻意很小）：
- * - 只做 `canHandle` / `probe`，**不实现下载**，**不注册到 platformOf / server / cli**。
- *   没有账号时下载链路验证不了，接上去就等于假装支持。
- * - 只按匿名档位探测：QQ 音乐现在连搜索都要登录（`musicu.fcg` 搜索返回 code 2001 +
- *   feedbackURL），但**单曲详情 + 取 vkey** 匿名还能用，实测 320K/FLAC 被拒（result 104003），
- *   128K MP3 / 96K AAC 对部分免费曲放行（result 0 + purl）。
- * - 因此“返回哪些档位”完全由接口实际给的 purl 决定，不按歌曲元数据里的
- *   `size_320mp3` / `size_flac` 猜——那两个字段就算有值，匿名也拿不到地址。
+ * - 档位只认接口实际给的 purl：QQ 音乐现在连搜索都要登录，320K/FLAC 还取决于账号会员，
+ *   所以不按歌曲元数据里的 `size_320mp3` / `size_flac` 猜档位。
+ * - 登录可选：`auth qq` 扫码导出 cookie 后自动带 `comm.uin` + `comm.authst`(qm_keyst)。
+ *   实测同一首歌登录前后可能完全一样——档位由**账号会员权限**决定。
+ * - 下载：流式落盘 + 限速 + 续传，ffmpeg 写 title/artist/album 与封面，失败降级保留音频。
  *
  * 规格来源：docs/music-channels.md（只取域名/路径/参数/字段，独立实现）。
  * 未验证项见文件末尾「未做」。
  */
 import { randomBytes } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync,
+  writeFileSync } from 'node:fs';
+import { open } from 'node:fs/promises';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 
+import { throwIfCancelled } from '../core/cancel';
 import { VdlError } from '../core/errors';
-import { request } from '../core/http';
+import { UA, request } from '../core/http';
+import { safeName } from '../core/naming';
+import { report } from '../core/progress';
+import { throttle } from '../core/rate';
 import { format, type Format, type ProbeResult } from '../core/types';
 
 const DETAIL = 'https://c.y.qq.com/v8/fcg-bin/fcg_play_single_song.fcg';
@@ -36,6 +40,11 @@ const QUALITIES: Array<{ prefix: string; ext: string; label: string; bitrate: nu
 
 const BARE_MID = /^[0-9A-Za-z]{14}$/;
 const MID_IN_PATH = /\/(?:songDetail|songdetail)\/([0-9A-Za-z]+)/;
+
+/** probe 时按档位缓存播放地址（purl 带 vkey，会过期，所以每次下载都重新 probe）。 */
+const urlCache = new Map<string, { url: string; ext: string }>();
+/** 详情留给下载阶段打标签用（album 名不在 ProbeResult.media 里）。 */
+let lastDetail: SongDetail | null = null;
 
 /** 纯函数：从分享链接 / 裸 mid 里取 songmid，取不到返回空串。
  *  QQ 音乐有三种常见形态：`y.qq.com/n/ryqq/songDetail/<mid>`、
@@ -205,8 +214,10 @@ async function headBytes(url: string): Promise<number> {
 export async function probeQQ(input: string): Promise<ProbeResult> {
   const mid = parseSongmid(input);
   if (!mid) throw new VdlError('bad_input', `识别不出 QQ 音乐 songmid: ${input}`);
+  urlCache.clear();
 
   const detail = await fetchDetail(mid);
+  lastDetail = detail;
   const cred = loadCredential();
   const { sip, items } = await fetchVkeys(mid, cred);
 
@@ -220,6 +231,7 @@ export async function probeQQ(input: string): Promise<ProbeResult> {
     }
     const url = item.purl.startsWith('http') ? item.purl : sip + item.purl;
     const real = await headBytes(url);
+    urlCache.set(quality.prefix.toLowerCase(), { url, ext: quality.ext });
     formats.push(format({
       id: quality.prefix.toLowerCase(),
       label: quality.label,
@@ -264,12 +276,125 @@ export async function probeQQ(input: string): Promise<ProbeResult> {
   };
 }
 
+async function streamTo(url: string, part: string): Promise<number> {
+  let resume = existsSync(part) ? statSync(part).size : 0;
+  const headers: Record<string, string> = { 'User-Agent': UA, Referer: 'https://y.qq.com/' };
+  if (resume) headers.Range = `bytes=${resume}-`;
+  const res = await fetch(url, { headers });
+  if (!res.ok && res.status !== 206) throw new VdlError(`http_${res.status}`, `下载失败 ${res.status}`);
+  if (resume && res.status !== 206) resume = 0;
+
+  const total = Number(res.headers.get('content-length') || 0) + resume;
+  const fh = await open(part, resume ? 'a' : 'w');
+  let written = resume;
+  let sinceStart = 0;
+  const startedAt = Date.now();
+  let last = 0;
+  try {
+    for await (const chunk of res.body as any) {
+      throwIfCancelled();
+      await fh.write(chunk);
+      written += chunk.length;
+      sinceStart += chunk.length;
+      await throttle(sinceStart, startedAt);
+      const now = Date.now();
+      if (now - last > 200) { last = now; report(written, total); }
+    }
+  } finally {
+    await fh.close();
+  }
+  report(written, total || written);
+  return statSync(part).size;
+}
+
+function ffmpeg(args: string[]) {
+  const ff = process.env.VDL_FFMPEG || 'ffmpeg';
+  return spawnSync(ff, args, { encoding: 'utf8', windowsHide: true });
+}
+
+/**
+ * 下载单曲。流程与网易云一致：流式落盘（.part）→ 封面/标签同一次 ffmpeg 写入 →
+ * 失败就把原始音频改名留着，不因为“标签写不进去”丢掉已经下好的内容。
+ */
+export async function getQQ(input: string, formatId: string | null, outDir: string) {
+  const probe = await probeQQ(input);
+  const fmt = probe.formats.find((f) => f.id === formatId) ||
+    probe.formats.find((f) => f.recommended) || probe.formats[0];
+  const cached = urlCache.get(fmt.id);
+  if (!cached) throw new VdlError('no_stream', '该档位没有可用地址');
+
+  mkdirSync(outDir, { recursive: true });
+  const dest = join(outDir,
+    `${probe.media!.id}_${safeName(probe.media!.title)}_${safeName(fmt.label, 16, fmt.id)}.${cached.ext}`);
+  if (existsSync(dest)) {
+    return { path: dest, bytes: statSync(dest).size, skipped: true, warnings: [] };
+  }
+
+  const part = dest + '.part';
+  await streamTo(cached.url, part);
+  if (statSync(part).size < 100 * 1024) {
+    unlinkSync(part);
+    throw new VdlError('bad_payload', '文件过小，多半是试听片段或错误页');
+  }
+
+  const warnings: string[] = [];
+  const rawCover = join(outDir, '__vdl_cover.img');
+  const coverUrl = probe.media!.thumbnail || '';
+  let coverPath = '';
+  if (coverUrl) {
+    try {
+      const res = await fetch(coverUrl, { headers: { 'User-Agent': UA, Referer: 'https://y.qq.com/' } });
+      if (res.ok) {
+        writeFileSync(rawCover, Buffer.from(await res.arrayBuffer()));
+        coverPath = rawCover;
+      }
+    } catch {
+      coverPath = '';
+    }
+  }
+
+  const out = dest.replace(/(\.\w+)$/, '.mux$1');
+  const args = ['-y', '-hide_banner', '-loglevel', 'error', '-i', part];
+  if (coverPath) args.push('-i', coverPath);
+  args.push('-map', '0:a');
+  if (coverPath) {
+    args.push('-map', '1:v', '-c:v', 'copy', '-disposition:v', 'attached_pic');
+  }
+  args.push('-c:a', 'copy');
+
+  const tags: Record<string, string> = {
+    title: probe.media!.title || '',
+    artist: probe.media!.author || '',
+    album: lastDetail?.albumName || '',
+    comment: 'downloaded by vdl',
+  };
+  for (const [key, value] of Object.entries(tags)) {
+    if (value) args.push('-metadata', `${key}=${value}`);
+  }
+  if (dest.toLowerCase().endsWith('.mp3')) args.push('-id3v2_version', '3');
+  args.push(out);
+
+  const run = ffmpeg(args);
+  try { unlinkSync(rawCover); } catch { /* 没有封面 */ }
+
+  if (run.status === 0 && existsSync(out)) {
+    renameSync(out, dest);
+    try { unlinkSync(part); } catch { /* ignore */ }
+  } else {
+    if (existsSync(out)) { try { unlinkSync(out); } catch { /* ignore */ } }
+    renameSync(part, dest);
+    warnings.push('写入标签失败，已保留音频');
+  }
+
+  return { path: dest, bytes: statSync(dest).size, skipped: false, warnings };
+}
+
 /**
  * 未做（不假装支持）：
- * - `download()`：还没写，所以**没有注册到 platformOf / server / cli**。
  * - 320K/FLAC：登录后仍实测 104003（《雨爱》《我怀念的》《告白气球》等），
  *   档位由账号会员权限决定；代码已带 uin+authst，换会员账号会自动生效，但没有验证过。
  * - 搜索：`DoSearchForQQMusicDesktop` 时好时坏——同一账号一次 code=0 返回 3 条，
  *   下一次 2001；不接关键词搜索，只吃 mid / 分享链接。
+ * - 歌词（.lrc）：QQ 的 lyric 接口没验，先不写。
  * - 其它容器（APE / 192K AAC / DTS）：没验证，先不铺。
  */

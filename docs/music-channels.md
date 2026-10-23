@@ -49,9 +49,11 @@
 
 ## 当前状态（2026-10-23）
 
-- **QQ 音乐骨架已实现**：`ts/src/engines/qq.ts` 的 `canHandle` / `probeQQ`，**未注册到路由**
-  （`platformOf` / `server` / `cli` 都不引用，`musicEngines` 仍为空）。`download()` 未实现，所以先不接路由——
-  接上去会把现在能落到 yt-dlp 通用引擎的 QQ 链接换成“只有探测没有下载”。
+- **QQ 音乐已接入**：`ts/src/engines/qq.ts` 的 `canHandle` / `probeQQ` / `getQQ`，已注册到
+  `platformOf`（只认 `*.qq.com` 域名，裸 mid 不参与路由）/ `server` / `cli`。
+  下载实测（《轻轻》）：128K MP3 **3,554,923 字节**（原始 3,529,853 + 封面/标签），
+  ffprobe 确认 128000bps、`mjpeg` 封面流、title/artist/album 三个标签；96K AAC 2.60MB 同样带封面。
+  落盘走 `.part` + Range 续传 + 与其它引擎共用的限速。
 - **登录已接**：`bun ts/src/cli.ts auth qq` 扫码写 `%LOCALAPPDATA%\vdl\auth\qq.json`（实测 49 cookies），
   `probeQQ` 自动带 `comm.uin` + `comm.authst`(qm_keyst) 与 `param.uin`；`auth --status` 可在线校验（返回昵称）。
 - 登录实测（2026-10-23，账号非会员）：**同一批歌曲登录前后档位完全一致**——
@@ -67,6 +69,6 @@
   - 搜索不稳定：`musicu.fcg` 的 `DoSearchForQQMusicDesktop` 匿名返回 `req_1.code=2001` +
     `feedbackURL`（登录页）；登录后实测一次 `code=0` 返回 3 条，下一次又回到 2001。
     因此不做关键词搜索，只吃 songmid / 分享链接。
-- 未做（不假装支持）：`download()`、标签与封面写入、歌单/专辑、会员档位实测。
+- 未做（不假装支持）：会员档位实测（当前账号 320K/FLAC 仍 104003）、歌单/专辑、歌词 `.lrc`。
 - 酷我 / 酷狗：未开始。
 - 服务端设置页后续加「音乐账号」页签（与 B站/网易云并列）。

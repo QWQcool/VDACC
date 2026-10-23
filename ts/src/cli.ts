@@ -2,6 +2,7 @@ import { getDouyin, probeDouyin } from './engines/douyin';
 import { getNetease, probeNetease } from './engines/netease';
 import { probeBilibili } from './engines/bilibili';
 import { getBilibiliApi, probeBilibiliApi } from './engines/bilibili_api';
+import { getQQ, probeQQ } from './engines/qq';
 import { loadConfig } from './core/config';
 import { VdlError, fail } from './core/errors';
 import { platformOf } from './core/platform';
@@ -23,6 +24,7 @@ async function probe(url: string): Promise<ProbeResult> {
   switch (platform) {
     case 'douyin': return probeDouyin(url);
     case 'netease': return probeNetease(url);
+    case 'qq': return probeQQ(url);
     case 'bilibili':
       return process.env.VDL_BILI_ENGINE === 'ytdlp'
         ? probeBilibili(url)
@@ -133,13 +135,18 @@ async function main() {
     }
 
     const platform = platformOf(url);
-    if (['douyin', 'bilibili', 'netease'].includes(platform)) {
+    if (['douyin', 'bilibili', 'netease', 'qq'].includes(platform)) {
+      if (has('--subs') && platform !== 'bilibili') {
+        console.error(`--subs 目前只支持 B站，${platform} 会忽略这个参数`);
+      }
       const out = platform === 'douyin'
         ? await getDouyin(url, flag('--format'), flag('-o', '下载') || '下载')
         : platform === 'netease'
           ? await getNetease(url, flag('--format'), flag('-o', '下载') || '下载')
-          : await getBilibiliApi(
-            url, flag('--format'), flag('-o', '下载') || '下载', { subs: has('--subs') });
+          : platform === 'qq'
+            ? await getQQ(url, flag('--format'), flag('-o', '下载') || '下载')
+            : await getBilibiliApi(
+              url, flag('--format'), flag('-o', '下载') || '下载', { subs: has('--subs') });
       if (has('--json')) {
         console.log(JSON.stringify({
           schema: 2, ok: true, path: out.path, bytes: out.bytes, skipped: out.skipped,
