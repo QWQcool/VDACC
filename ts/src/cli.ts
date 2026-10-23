@@ -136,8 +136,8 @@ async function main() {
 
     const platform = platformOf(url);
     if (['douyin', 'bilibili', 'netease', 'qq'].includes(platform)) {
-      if (has('--subs') && platform !== 'bilibili') {
-        console.error(`--subs 目前只支持 B站，${platform} 会忽略这个参数`);
+      if ((has('--subs') || has('--danmaku')) && platform !== 'bilibili') {
+        console.error(`--subs / --danmaku 目前只支持 B站，${platform} 会忽略这些参数`);
       }
       const out = platform === 'douyin'
         ? await getDouyin(url, flag('--format'), flag('-o', '下载') || '下载')
@@ -146,7 +146,8 @@ async function main() {
           : platform === 'qq'
             ? await getQQ(url, flag('--format'), flag('-o', '下载') || '下载')
             : await getBilibiliApi(
-              url, flag('--format'), flag('-o', '下载') || '下载', { subs: has('--subs') });
+              url, flag('--format'), flag('-o', '下载') || '下载',
+              { subs: has('--subs'), danmaku: has('--danmaku') });
       if (has('--json')) {
         console.log(JSON.stringify({
           schema: 2, ok: true, path: out.path, bytes: out.bytes, skipped: out.skipped,
@@ -157,6 +158,12 @@ async function main() {
         if (has('--subs')) {
           const srt = (out as any).srt as string | null;
           console.log(srt ? `字幕 ${srt}` : '字幕：该视频没有可用字幕（含 AI 字幕）');
+        }
+        if (has('--danmaku')) {
+          const dm = out as any;
+          if (dm.danmakuSupported === false) console.log('弹幕：番剧的弹幕暂不支持');
+          else if (dm.danmaku) console.log(`弹幕 ${dm.danmaku}（${dm.danmakuCount} 条）`);
+          else console.log('弹幕：该视频没有弹幕');
         }
       }
       process.exit(0);

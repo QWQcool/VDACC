@@ -326,6 +326,34 @@ async function probeStreamSize(url: string): Promise<number> {
   }
 }
 
+/** 数 `<d ` 标签；弹幕 XML 的条目就是 `<d p="...">文本</d>`。 */
+export function countDanmaku(xml: string): number {
+  return (xml.match(/<d /g) || []).length;
+}
+
+/**
+ * 弹幕 XML 落盘。只有普通视频（有 cid）支持；番剧的分段弹幕接口还没验，直接说「不支持」，
+ * 不要用空文件冒充。
+ */
+async function saveDanmaku(videoPath: string): Promise<{
+  xml: string | null; count: number; supported: boolean;
+}> {
+  if (!subCtx?.bvid || !subCtx.cid) return { xml: null, count: 0, supported: false };
+  try {
+    const res = await fetch(`https://api.bilibili.com/x/v1/dm/list.so?oid=${subCtx.cid}`,
+      { headers: { 'User-Agent': UA, Referer: 'https://www.bilibili.com/' } });
+    if (!res.ok) return { xml: null, count: 0, supported: true };
+    const text = await res.text();
+    const count = countDanmaku(text);
+    if (!count) return { xml: null, count: 0, supported: true };
+    const target = videoPath.replace(/\.mp4$/i, '.danmaku.xml');
+    writeFileSync(target, text, 'utf8');
+    return { xml: target, count, supported: true };
+  } catch {
+    return { xml: null, count: 0, supported: true };
+  }
+}
+
 interface SubEntry { lan: string; name: string; url: string }
 
 /**
@@ -385,7 +413,8 @@ async function saveSubtitle(videoPath: string): Promise<{ srt: string | null; co
 }
 
 export async function getBilibiliApi(
-  input: string, formatId: string | null, outDir: string, opts: { subs?: boolean } = {},
+  input: string, formatId: string | null, outDir: string,
+  opts: { subs?: boolean; danmaku?: boolean } = {},
 ) {
   const probe = await probeBilibiliApi(input);
   const fmt = probe.formats.find((f) => f.id === formatId) ||
@@ -400,11 +429,14 @@ export async function getBilibiliApi(
   const stem = `${probe.media!.id}_${safeName(probe.media!.title)}${suffix}_${safeName(fmt.label, 16, fmt.id)}`;
   const dest = join(outDir, `${stem}.mp4`);
   if (existsSync(dest)) {
-    // 视频已存在也要让 --subs 生效：字幕是独立产物，不能因为跳过视频就一起跳过
+    // 视频已存在也要让 --subs / --danmaku 生效：附属产物不能因为跳过视频就一起跳过
     const sub = opts.subs ? await saveSubtitle(dest) : { srt: null, count: 0 };
+    const dm = opts.danmaku ? await saveDanmaku(dest) : null;
     return {
       path: dest, bytes: statSync(dest).size, skipped: true,
       srt: sub.srt, srtCount: sub.count,
+      danmaku: dm?.xml || null, danmakuCount: dm?.count || 0,
+      danmakuSupported: dm ? dm.supported : null,
     };
   }
 
@@ -444,8 +476,11 @@ export async function getBilibiliApi(
   if (run.status !== 0) throw new VdlError('ffmpeg_missing', String(run.stderr || '').slice(0, 300));
 
   const sub = opts.subs ? await saveSubtitle(dest) : { srt: null, count: 0 };
+  const dm = opts.danmaku ? await saveDanmaku(dest) : null;
   return {
     path: dest, bytes: statSync(dest).size, skipped: false,
     srt: sub.srt, srtCount: sub.count,
+    danmaku: dm?.xml || null, danmakuCount: dm?.count || 0,
+    danmakuSupported: dm ? dm.supported : null,
   };
 }

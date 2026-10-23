@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 
-import { aggregateProgress, parseContentRangeTotal, srtTime, toSrt } from '../src/engines/bilibili_api';
+import {
+  aggregateProgress, countDanmaku, parseContentRangeTotal, srtTime, toSrt,
+} from '../src/engines/bilibili_api';
 
 // 只测纯函数：真实流的字节数依赖 CDN 与登录态，放进手工验收（见 commit 记录）。
 describe('B站 进度折算', () => {
@@ -23,6 +25,12 @@ describe('B站 进度折算', () => {
     expect(aggregateProgress(0, 5, 0, 20)).toEqual([5, 20]);
     expect(aggregateProgress(20, 5, 0, 10)).toEqual([25, 30]);
     expect(aggregateProgress(20, 5, 0, 0)).toEqual([25, 0]);
+  });
+
+  test('弹幕条数只看 <d 标签', () => {
+    expect(countDanmaku('<i><d p="1,2">a</d><d p="3">b</d></i>')).toBe(2);
+    expect(countDanmaku('<?xml version="1.0"?><i></i>')).toBe(0);
+    expect(countDanmaku('')).toBe(0);
   });
 
   test('SRT 时间戳格式', () => {
