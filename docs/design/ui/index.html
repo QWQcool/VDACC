@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VDACC 示意 · 主界面</title>
+<link rel="stylesheet" href="mockup.css">
+</head>
+<body>
+<div class="wrap">
+
+  <nav class="nav-demo">
+    <b>示意页面</b>
+    <a class="on" href="index.html">主界面</a>
+    <a href="batch.html">分P批量</a>
+    <a href="album-dark.html">专辑（暗色）</a>
+    <a href="settings.html">设置</a>
+  </nav>
+
+  <header class="appbar">
+    <span class="logo">V</span>
+    <h1>VDACC</h1>
+    <span class="sub">媒体下载器</span>
+    <span class="spacer"></span>
+    <span class="ver">V3.2.0</span>
+    <button class="icon-btn" title="主题">◐</button>
+    <button class="icon-btn" title="设置">⚙</button>
+  </header>
+
+  <!-- 输入 -->
+  <section class="card">
+    <div class="card-title">平台链接</div>
+    <div class="input-row">
+      <input class="field" value="https://www.bilibili.com/video/BV1viKV6mEA2" spellcheck="false">
+      <button class="btn primary">解析</button>
+    </div>
+    <p class="hint">B站 分P / 番剧会自动列出集数；下载默认 1080P。专辑链接直接列出曲目（前 20 首）。</p>
+    <div class="quick-tags">
+      <span class="qtag">抖音</span><span class="qtag">B站</span><span class="qtag">网易云</span>
+      <span class="qtag">QQ 音乐</span><span class="qtag">酷我</span><span class="qtag">酷狗</span>
+      <span class="qtag">m3u8 / 直链</span>
+    </div>
+  </section>
+
+  <!-- 结果卡：缩略图 + 元数据 + 分段画质 + 附属开关 -->
+  <section class="card">
+    <div class="media">
+      <div class="thumb">缩略图<span class="dur">03:21</span></div>
+      <div class="info">
+        <div style="display:flex;align-items:start;gap:10px">
+          <h3 style="flex:1">终末地武陵城地图导入UE（GPT神力）</h3>
+          <span class="tag accent">BILIBILI</span>
+        </div>
+        <div class="meta">
+          <span>作者 <b style="color:var(--text-2)">6F978E</b></span>
+          <span>时长 03:21</span>
+          <span>分P 1</span>
+        </div>
+        <div class="src">https://www.bilibili.com/video/BV1viKV6mEA2?vd_source=…</div>
+        <p class="desc">GPT天天重置，20x瞪不完，于是昨晚睡觉前给Codex cli丢了几个repo，本地工具，破甲skill，mcp，然后全自动执行任务。早上起来发现已经用开源opengl渲染器预览效果了……</p>
+      </div>
+    </div>
+
+    <hr style="border:none;border-top:1px solid var(--line);margin:14px 0">
+
+    <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+      <span style="font-size:12px;color:var(--muted)">画质</span>
+      <div class="segs">
+        <button class="seg">720P<small>31.14 MB</small></button>
+        <button class="seg on">1080P<small>81.54 MB</small></button>
+        <button class="seg">2K<small>142 MB</small></button>
+        <button class="seg">4K<small>257.90 MB</small></button>
+      </div>
+      <button class="btn sm ghost" style="margin-left:auto">预览</button>
+    </div>
+
+    <div class="switches">
+      <label class="check"><input type="checkbox" checked> 封面</label>
+      <label class="check"><input type="checkbox" checked> 字幕</label>
+      <label class="check"><input type="checkbox"> 弹幕</label>
+      <span class="hint" style="margin:0">字幕 / 弹幕会在同目录额外写 .srt / .danmaku.xml（仅 B站）</span>
+    </div>
+
+    <div style="display:flex;justify-content:flex-end">
+      <button class="btn primary">下载选中</button>
+    </div>
+  </section>
+
+  <!-- 警告示例：音乐平台的匿名档位 -->
+  <section class="card">
+    <div class="warnbar">
+      ⚠ 未登录，仅匿名档（320K / FLAC 需登录，本次不包含）；本次接口未放行：320K MP3、无损 FLAC——歌曲付费或账号无对应会员
+    </div>
+    <div class="media">
+      <div class="thumb" style="aspect-ratio:1;width:96px">封面</div>
+      <div class="info">
+        <div style="display:flex;align-items:center;gap:10px">
+          <h3 style="flex:1">轻轻</h3>
+          <span class="tag accent">QQ 音乐</span>
+        </div>
+        <div class="meta"><span>歌手 <b style="color:var(--text-2)">肖战</b></span><span>时长 03:40</span></div>
+        <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-top:8px">
+          <div class="segs">
+            <button class="seg on">128K MP3<small>3.37 MB</small></button>
+            <button class="seg">96K AAC<small>2.58 MB</small></button>
+          </div>
+          <button class="btn sm primary" style="margin-left:auto">下载选中</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 任务列表 -->
+  <section class="card">
+    <div class="card-title">任务</div>
+
+    <div class="job">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:center">
+        <div class="jtitle">【英雄联盟】K/DA官方MV - “FIRESTARTER（燃）”正式上线</div>
+        <span class="badge running">下载中</span>
+      </div>
+      <div class="jmeta"><span>1080P</span><span>15.6 MB / 21.1 MB</span><span>74%</span></div>
+      <div class="bar"><i style="width:74%"></i></div>
+      <div class="jactions"><button class="btn sm ghost">取消</button></div>
+    </div>
+
+    <div class="job">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:center">
+        <div class="jtitle">轻轻 - 肖战（128K MP3）</div>
+        <span class="badge done">完成</span>
+      </div>
+      <div class="jmeta"><span>3.39 MB</span><span>字幕/弹幕 32/0</span><span>·</span><span>2026-10-23 10:12</span></div>
+      <div class="jactions"><button class="btn sm ghost">▶ 预览</button></div>
+    </div>
+
+    <div class="job">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:center">
+        <div class="jtitle">折1万次，会坏吗？iPhone Duo深度评测（480P）</div>
+        <span class="badge queued">排队</span>
+      </div>
+      <div class="jmeta"><span>0 B</span></div>
+      <div class="jactions"><button class="btn sm ghost">取消</button></div>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>

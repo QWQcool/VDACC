@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VDACC 示意 · 专辑（暗色）</title>
+<link rel="stylesheet" href="mockup.css">
+</head>
+<body>
+<div class="wrap">
+
+  <nav class="nav-demo">
+    <b>示意页面</b>
+    <a href="index.html">主界面</a>
+    <a href="batch.html">分P批量</a>
+    <a class="on" href="album-dark.html">专辑（暗色）</a>
+    <a href="settings.html">设置</a>
+  </nav>
+
+  <header class="appbar">
+    <span class="logo">V</span>
+    <h1>VDACC</h1>
+    <span class="sub">媒体下载器</span>
+    <span class="spacer"></span>
+    <span class="ver">V3.2.0</span>
+    <button class="icon-btn" title="主题">◐</button>
+    <button class="icon-btn" title="设置">⚙</button>
+  </header>
+
+  <section class="card">
+    <div class="card-title">音乐链接（歌曲 / 专辑）</div>
+    <div class="input-row">
+      <input class="field" value="https://y.qq.com/n/ryqq/albumDetail/001zU1173lcnR3" spellcheck="false">
+      <button class="btn primary">解析</button>
+    </div>
+    <p class="hint">支持 QQ 音乐 / 网易云 的歌曲与专辑链接；专辑最多列前 20 首。</p>
+  </section>
+
+  <section class="card">
+    <div class="media">
+      <div class="thumb" style="aspect-ratio:1;width:120px">封面</div>
+      <div class="info">
+        <div style="display:flex;align-items:start;gap:10px">
+          <h3 style="flex:1">起风了（专辑）</h3>
+          <span class="tag accent">网易云</span>
+        </div>
+        <div class="meta"><span>共 173 首</span><span>本次只列前 20 首，略过 153</span></div>
+        <div class="src">https://music.163.com/#/album?id=2854052</div>
+      </div>
+    </div>
+
+    <hr style="border:none;border-top:1px solid var(--line);margin:14px 0">
+
+    <div class="warnbar">⚠ 专辑超过 20 首：本次只列前 20，略过 153 首；要全下请分批。</div>
+
+    <div class="batch-head">
+      <label class="check"><input type="checkbox" checked> 全选</label>
+      <span class="num">20 / 20 已选</span>
+      <span class="num" style="margin-left:auto">预计 约 210 MB</span>
+    </div>
+
+    <div class="item-list">
+      <div class="item"><input type="checkbox" checked><span class="idx">01</span><span class="name">さくらの季节</span><span class="hint" style="margin:0">V.A.</span></div>
+      <div class="item"><input type="checkbox" checked><span class="idx">02</span><span class="name">秋姉妹のなく頃に in the autumn sky</span><span class="hint" style="margin:0">V.A.</span></div>
+      <div class="item"><input type="checkbox" checked><span class="idx">03</span><span class="name">歳月-雲流れ-</span><span class="hint" style="margin:0">V.A.</span></div>
+      <div class="item"><input type="checkbox" checked><span class="idx">04</span><span class="name">夏陽炎(inst.ver)</span><span class="hint" style="margin:0">V.A.</span></div>
+      <div class="item"><input type="checkbox" checked><span class="idx">05</span><span class="name">幽雅に咲かせ、墨染の桜</span><span class="hint" style="margin:0">V.A.</span></div>
+      <div class="item"><input type="checkbox" checked><span class="idx">06</span><span class="name">永夜の报い ~ Imperishable Night</span><span class="hint" style="margin:0">V.A.</span></div>
+    </div>
+
+    <div style="display:flex;justify-content:flex-end;margin-top:12px">
+      <button class="btn primary">下载选中（20）</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-title">任务</div>
+    <div class="job">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:center">
+        <div class="jtitle">鸟之诗 (原版) - 茶太</div>
+        <span class="badge done">完成</span>
+      </div>
+      <div class="jmeta"><span>极高 320K</span><span>7.13 MB</span></div>
+      <div class="jactions"><button class="btn sm ghost">▶ 预览</button></div>
+    </div>
+    <div class="job">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:center">
+        <div class="jtitle">告白气球 - 周杰伦</div>
+        <span class="badge failed">失败</span>
+      </div>
+      <div class="jmeta"><span>not_found：这首歌没有可下载的地址（可能需要会员）</span></div>
+      <div class="jactions"><button class="btn sm ghost">↻ 重试</button></div>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>

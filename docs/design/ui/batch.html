@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VDACC 示意 · 分P批量</title>
+<link rel="stylesheet" href="mockup.css">
+</head>
+<body>
+<div class="wrap">
+
+  <nav class="nav-demo">
+    <b>示意页面</b>
+    <a href="index.html">主界面</a>
+    <a class="on" href="batch.html">分P批量</a>
+    <a href="album-dark.html">专辑（暗色）</a>
+    <a href="settings.html">设置</a>
+  </nav>
+
+  <header class="appbar">
+    <span class="logo">V</span>
+    <h1>VDACC</h1>
+    <span class="sub">媒体下载器</span>
+    <span class="spacer"></span>
+    <span class="ver">V3.2.0</span>
+    <button class="icon-btn" title="主题">◐</button>
+    <button class="icon-btn" title="设置">⚙</button>
+  </header>
+
+  <section class="card">
+    <div class="card-title">平台链接</div>
+    <div class="input-row">
+      <input class="field" value="https://www.bilibili.com/bangumi/play/ss66727" spellcheck="false">
+      <button class="btn primary">解析</button>
+    </div>
+    <p class="hint">番剧会列出整季剧集；超过 20 集需要分批选择（硬上限 20）。</p>
+  </section>
+
+  <section class="card">
+    <div class="media">
+      <div class="thumb">番剧封面<span class="dur">24:00</span></div>
+      <div class="info">
+        <div style="display:flex;align-items:start;gap:10px">
+          <h3 style="flex:1">葬送的芙莉莲</h3>
+          <span class="tag accent">番剧</span>
+        </div>
+        <div class="meta"><span>全 28 集</span><span>清晰度整批统一</span></div>
+      </div>
+    </div>
+
+    <hr style="border:none;border-top:1px solid var(--line);margin:14px 0">
+
+    <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+      <span style="font-size:12px;color:var(--muted)">画质</span>
+      <div class="segs">
+        <button class="seg">720P<small>约 300 MB/集</small></button>
+        <button class="seg on">1080P<small>约 450 MB/集</small></button>
+        <button class="seg">4K<small>约 1.4 GB/集</small></button>
+      </div>
+    </div>
+
+    <div class="batch-head">
+      <label class="check"><input type="checkbox" checked> 全选</label>
+      <span class="num">3 / 6 已选</span>
+      <span class="num" style="margin-left:auto">预计 1.35 GB</span>
+    </div>
+    <p class="batch-limit">共 28 集：超过 20 集请分批选择（硬上限 20）</p>
+
+    <div class="item-list">
+      <div class="item"><input type="checkbox" checked><span class="idx">EP01</span><span class="name">冒险的终结</span><span class="qn">1080P</span><span class="hint" style="margin:0">24:00</span></div>
+      <div class="item"><input type="checkbox" checked><span class="idx">EP02</span><span class="name">并非一定是魔法</span><span class="qn">1080P</span><span class="hint" style="margin:0">23:42</span></div>
+      <div class="item"><input type="checkbox" checked><span class="idx">EP03</span><span class="name">杀魔的魔法</span><span class="qn">1080P</span><span class="hint" style="margin:0">23:40</span></div>
+      <div class="item"><input type="checkbox"><span class="idx">EP04</span><span class="name">灵魂安眠之地</span><span class="qn">1080P</span><span class="hint" style="margin:0">23:41</span></div>
+      <div class="item"><input type="checkbox"><span class="idx">EP05</span><span class="name">死者的幻影</span><span class="qn">1080P</span><span class="hint" style="margin:0">23:40</span></div>
+      <div class="item"><input type="checkbox"><span class="idx">EP06</span><span class="name">村子的英雄</span><span class="qn">1080P</span><span class="hint" style="margin:0">23:39</span></div>
+    </div>
+
+    <div class="switches">
+      <label class="check"><input type="checkbox" checked> 字幕</label>
+      <label class="check"><input type="checkbox"> 弹幕</label>
+    </div>
+
+    <div style="display:flex;justify-content:flex-end">
+      <button class="btn primary">下载选中（3）</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-title">任务</div>
+    <div class="job">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:center">
+        <div class="jtitle">葬送的芙莉莲 EP01 冒险的终结（1080P）</div>
+        <span class="badge running">下载中</span>
+      </div>
+      <div class="jmeta"><span>312 MB / 452 MB</span><span>69%</span><span>2.1 MB/s</span></div>
+      <div class="bar"><i style="width:69%"></i></div>
+      <div class="jactions"><button class="btn sm ghost">取消</button></div>
+    </div>
+    <div class="job">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:center">
+        <div class="jtitle">葬送的芙莉莲 EP02 并非一定是魔法（1080P）</div>
+        <span class="badge queued">排队</span>
+      </div>
+      <div class="jmeta"><span>等待 EP01 完成</span></div>
+      <div class="jactions"><button class="btn sm ghost">取消</button></div>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>
