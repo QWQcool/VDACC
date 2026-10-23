@@ -56,13 +56,32 @@ async function main() {
     const auth = await import('./auth');
     if (has('--status')) {
       const rows = auth.status();
-      if (has('--json')) console.log(JSON.stringify({ ok: true, sites: rows }, null, 2));
-      else for (const r of rows) console.log(`${r.label}\t${r.loggedIn ? '已登录' : '未登录'}\t${r.cookies} cookies`);
+      // 默认在线校验：只数 cookie 名会把过期的 SESSDATA 报成「已登录」（实测踩到）
+      const online = has('--offline') ? null : await auth.verify();
+      const bySite = new Map((online || []).map((r) => [r.site, r]));
+      if (has('--json')) {
+        console.log(JSON.stringify({
+          ok: true,
+          sites: rows.map((r) => ({ ...r, online: bySite.get(r.site) || null })),
+        }, null, 2));
+      } else {
+        for (const r of rows) {
+          const v = bySite.get(r.site);
+          const live = !v ? '未校验'
+            : v.ok === true ? `在线有效（${v.message}）`
+              : v.ok === false ? `在线无效：${v.message}` : v.message;
+          console.log(`${r.label}\t${r.loggedIn ? '本地有凭据' : '本地无凭据'}\t${r.cookies} cookies\t${live}`);
+        }
+        if (!online) console.log('（--offline：只看本地文件，不代表凭据有效）');
+        else if (online.some((v) => v.ok === false)) {
+          console.log('失效的站点请重新登录：bun ts/src/cli.ts auth <site>');
+        }
+      }
       process.exit(0);
     }
     const site = positional[0];
     if (!site) {
-      console.error('用法: bun src/cli.ts auth <bilibili|netease> [--status|--clear]');
+      console.error('用法: bun src/cli.ts auth <bilibili|netease> [--status [--offline]|--clear]');
       process.exit(2);
     }
     if (has('--clear')) {

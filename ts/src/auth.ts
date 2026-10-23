@@ -58,6 +58,78 @@ export function clear(site: string) {
   return true;
 }
 
+/**
+ * 在线校验本地凭据是否还有效。
+ * 只数 cookie 名会误报——实测 B站 的 SESSDATA 过期后名字还在，`auth --status` 仍显示「已登录」，
+ * 而 probe 只给到 480P。网络失败单独返回 ok=null，不要把它说成「登录过期」。
+ */
+export interface VerifyRow {
+  site: string;
+  label: string;
+  ok: boolean | null;
+  message: string;
+}
+
+const CHECKS: Record<string, { url: string; inspect: (json: any) => { ok: boolean; message: string } }> = {
+  bilibili: {
+    url: 'https://api.bilibili.com/x/web-interface/nav',
+    inspect: (j) => (j?.data?.isLogin
+      ? { ok: true, message: String(j.data.uname || '') }
+      : { ok: false, message: `未登录（code=${j?.code ?? '?'}）` }),
+  },
+  netease: {
+    url: 'https://music.163.com/api/nuser/account/get',
+    inspect: (j) => (j?.account?.id
+      ? { ok: true, message: String(j?.profile?.nickname || j.account.id) }
+      : { ok: false, message: `未登录（code=${j?.code ?? '?'}）` }),
+  },
+};
+
+/** 从 storage_state 里拼本站未过期 cookie；值只用于请求头，不打印。 */
+function cookieHeader(site: string): string {
+  const file = join(AUTH, `${site}.json`);
+  if (!existsSync(file)) return '';
+  try {
+    const state = JSON.parse(readFileSync(file, 'utf8'));
+    const now = Date.now() / 1000;
+    return (state.cookies || [])
+      .filter((c: any) => String(c.domain || '').includes(SITES[site]?.domain || site))
+      .filter((c: any) => !c.expires || c.expires < 0 || c.expires > now)
+      .map((c: any) => `${c.name}=${c.value}`)
+      .join('; ');
+  } catch {
+    return '';
+  }
+}
+
+export async function verify(): Promise<VerifyRow[]> {
+  const rows: VerifyRow[] = [];
+  for (const [site, info] of Object.entries(SITES)) {
+    const check = CHECKS[site];
+    if (!check) continue;
+    const cookie = cookieHeader(site);
+    if (!cookie) {
+      rows.push({ site, label: info.label, ok: false, message: '本地没有凭据' });
+      continue;
+    }
+    try {
+      const res = await fetch(check.url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
+            '(KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36',
+          Referer: info.url,
+          Cookie: cookie,
+        },
+        signal: AbortSignal.timeout(8000),
+      });
+      rows.push({ site, label: info.label, ...check.inspect(await res.json()) });
+    } catch (err) {
+      rows.push({ site, label: info.label, ok: null, message: `校验失败：${(err as Error).message}` });
+    }
+  }
+  return rows;
+}
+
 function toNetscape(state: any): string {
   const lines = ['# Netscape HTTP Cookie File', ''];
   for (const c of state.cookies || []) {
