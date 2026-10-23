@@ -74,7 +74,8 @@ ffmpeg 为什么是硬前提：B站/YouTube 全是 DASH 音视频分离，yt-dlp
 ├─ ts/skill/         TS Skill 源（SKILL.md + references），由 tools/build_skill_ts.py 组装
 ├─ legacy/python/    Python 归档：vdl / skill / tests / tools / dy_* / VDACC.bat（冻结，仅参考）
 ├─ docs/             CHANGELOG.md、music-channels.md、design/
-├─ tools/            构建脚本（build_skill.py / build_skill_ts.py / build_portable.py）
+├─ tools/            构建脚本（build_skill_ts.py；legacy 构建在 legacy/python/tools/）
+├─ VDACC.bat         双击启动：起服务 + --open 打开浏览器
 ├─ 下载/             输出目录（不入库）
 └─ venv/             Python 环境（只给 legacy 用，不入库）
 ```
@@ -109,7 +110,7 @@ bun test ts/tests
   `%LOCALAPPDATA%\vdl\auth\`（`storage_state` 里是 HttpOnly cookie），profile 在
   `%LOCALAPPDATA%\vdl\profile`。两者永不入库、永不打印值——日志只报 cookie 名与数量。
 - **Skill 只能由构建脚本组装。** TS 版：`python tools/build_skill_ts.py --zip`（单文件 `vdl.exe`
-  + `ts/skill/SKILL.md`）；legacy 版：`tools/build_skill.py`。别手工往 `dist/` 拷代码。
+  + `ts/skill/SKILL.md`）；legacy 版：`legacy/python/tools/build_skill.py`。别手工往 `dist/` 拷代码。
   legacy 包刻意排除 `legacy/python/vdl/web` 与 `server.py`（Agent 不需要，且含授权受限的插画）；
   TS 包只含 `skill_cli.ts`。
 - **legacy 已冻结。** `legacy/python/`（`dy_dl.py` / `dy_gui.pyw` / `vdl/` / `skill/` / `tests/`）

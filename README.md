@@ -33,16 +33,20 @@
 
 ## 怎么用
 
-**双击 `抖音下载器.bat`**，弹出窗口后：
+**双击 `VDACC.bat`**：启动本地服务（默认 8765）并自动用浏览器打开带 token 的地址。
 
-1. 把抖音里「复制链接」得到的**整段文字**直接粘进去（不用挑链接，脚本自己抠）
-2. 多个视频就一行一个
-3. 点「开始下载」
+1. 粘贴抖音 / B站 / 网易云链接（B站 分P 会列出集数，默认 1080P）
+2. 选画质（可多选），点「下载选中」
+3. 文件存到 `下载\`（设置里可改输出目录）
 
-文件存到 `下载\`，命名格式 `视频ID_标题.mp4`。同一个视频重复下载会自动跳过。
+命令行等价写法：
 
-下载有两条路：**默认先走纯 HTTP 签名引擎**（自己算 `x-secsdk-web-signature`，实测 1.2 秒一条，
-不需要浏览器、不需要 cookie），失败才回退 Playwright 截流。用 `--engine` 可以强制指定。
+```bash
+bun ts/src/cli.ts probe "<链接>"
+bun ts/src/cli.ts get   "<链接>" --limit 2M
+```
+
+> Python 版（tkinter 界面 / `dy_dl.py`）已归档到 `legacy/python/`，不再演进，仅作参考。
 
 ## 为什么不用 yt-dlp / 那些 GUI
 
@@ -102,7 +106,7 @@ Playwright 起一个独立 Edge（独立 profile，不碰你正在用的）
 ## 便携包
 
 ```bash
-python tools/build_portable.py --zip   # dist/VDACC-portable.zip（约 370 KB）
+python legacy/python/tools/build_portable.py --zip   # dist/VDACC-portable.zip（约 370 KB，Python 版）
 ```
 
 解压后双击 `VDACC.bat`。**仍需系统有 Python 3.9+**——不打包 Python 本体，
@@ -144,16 +148,20 @@ python scripts/vdl_run.py get "<url>" --json -o 下载
 
 ```
 VDACC\
-├─ VDACC.bat          一键启动 Web 界面（首次自动建 venv、装依赖）
-├─ 抖音下载器.bat     双击启动抖音专用 tkinter 界面
-├─ vdl\               核心包：core 契约层 / engines / cli / server / web
-├─ skill\             Agent Skill 源（video-acquire）
-├─ dy_dl.py           抖音入口 + 浏览器引擎（Playwright 截流），兼容旧用法
-├─ dy_http.py         抖音纯 HTTP 引擎（只用标准库，自己算签名；无浏览器也能跑）
-├─ dy_gui.pyw         抖音 tkinter 界面
-├─ venv\              独立 Python 环境（playwright + yt-dlp）
-├─ browser_profile\   独立浏览器配置（58MB，删了会自动重建）
+├─ VDACC.bat          一键启动（起 TS 服务 + 打开浏览器，需要 Bun 在 PATH）
+├─ ts\
+│  ├─ src\            主线：cli / server / auth / skill_cli
+│  │  ├─ core\        契约层：types / platform / config / http / progress / cancel / rate
+│  │  └─ engines\     douyin / netease / bilibili(_api) / generic(yt-dlp) / qq（骨架，未接路由）
+│  ├─ tests\          bun test（27 个）
+│  └─ skill\          TS Skill 源（SKILL.md + references）
+├─ web\               Vue 3 界面（默认入口 /）
+├─ legacy\python\     Python 归档：vdl / skill / tests / tools / dy_* / VDACC.bat（冻结）
+├─ docs\              CHANGELOG.md / music-channels.md / design\
+├─ tools\             build_skill_ts.py（legacy 构建脚本在 legacy\python\tools\）
 └─ 下载\              输出目录
+
+（venv\ 与 browser_profile\ 只给 legacy 的 Python 版用，TS 主线的凭据在 %LOCALAPPDATA%\vdl\）
 ```
 
 ## 命令行用法
@@ -204,7 +212,7 @@ vdl doctor --fix                            # 自动补装 pip 依赖（ffmpeg �
 - **任务可取消/重试**：任务卡上有「取消」「重试」；取消不会删半截文件。
 - **`doctor --live`**：对抖音/网易云/B站各真解析一次；`--bundle` 生成脱敏诊断包（不含 cookie）。
 - **并发**：`vdl serve --concurrency 2`（默认 1，对平台更友好）。
-- **Windows 一键启动**：双击 `VDACC.bat`（首次会建 venv 并装依赖）。
+- **Windows 一键启动**：双击 `VDACC.bat`（需要 Bun 在 PATH；界面会自动打开）。
 
 音乐用同一个入口（`vdl probe` / `vdl get` 支持 `music.163.com/song?id=...`）：
 

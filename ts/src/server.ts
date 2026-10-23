@@ -24,6 +24,8 @@ const flag = (name: string, def: string) => {
 
 const PORT = Number(flag('--port', '8780'));
 const TOKEN = flag('--token', randomBytes(8).toString('hex'));
+// 双击启动器时用：服务起来后把带 token 的地址交给默认浏览器，省掉手动复制
+const OPEN = argv.includes('--open');
 const CONFIG = loadConfig();
 const OUT = resolve(flag('-o', CONFIG.outDir || join(process.cwd(), '下载')));
 const WEB = join(import.meta.dir, '..', '..', 'web');
@@ -469,3 +471,17 @@ const server = Bun.serve({
 console.log(`vdl-ts ${server.port} 已启动`);
 console.log(`  地址: http://127.0.0.1:${server.port}/?token=${TOKEN}`);
 console.log(`  输出: ${OUT}`);
+
+/** 打开默认浏览器。失败不致命——地址已经打印在上面，复制粘贴照样能用。 */
+function openBrowser(url: string) {
+  const [cmd, args]: [string, string[]] = process.platform === 'win32'
+    ? ['cmd.exe', ['/c', 'start', '', url]]
+    : process.platform === 'darwin' ? ['open', [url]] : ['xdg-open', [url]];
+  try {
+    spawn(cmd, args, { detached: true, stdio: 'ignore' }).unref();
+  } catch {
+    // 忽略
+  }
+}
+
+if (OPEN) openBrowser(`http://127.0.0.1:${server.port}/?token=${TOKEN}`);

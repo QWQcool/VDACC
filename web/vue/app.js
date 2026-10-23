@@ -12,7 +12,7 @@ const I18N = {
     install: '下载组件', downloading: '下载中…', save: '保存', preview: '预览',
     installed: '组件已安装', notInstalled: '组件未安装', saved: '设置已保存',
     notSupported: '当前后端不支持设置',
-    lang: '切换语言', theme: '切换主题', legacy: '旧版界面',
+    lang: '切换语言', theme: '切换主题',
     queued: '已提交', needToken: '缺少 token：请用启动时打印的 ?token=... 打开',
     empty: '没有可下载档位', failed: '失败',
     queued_s: '排队', running: '下载中', done: '完成', cancelled: '已取消',
@@ -29,7 +29,7 @@ const I18N = {
     install: 'Download component', downloading: 'Downloading…', save: 'Save', preview: 'Preview',
     installed: 'Component installed', notInstalled: 'Component not installed', saved: 'Settings saved',
     notSupported: 'This backend does not support settings',
-    lang: 'Language', theme: 'Theme', legacy: 'Legacy UI',
+    lang: 'Language', theme: 'Theme',
     queued: 'Queued', needToken: 'Missing token: open the URL printed with ?token=...',
     empty: 'No downloadable format', failed: 'Failed',
     queued_s: 'Queued', running: 'Running', done: 'Done', cancelled: 'Cancelled',
@@ -65,7 +65,6 @@ createApp({
     const compBusy = ref(false);
     const previewUrl = ref('');
     const checkedParts = ref([]);
-    const legacyUrl = computed(() => `/legacy/?token=${encodeURIComponent(token)}`);
     const isBatch = computed(() =>
       !!(result.value && result.value.media.parts.length > 1));
     const allChecked = computed(() =>
@@ -313,7 +312,7 @@ createApp({
 
     return {
       t, lang, url, partUrl, result, selected, jobs, busy, message, version,
-      withCover, legacyUrl, size, statusLabel, dur,
+      withCover, size, statusLabel, dur,
       settingsOpen, sOutDir, sTheme, sConcurrency, sGeneric, compStatus, compBusy, previewUrl,
       checkedParts, isBatch, allChecked, someChecked, estimated, toggleAll, togglePart,
       toggleLang, toggleTheme, toggleFormat, probe, probePart, download, cancel, retry,
