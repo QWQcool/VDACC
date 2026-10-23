@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, 
 import { open } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import type { AlbumInfo, AlbumTrack } from '../core/album';
 import { throwIfCancelled } from '../core/cancel';
 import { VdlError } from '../core/errors';
 import { UA } from '../core/http';
@@ -66,6 +67,55 @@ async function getJson(path: string, cookie: string): Promise<any> {
   const res = await fetch(API + path, { headers: headers(cookie) });
   if (!res.ok) throw new VdlError('network', `网易云接口 HTTP ${res.status}`);
   return res.json();
+}
+
+/** 专辑链接：`/album?id=123`、`/album/123`、`#/album?id=123`，或裸数字 ID。 */
+export function parseAlbumId(input: string): string {
+  const raw = (input || '').trim();
+  if (/^\d+$/.test(raw)) return raw;
+  try {
+    const u = new URL(raw);
+    // 分享链接常是 `/#/album?id=123`：id 在 hash 里，search 是空的
+    if (/\/album\b/.test(u.hash)) {
+      const q = new URLSearchParams(u.hash.split('?')[1] || '');
+      const id = q.get('id') || '';
+      if (/^\d+$/.test(id)) return id;
+    }
+    // 只认 album 路径：`/song?id=` 里的 id 是歌曲，拿来当专辑会下错东西
+    if (/\/album\b/.test(u.pathname)) {
+      const id = u.searchParams.get('id') || '';
+      if (/^\d+$/.test(id)) return id;
+      const m = /\/album\/(\d+)/.exec(u.pathname);
+      if (m) return m[1];
+    }
+    return '';
+  } catch {
+    return '';
+  }
+}
+
+/** 专辑曲目列表。返回空列表时抛错，不拿“空专辑”冒充成功。 */
+export async function albumTracks(input: string): Promise<AlbumInfo> {
+  const id = parseAlbumId(input);
+  if (!id) throw new VdlError('bad_input', `识别不出网易云专辑 ID: ${input}`);
+  const data = await getJson(`/api/album/${id}`, cookieHeader());
+  const album = data?.album || {};
+  const songs: any[] = album.songs || [];
+  if (!songs.length) {
+    throw new VdlError('not_found', `专辑里没有可下载的曲目（id=${id}）`,
+      '可能是地区限制或接口限流，稍后重试');
+  }
+  return {
+    id,
+    title: String(album.name || `album_${id}`),
+    cover: String(album.picUrl || ''),
+    tracks: songs.map((s: any) => ({
+      id: String(s.id || ''),
+      title: String(s.name || ''),
+      author: (s.artists || s.ar || []).map((a: any) => String(a.name || '')).filter(Boolean).join(' / '),
+      url: `${API}/song?id=${s.id}`,
+    })).filter((t: AlbumTrack) => t.id),
+  };
 }
 
 export async function probeNetease(url: string): Promise<ProbeResult> {

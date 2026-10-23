@@ -17,6 +17,7 @@ import { open } from 'node:fs/promises';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
+import type { AlbumInfo, AlbumTrack } from '../core/album';
 import { throwIfCancelled } from '../core/cancel';
 import { VdlError } from '../core/errors';
 import { UA, request } from '../core/http';
@@ -40,6 +41,7 @@ const QUALITIES: Array<{ prefix: string; ext: string; label: string; bitrate: nu
 
 const BARE_MID = /^[0-9A-Za-z]{14}$/;
 const MID_IN_PATH = /\/(?:songDetail|songdetail)\/([0-9A-Za-z]+)/;
+const ALBUM_IN_PATH = /\/(?:albumDetail|albumdetail)\/([0-9A-Za-z]+)/;
 
 /** probe 时按档位缓存播放地址（purl 带 vkey，会过期，所以每次下载都重新 probe）。 */
 const urlCache = new Map<string, { url: string; ext: string }>();
@@ -387,6 +389,51 @@ export async function getQQ(input: string, formatId: string | null, outDir: stri
   }
 
   return { path: dest, bytes: statSync(dest).size, skipped: false, warnings };
+}
+
+/** 专辑链接：`/n/ryqq/albumDetail/<mid>`、`?albummid=`，或裸 mid。 */
+export function parseAlbumMid(input: string): string {
+  const raw = (input || '').trim();
+  if (BARE_MID.test(raw)) return raw;
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return '';
+  }
+  const host = u.hostname.toLowerCase();
+  if (host !== 'qq.com' && !host.endsWith('.qq.com')) return '';
+  for (const key of ['albummid', 'albumMid', 'mid']) {
+    const value = u.searchParams.get(key) || '';
+    if (BARE_MID.test(value)) return value;
+  }
+  const m = ALBUM_IN_PATH.exec(u.pathname);
+  return m ? m[1] : '';
+}
+
+/** 专辑曲目（`fcg_v8_album_info_cp`）。上限与截断在 core/album.ts。 */
+export async function albumTracks(input: string): Promise<AlbumInfo> {
+  const mid = parseAlbumMid(input);
+  if (!mid) throw new VdlError('bad_input', `识别不出 QQ 音乐专辑 mid: ${input}`);
+  const res = await request(
+    `https://c.y.qq.com/v8/fcg-bin/fcg_v8_album_info_cp.fcg?albummid=${mid}&format=json`,
+    { headers: { Referer: 'https://y.qq.com/' } });
+  const json = await res.json() as any;
+  if (json?.code !== 0) throw new VdlError('album_failed', `专辑接口 code=${json?.code}`);
+  const data = json.data || {};
+  const list: any[] = data.list || [];
+  if (!list.length) throw new VdlError('not_found', `专辑里没有曲目（albummid=${mid}）`);
+  return {
+    id: mid,
+    title: String(data.name || mid),
+    cover: `https://y.qq.com/music/photo_new/T002R300x300M000${mid}.jpg`,
+    tracks: list.map((s: any) => ({
+      id: String(s.songmid || ''),
+      title: String(s.songname || ''),
+      author: (s.singer || []).map((x: any) => String(x.name || '')).filter(Boolean).join(' / '),
+      url: SONG_PAGE + s.songmid,
+    })).filter((t: AlbumTrack) => t.id),
+  };
 }
 
 /**

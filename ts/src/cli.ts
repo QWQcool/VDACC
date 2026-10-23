@@ -1,8 +1,9 @@
 import { getDouyin, probeDouyin } from './engines/douyin';
-import { getNetease, probeNetease } from './engines/netease';
+import { planAlbum } from './core/album';
+import { albumTracks as neteaseAlbum, getNetease, probeNetease } from './engines/netease';
 import { probeBilibili } from './engines/bilibili';
 import { getBilibiliApi, probeBilibiliApi } from './engines/bilibili_api';
-import { getQQ, probeQQ } from './engines/qq';
+import { albumTracks as qqAlbum, getQQ, probeQQ } from './engines/qq';
 import { loadConfig } from './core/config';
 import { VdlError, fail } from './core/errors';
 import { platformOf } from './core/platform';
@@ -132,6 +133,47 @@ async function main() {
       if (has('--json')) console.log(JSON.stringify(res, null, 2));
       else human(res);
       process.exit(res.ok ? 0 : 1);
+    }
+
+    // 专辑批量：显式 --album 才走这条路，默认仍然是单曲/单视频
+    if (cmd === 'get' && has('--album')) {
+      const platform = platformOf(url);
+      if (platform !== 'netease' && platform !== 'qq') {
+        console.error('--album 目前只支持 网易云 / QQ 音乐');
+        process.exit(2);
+      }
+      const album = platform === 'netease' ? await neteaseAlbum(url) : await qqAlbum(url);
+      const { take, dropped } = planAlbum(album.tracks);
+      console.log(`专辑：${album.title}（${album.tracks.length} 首` +
+        `${dropped ? `，本次取前 ${take.length}，略过 ${dropped}` : ''}）`);
+      if (has('--dry-run')) {
+        take.forEach((t, i) => console.log(`  ${i + 1}. ${t.title}${t.author ? ` — ${t.author}` : ''}`));
+        process.exit(0);
+      }
+      const outDir = flag('-o', '下载') || '下载';
+      const formatId = flag('--format', '') || null;
+      let ok = 0;
+      const failed: string[] = [];
+      for (let i = 0; i < take.length; i += 1) {
+        const track = take[i];
+        console.log(`[${i + 1}/${take.length}] ${track.title}`);
+        try {
+          const out = platform === 'netease'
+            ? await getNetease(track.url, formatId, outDir)
+            : await getQQ(track.url, formatId, outDir);
+          ok += 1;
+          console.log(`  ${out.skipped ? '已存在' : '完成'} ${out.path} ` +
+            `(${(out.bytes / 1048576).toFixed(2)} MB)`);
+          for (const w of ((out as any).warnings || [])) console.error(`  注意：${w}`);
+        } catch (err) {
+          const e = err as VdlError;
+          failed.push(`${track.title}: ${e.message || String(err)}`);
+          console.error(`  失败：${e.message || String(err)}`);
+        }
+      }
+      console.log(`完成 ${ok}/${take.length}${failed.length ? `，失败 ${failed.length}` : ''}`);
+      for (const f of failed) console.error(`  失败明细：${f}`);
+      process.exit(failed.length ? 1 : 0);
     }
 
     const platform = platformOf(url);

@@ -69,6 +69,8 @@
   - 搜索不稳定：`musicu.fcg` 的 `DoSearchForQQMusicDesktop` 匿名返回 `req_1.code=2001` +
     `feedbackURL`（登录页）；登录后实测一次 `code=0` 返回 3 条，下一次又回到 2001。
     因此不做关键词搜索，只吃 songmid / 分享链接。
-- 未做（不假装支持）：会员档位实测（当前账号 320K/FLAC 仍 104003）、歌单/专辑、歌词 `.lrc`。
+- **专辑批量已接**：`--album` 支持网易云 `/api/album/{id}` 与 QQ `fcg_v8_album_info_cp`，
+  上限 20（`core/album.ts` 的 `planAlbum`），`--dry-run` 先看曲目；逐首下载，单首失败继续并在结尾汇总。
+- 未做（不假装支持）：会员档位实测（当前账号 320K/FLAC 仍 104003）、歌单、歌词 `.lrc`。
 - 酷我 / 酷狗：未开始。
 - 服务端设置页后续加「音乐账号」页签（与 B站/网易云并列）。
