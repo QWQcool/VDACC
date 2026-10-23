@@ -1,6 +1,6 @@
 # Plan.md —— 计划、架构与决策（唯一计划来源）
 
-> 状态：**3.1.0 已发布**（tag `v3.1.0`，2026-10-23）。后端主线已是 TypeScript（Bun），
+> 状态：**3.2.0 已发布**（tag `v3.2.0`，2026-10-23）。后端主线已是 TypeScript（Bun），
 > Python 冻结并归档在 `legacy/python/`。硬性约束见 `AGENTS.md`，使用说明见 `README.md`，
 > 逐版本历史见 `docs/CHANGELOG.md`，后续计划见 §2.2。
 
@@ -137,6 +137,7 @@ parity 稳定后再决定 Python 是否退化为 yt-dlp helper。
 | 3.0.0 | 正式版：Vue 默认、B站 进度聚合、4K avc 兼容优先、CI 手动 |
 | 3.0.1 | ✅ 已完成：Python 物理归档 `legacy/python/`、删 `/legacy/` 路由与旧 UI（Vue 唯一入口） |
 | 3.1.0 | 限速 + QQ 音乐探测骨架（未接路由）+ 双击启动 + 版本/文档对齐（tag `v3.1.0`） |
+| 3.2.0 | B站字幕/弹幕 + 进度真实分母、QQ 全链路（下载/歌词/预览）、专辑批量、酷我/酷狗、L2 嗅探、auth 在线校验（tag `v3.2.0`） |
 | 已知边界 | 番剧 4K 选流与 yt-dlp 有差异；B站 合并后的 mp4 比两条流之和大一点（容器索引，实测 61KB/21MB） |
 
 契约不变：仍是 `schema=2`，`ts/src/core/types.ts` 与 `legacy/python/vdl/core/models.py` 字段一致。
