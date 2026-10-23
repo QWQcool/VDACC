@@ -49,7 +49,7 @@
 
 | 项 | 现状 | 验收 |
 |---|---|---|
-| 运行时决策 | 本机无 Bun，TS 主线跑不起来；且 59 处相对 import 无 `.ts` 后缀，Node ESM 直接解析失败 | `bun run probe "<url>"` 或等效 Node 入口可用 |
+| 运行时决策 | ✅ 已解决（2026-10-23）：本机 `bun` 命令修好（`@oven/bun-windows-x64` 1.4.3 + 指向它的 shim），实测 `bun --version` / `bun test` / `bun ts/src/server.ts` 均通过。64 处无 `.ts` 后缀的相对 import 由 Bun 直接解析，不需要为 Node ESM 改扩展名 | `bun run probe "<url>"` 或等效 Node 入口可用 |
 | 启动器 | 顶层 `抖音下载器.bat` 指向已归档的 `dy_gui.pyw`，双击必失败 | 双击起 Web 界面并自动打开浏览器 |
 | 版本号 | `package.json` 仍是 3.0.0，代码已是 3.1 内容 | 3.1.0 + tag + CHANGELOG 对齐 |
 
