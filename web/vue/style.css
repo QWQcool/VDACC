@@ -119,6 +119,7 @@
 }
 .icon-btn:hover { background: var(--surface-soft); color: var(--text); }
 .icon-btn:active { transform: translateY(1px); }
+.icon-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .content {
   width: min(1320px, 100%);
@@ -331,6 +332,12 @@
 .batch-limit { color: var(--warn); font-size: 12px; margin: 6px 0 8px; }
 
 /* ── 任务 ───────────────────────────────── */
+.group-label {
+  font-size: 10px; letter-spacing: 1.6px; color: var(--text-3);
+  margin: 14px 0 8px; text-transform: uppercase;
+}
+.group-label:first-of-type { margin-top: 2px; }
+
 .job {
   padding: 14px; border: 1px solid var(--line); border-radius: var(--r-md);
   background: var(--surface);

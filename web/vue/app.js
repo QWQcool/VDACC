@@ -12,6 +12,11 @@ const I18N = {
     outDirHelp: '留空使用默认 下载\\；路径只保存在本机。',
     genericHelp: '只在你点「下载组件」时联网；官网直链 + SHA256 校验。',
     unlimited: '不限速',
+    limitRate: '下载限速（MB/s）',
+    limitRateHelp: '留空或 0 = 不限速；按单条流计算，B站 音轨另起一份预算。',
+    concurrencyFixed: '并发 1（单 worker 串行，当前版本固定）',
+    activeJobs: '进行中', finishedJobs: '已结束',
+    close: '关闭',
     emptyTitle: '粘贴一个链接开始',
     emptyBody: '支持抖音、B站（分P/番剧）、网易云、QQ 音乐、酷我/酷狗、m3u8 与直链；专辑会先列出曲目。',
     download: '下载选中', cover: '封面', subs: '字幕', danmaku: '弹幕',
@@ -42,6 +47,11 @@ const I18N = {
     outDirHelp: 'Leave empty for the default 下载\\ folder; stored on this machine only.',
     genericHelp: 'Only downloads when you click Install; official URL + SHA256 check.',
     unlimited: 'Unlimited',
+    limitRate: 'Download limit (MB/s)',
+    limitRateHelp: 'Empty or 0 = unlimited; per stream (Bilibili audio uses its own budget).',
+    concurrencyFixed: 'Concurrency 1 (single worker, fixed in this version)',
+    activeJobs: 'Active', finishedJobs: 'Finished',
+    close: 'Close',
     emptyTitle: 'Paste a link to start',
     emptyBody: 'Douyin, Bilibili (multi-part/seasons), NetEase, QQ Music, Kuwo/Kugou, m3u8 and direct URLs. Albums list tracks first.',
     download: 'Download', cover: 'Cover', subs: 'Subtitles', danmaku: 'Danmaku',
@@ -62,7 +72,7 @@ const I18N = {
   },
 };
 
-const { createApp, ref, computed, onMounted, onBeforeUnmount } = Vue;
+const { createApp, ref, computed, watch, nextTick, onMounted, onBeforeUnmount } = Vue;
 
 createApp({
   setup() {
@@ -98,6 +108,8 @@ createApp({
     const settingsOpen = ref(false);
     const sOutDir = ref('');
     const sTheme = ref('light');
+    // 限速用 MB/s 呈现（后端是字节/秒）；空串 = 不限速
+    const sLimitRateMB = ref('');
     const sConcurrency = ref(1);
     const sGeneric = ref(false);
     const compStatus = ref('');
@@ -114,6 +126,12 @@ createApp({
       const fmt = result.value && result.value.formats.find((f) => f.id === selected.value[0]);
       return fmt && fmt.bytes ? fmt.bytes * checkedParts.value.length : 0;
     });
+    // 任务按状态分组：进行中置顶，已结束在后；组内保持原有先后
+    const activeJobs = computed(() =>
+      jobs.value.filter((j) => j.status === 'running' || j.status === 'queued'));
+    const finishedJobs = computed(() =>
+      jobs.value.filter((j) => j.status !== 'running' && j.status !== 'queued'));
+    const orderedJobs = computed(() => [...activeJobs.value, ...finishedJobs.value]);
 
     const size = (bytes) => {
       if (!bytes) return '—';
@@ -356,24 +374,38 @@ createApp({
       const s = data.settings || {};
       sOutDir.value = s.outDir || '';
       sTheme.value = s.theme || 'light';
+      sLimitRateMB.value = s.limitRate
+        ? String(Number((s.limitRate / 1048576).toFixed(2)))
+        : '';
       sConcurrency.value = s.concurrency || 1;
       sGeneric.value = !!s.allowGeneric;
       await refreshComponents();
       settingsOpen.value = true;
+      // 键盘/读屏用户打开面板后焦点应落在面板里，而不是留在背后的按钮上
+      nextTick(() => {
+        const el = document.querySelector('.slideover .icon-btn');
+        if (el) el.focus();
+      });
     }
 
     async function saveSettings() {
+      // 空/0 = 不限速；后端存字节/秒
+      const mb = Number(sLimitRateMB.value);
+      // 别叫 limitRate：会遮蔽外面的 ref，赋值静默失效（这里踩过）
+      const limitBytes = Number.isFinite(mb) && mb > 0 ? Math.round(mb * 1048576) : 0;
       const data = await api('/api/settings', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: {
           outDir: sOutDir.value.trim(), theme: sTheme.value,
           concurrency: sConcurrency.value, allowGeneric: sGeneric.value,
+          limitRate: limitBytes,
         },
       });
       if (!data.ok) { message.value = (data.error && data.error.message) || 'failed'; return; }
       document.documentElement.dataset.theme = sTheme.value;
       localStorage.setItem('vdl-theme', sTheme.value);
+      limitRate.value = (data.settings && data.settings.limitRate) || limitBytes;
       settingsOpen.value = false;
       message.value = t('saved');
     }
@@ -407,8 +439,21 @@ createApp({
     }
     function closePreview() { previewUrl.value = ''; }
 
+    // Esc 关闭浮层；打开时锁背景滚动（否则面板后面还能滚，读屏也会读到底下内容）
+    const closeOverlays = () => {
+      if (settingsOpen.value) { settingsOpen.value = false; return; }
+      if (previewUrl.value) previewUrl.value = '';
+    };
+    const onKeydown = (e) => {
+      if (e.key === 'Escape') closeOverlays();
+    };
+    watch([settingsOpen, previewUrl], ([s, p]) => {
+      document.body.style.overflow = s || p ? 'hidden' : '';
+    });
+
     let events = null;
     onMounted(async () => {
+      window.addEventListener('keydown', onKeydown);
       document.documentElement.dataset.theme =
         localStorage.getItem('vdl-theme') || 'light';
       if (!token) {
@@ -440,14 +485,20 @@ createApp({
       };
     });
 
-    onBeforeUnmount(() => { if (events) events.close(); });
+    onBeforeUnmount(() => {
+      if (events) events.close();
+      window.removeEventListener('keydown', onKeydown);
+      document.body.style.overflow = '';
+    });
 
     return {
       t, lang, url, partUrl, result, selected, jobs, busy, message, version,
       withCover, withSubs, withDanmaku, size, statusLabel, dur,
       connected, outDir, limitRate, rateText, platformClass, jobName,
-      settingsOpen, sOutDir, sTheme, sConcurrency, sGeneric, compStatus, compBusy, previewUrl,
+      settingsOpen, sOutDir, sTheme, sLimitRateMB, sConcurrency, sGeneric,
+      compStatus, compBusy, previewUrl,
       checkedParts, isBatch, allChecked, someChecked, estimated, toggleAll, togglePart,
+      activeJobs, finishedJobs, orderedJobs,
       album, albumTracks, checkedTracks, allTracks, toggleTrack, toggleAllTracks,
       toggleLang, toggleTheme, toggleFormat, persistSidecars, probe, probePart, download, cancel, retry,
       openSettings, saveSettings, installComponent, previewSelected, previewJob, closePreview,

@@ -56,9 +56,8 @@
 
         <div class="sys-card">
           <div class="rowline">
-            <span class="dot" :class="{ idle: !connected }"></span>
-            {{ connected ? t('connected') : t('offline') }}
-            <span class="ver" v-if="version">v{{ version }}</span>
+            {{ t('version') }}
+            <span class="ver">{{ version ? 'v' + version : '—' }}</span>
           </div>
           <div class="path" v-if="outDir" :title="outDir">{{ outDir }}</div>
         </div>
@@ -271,7 +270,15 @@
                 <span class="section-label">{{ jobs.length }}</span>
               </div>
 
-              <div v-for="j in jobs" :key="j.id" class="job">
+              <template v-for="(j, i) in orderedJobs" :key="j.id">
+              <div class="group-label" v-if="i === 0">
+                {{ activeJobs.length ? t('activeJobs') : t('finishedJobs') }}
+                · {{ activeJobs.length || finishedJobs.length }}
+              </div>
+              <div class="group-label" v-if="activeJobs.length && i === activeJobs.length">
+                {{ t('finishedJobs') }} · {{ finishedJobs.length }}
+              </div>
+              <div class="job">
                 <div class="job-top">
                   <span class="name">{{ jobName(j) }}</span>
                   <span :class="['state', j.status]">{{ statusLabel(j.status) }}</span>
@@ -295,6 +302,7 @@
                   <button class="btn ghost sm" @click="previewJob(j)">▶ {{ t('preview') }}</button>
                 </div>
               </div>
+              </template>
             </section>
 
             <p v-if="message" class="msg">{{ message }}</p>
@@ -358,6 +366,13 @@
           </div>
 
           <div class="field">
+            <label>{{ t('limitRate') }}</label>
+            <input class="input" v-model="sLimitRateMB" inputmode="decimal"
+                   placeholder="例如 2；留空不限速">
+            <span class="help">{{ t('limitRateHelp') }}</span>
+          </div>
+
+          <div class="field">
             <label>{{ t('theme') }}</label>
             <select class="input" v-model="sTheme">
               <option value="light">{{ t('light') }}</option>
@@ -367,9 +382,10 @@
 
           <div class="field">
             <label>{{ t('concurrency') }}</label>
-            <select class="input" v-model.number="sConcurrency">
-              <option v-for="n in [1, 2, 3, 4]" :key="n" :value="n">{{ n }}</option>
-            </select>
+            <div class="comp-row">
+              <span class="name">{{ t('concurrencyFixed') }}</span>
+              <span class="badge neutral">1</span>
+            </div>
           </div>
 
           <div class="field">
