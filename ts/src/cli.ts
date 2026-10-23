@@ -138,11 +138,19 @@ async function main() {
         ? await getDouyin(url, flag('--format'), flag('-o', '下载') || '下载')
         : platform === 'netease'
           ? await getNetease(url, flag('--format'), flag('-o', '下载') || '下载')
-          : await getBilibiliApi(url, flag('--format'), flag('-o', '下载') || '下载');
+          : await getBilibiliApi(
+            url, flag('--format'), flag('-o', '下载') || '下载', { subs: has('--subs') });
       if (has('--json')) {
-        console.log(JSON.stringify({ schema: 2, ok: true, path: out.path, bytes: out.bytes, skipped: out.skipped }, null, 2));
+        console.log(JSON.stringify({
+          schema: 2, ok: true, path: out.path, bytes: out.bytes, skipped: out.skipped,
+          ...(has('--subs') ? { srt: (out as any).srt || null, srt_count: (out as any).srtCount || 0 } : {}),
+        }, null, 2));
       } else {
         console.log(`完成 ${out.path} (${(out.bytes / 1048576).toFixed(2)} MB)`);
+        if (has('--subs')) {
+          const srt = (out as any).srt as string | null;
+          console.log(srt ? `字幕 ${srt}` : '字幕：该视频没有可用字幕（含 AI 字幕）');
+        }
       }
       process.exit(0);
     }

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { aggregateProgress, parseContentRangeTotal } from '../src/engines/bilibili_api';
+import { aggregateProgress, parseContentRangeTotal, srtTime, toSrt } from '../src/engines/bilibili_api';
 
 // 只测纯函数：真实流的字节数依赖 CDN 与登录态，放进手工验收（见 commit 记录）。
 describe('B站 进度折算', () => {
@@ -23,6 +23,26 @@ describe('B站 进度折算', () => {
     expect(aggregateProgress(0, 5, 0, 20)).toEqual([5, 20]);
     expect(aggregateProgress(20, 5, 0, 10)).toEqual([25, 30]);
     expect(aggregateProgress(20, 5, 0, 0)).toEqual([25, 0]);
+  });
+
+  test('SRT 时间戳格式', () => {
+    expect(srtTime(0)).toBe('00:00:00,000');
+    expect(srtTime(1.5)).toBe('00:00:01,500');
+    expect(srtTime(3725.25)).toBe('01:02:05,250');
+    expect(srtTime(0.9996)).toBe('00:00:01,000');
+    expect(srtTime(-1)).toBe('00:00:00,000');
+  });
+
+  test('字幕 JSON 转 SRT', () => {
+    const srt = toSrt([
+      { from: 1.5, to: 3, content: '你好' },
+      { from: 3, to: 4.25, content: '第二行\r\n换行' },
+    ]);
+    expect(srt).toBe(
+      '1\n00:00:01,500 --> 00:00:03,000\n你好\n\n' +
+      '2\n00:00:03,000 --> 00:00:04,250\n第二行\n换行\n',
+    );
+    expect(toSrt([])).toBe('');
   });
 
   test('两段流拼起来的进度单调、只在最后到 100%', () => {

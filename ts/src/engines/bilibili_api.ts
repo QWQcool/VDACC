@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { open } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -17,6 +17,8 @@ const BUCKETS: Array<[number, string]> = [
 ];
 
 const urlCache = new Map<string, { video: string; audio: string }>();
+/** 字幕接口要 bvid+cid（普通视频）或 ep_id（番剧）；探测时顺手记下，下载带 --subs 时才请求。 */
+let subCtx: { bvid?: string; cid?: number; epId?: string } | null = null;
 
 /** 供下载前预览：只取视频轨（浏览器预览不需要音轨）。 */
 export function previewBilibili(formatId: string): string {
@@ -111,7 +113,9 @@ function foldDash(dash: any, durationMs: number): Format[] {
     const totalBw = Number(best.bandwidth || 0) + Number(bestAudio?.bandwidth || 0);
     out.push(format({
       id,
-      label: BUCKETS.find(([l]) => l === limit)?.[1] || `${best.height}P`,
+      // 不落在已知档位的（竖屏 720×1280、640×360 等）用「宽×高」，别只报高度——
+      // 竖屏视频只报高度会显示成「1280P」，看着像 4K 档
+      label: BUCKETS.find(([l]) => l === limit)?.[1] || `${best.width}×${best.height}`,
       width: Number(best.width || 0), height: Number(best.height || 0),
       ext: 'mp4', vcodec: String(best.codecs || '').split('.')[0],
       acodec: bestAudio ? String(bestAudio.codecs || '').split('.')[0] : '',
@@ -156,6 +160,7 @@ function parseTarget(input: string): Target {
 
 export async function probeBilibiliApi(input: string): Promise<ProbeResult> {
   urlCache.clear();
+  subCtx = null;
   const target = parseTarget(input);
   return target.kind === 'video' ? probeVideo(target) : probeBangumi(target);
 }
@@ -176,6 +181,7 @@ async function probeVideo(target: Target): Promise<ProbeResult> {
   const durationMs = Number(play.timelength || 0) || Number(view.duration || 0) * 1000;
   const formats = foldDash(play.dash, durationMs);
   if (!formats.length) throw new VdlError('no_stream', '没有视频轨');
+  subCtx = { bvid, cid: Number(current.cid) };
 
   const parts: Part[] = pages.length > 1 ? pages.map((p) => ({
     index: Number(p.page || 0),
@@ -224,6 +230,7 @@ async function probeBangumi(target: Target): Promise<ProbeResult> {
   const durationMs = Number(ep.duration || 0) || Number(play.timelength || 0);
   const formats = foldDash(dash, durationMs);
   if (!formats.length) throw new VdlError('no_stream', '没有视频轨');
+  subCtx = { epId: String(ep.id) };
 
   const parts: Part[] = episodes.map((e, i) => ({
     index: i + 1,
@@ -319,7 +326,67 @@ async function probeStreamSize(url: string): Promise<number> {
   }
 }
 
-export async function getBilibiliApi(input: string, formatId: string | null, outDir: string) {
+interface SubEntry { lan: string; name: string; url: string }
+
+/**
+ * 拉字幕列表（含 AI 字幕）。失败返回空数组——
+ * 字幕是附属产物，不能因为它把已经下好的视频判成失败。
+ */
+async function fetchSubtitleList(): Promise<SubEntry[]> {
+  if (!subCtx) return [];
+  const query = subCtx.bvid ? `bvid=${subCtx.bvid}&cid=${subCtx.cid}` : `ep_id=${subCtx.epId}`;
+  try {
+    const data = await apiJson(`/x/player/v2?${query}`, 'https://www.bilibili.com/');
+    return (data?.subtitle?.subtitles || [])
+      .map((s: any) => ({
+        lan: String(s.lan || ''),
+        name: String(s.lan_doc || s.lan || ''),
+        url: String(s.subtitle_url || ''),
+      }))
+      .filter((s: SubEntry) => s.url);
+  } catch {
+    return [];
+  }
+}
+
+const pad2 = (n: number) => String(n).padStart(2, '0');
+
+/** 秒 → `HH:MM:SS,mmm`（SRT 用逗号，不是小数点）。 */
+export function srtTime(sec: number): string {
+  const ms = Math.max(0, Math.round(sec * 1000));
+  return `${pad2(Math.floor(ms / 3600000))}:${pad2(Math.floor((ms % 3600000) / 60000))}:` +
+    `${pad2(Math.floor((ms % 60000) / 1000))},${String(ms % 1000).padStart(3, '0')}`;
+}
+
+/** B站字幕 JSON（`body[].from/to/content`）→ SRT。正文里的换行原样保留。 */
+export function toSrt(body: Array<{ from: number; to: number; content: string }>): string {
+  return (body || []).map((line, i) =>
+    `${i + 1}\n${srtTime(line.from)} --> ${srtTime(line.to)}\n` +
+    `${String(line.content || '').replace(/\r/g, '')}\n`).join('\n');
+}
+
+async function saveSubtitle(videoPath: string): Promise<{ srt: string | null; count: number }> {
+  const list = await fetchSubtitleList();
+  if (!list.length) return { srt: null, count: 0 };
+  const pick = list.find((s) => /^(ai-)?zh/i.test(s.lan)) || list[0];
+  const url = pick.url.startsWith('//') ? `https:${pick.url}` : pick.url;
+  try {
+    const res = await fetch(url, { headers: { 'User-Agent': UA, Referer: 'https://www.bilibili.com/' } });
+    if (!res.ok) return { srt: null, count: list.length };
+    const json = await res.json() as any;
+    const text = toSrt(json?.body || []);
+    if (!text.trim()) return { srt: null, count: list.length };
+    const target = videoPath.replace(/\.mp4$/i, '.srt');
+    writeFileSync(target, text, 'utf8');
+    return { srt: target, count: list.length };
+  } catch {
+    return { srt: null, count: list.length };
+  }
+}
+
+export async function getBilibiliApi(
+  input: string, formatId: string | null, outDir: string, opts: { subs?: boolean } = {},
+) {
   const probe = await probeBilibiliApi(input);
   const fmt = probe.formats.find((f) => f.id === formatId) ||
     probe.formats.find((f) => f.recommended) || probe.formats[0];
@@ -332,7 +399,14 @@ export async function getBilibiliApi(input: string, formatId: string | null, out
     ? `_${probe.media!.id.startsWith('ep') ? 'EP' : 'P'}${selected.index}` : '';
   const stem = `${probe.media!.id}_${safeName(probe.media!.title)}${suffix}_${safeName(fmt.label, 16, fmt.id)}`;
   const dest = join(outDir, `${stem}.mp4`);
-  if (existsSync(dest)) return { path: dest, bytes: statSync(dest).size, skipped: true };
+  if (existsSync(dest)) {
+    // 视频已存在也要让 --subs 生效：字幕是独立产物，不能因为跳过视频就一起跳过
+    const sub = opts.subs ? await saveSubtitle(dest) : { srt: null, count: 0 };
+    return {
+      path: dest, bytes: statSync(dest).size, skipped: true,
+      srt: sub.srt, srtCount: sub.count,
+    };
+  }
 
   const vPart = dest + '.video.m4s';
   const aPart = dest + '.audio.m4s';
@@ -369,5 +443,9 @@ export async function getBilibiliApi(input: string, formatId: string | null, out
   for (const p of [vPart, aPart]) { try { unlinkSync(p); } catch { /* ignore */ } }
   if (run.status !== 0) throw new VdlError('ffmpeg_missing', String(run.stderr || '').slice(0, 300));
 
-  return { path: dest, bytes: statSync(dest).size, skipped: false };
+  const sub = opts.subs ? await saveSubtitle(dest) : { srt: null, count: 0 };
+  return {
+    path: dest, bytes: statSync(dest).size, skipped: false,
+    srt: sub.srt, srtCount: sub.count,
+  };
 }
