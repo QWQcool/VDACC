@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VDACC 示意 · 设置（Slide-over）</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="mark">V</span>
+      <div><b>VDACC</b><small>MEDIA STUDIO</small></div>
+    </div>
+    <div class="nav-group">
+      <div class="nav-label">Workspace</div>
+      <a class="nav-item" href="detail.html"><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg></span><span class="txt">解析</span></a>
+      <a class="nav-item" href="detail.html#jobs"><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h16M4 12h16M4 18h10"/></svg></span><span class="txt">任务</span><span class="count">2</span></a>
+      <a class="nav-item" href="detail.html"><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.2"/></svg></span><span class="txt">专辑</span></a>
+    </div>
+    <div class="nav-group">
+      <div class="nav-label">System</div>
+      <a class="nav-item on" href="settings.html"><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.1l2-1.5-2-3.4-2.3 1a7 7 0 0 0-1.9-1.1L14.3 3h-4.6l-.4 2.9a7 7 0 0 0-1.9 1.1l-2.3-1-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .4 0 .7.1 1.1l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 1.9 1.1l.4 2.9h4.6l.4-2.9a7 7 0 0 0 1.9-1.1l2.3 1 2-3.4-2-1.5c.1-.4.1-.7.1-1.1Z"/></svg></span><span class="txt">设置</span></a>
+    </div>
+    <div class="spacer"></div>
+    <div class="sys-card">
+      <div class="rowline"><span class="dot"></span> 服务运行中<span class="ver">:8765</span></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div><h1>设置</h1><div class="en">PREFERENCES</div></div>
+      <span class="spacer"></span>
+      <span class="pill"><span class="dot"></span> 已连接 · 本机</span>
+    </header>
+
+    <div class="content" style="grid-template-columns:minmax(0,1fr)">
+      <section class="card" style="min-height:320px">
+        <div class="card-head"><h2>解析</h2><span class="en">PROBE</span></div>
+        <div class="probe-row">
+          <input class="input" placeholder="粘贴链接（B站 / 抖音 / 音乐 / m3u8）">
+          <button class="btn primary">解析</button>
+        </div>
+        <p style="color:var(--text-3);font-size:12px;margin:12px 0 0">设置以右侧面板打开，不打断当前工作。</p>
+      </section>
+    </div>
+  </main>
+</div>
+
+<!-- Slide-over：设置 -->
+<div class="scrim">
+  <div class="slideover" role="dialog" aria-label="设置">
+    <div class="so-head">
+      <div><h2>设置</h2><div class="en">PREFERENCES</div></div>
+      <span style="flex:1"></span>
+      <a class="icon-btn" href="detail.html" title="关闭" style="display:grid;place-items:center;text-decoration:none">✕</a>
+    </div>
+
+    <div class="so-body">
+      <div class="field">
+        <label>输出目录</label>
+        <input class="input" value="C:\Users\me\Desktop\VDACC\下载">
+        <span class="help">留空使用默认 <b>下载\</b>；只作用于本机。</span>
+      </div>
+
+      <div class="field">
+        <label>下载限速（字节/秒）</label>
+        <input class="input" placeholder="2097152 = 2 MB/s，留空不限速">
+        <span class="help">按单条流计算；B站 音轨会另起一份预算。</span>
+      </div>
+
+      <div class="field">
+        <label>主题</label>
+        <select class="input"><option>浅色</option><option>深色</option></select>
+      </div>
+
+      <div class="field">
+        <label>并发任务</label>
+        <select class="input"><option>1（默认，对平台更友好）</option><option>2</option></select>
+      </div>
+
+      <div class="field">
+        <label>通用解析组件</label>
+        <div class="list">
+          <div class="list-row">
+            <span class="name">yt-dlp（ytdlp-generic）</span>
+            <span class="badge ok">已安装</span>
+            <button class="btn ghost sm">卸载</button>
+          </div>
+          <div class="list-row">
+            <span class="name">ffmpeg</span>
+            <span class="badge ok">n8.1.2</span>
+            <span class="meta mono" style="margin-left:auto;color:var(--text-3)">PATH</span>
+          </div>
+        </div>
+        <span class="help">只在你点「下载组件」时联网；官网直链 + SHA256 校验。</span>
+      </div>
+
+      <div class="alert">
+        <span class="ico">⚠</span>
+        <div>开启局域网模式后，同网段设备都能访问本服务（仍需 token）。公共网络下不要开。</div>
+      </div>
+    </div>
+
+    <div class="so-foot">
+      <a class="btn ghost" href="detail.html" style="text-decoration:none;display:grid;place-items:center">取消</a>
+      <button class="btn primary">保存</button>
+    </div>
+  </div>
+</div>
+</body>
+</html>

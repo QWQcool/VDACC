@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VDACC 示意 · 解析详情（infOS 风格）</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="app">
+
+  <!-- ── 侧栏 ───────────────────────────── -->
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="mark">V</span>
+      <div><b>VDACC</b><small>MEDIA STUDIO</small></div>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-label">Workspace</div>
+      <a class="nav-item on" href="detail.html">
+        <span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg></span>
+        <span class="txt">解析</span>
+      </a>
+      <a class="nav-item" href="#jobs">
+        <span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h16M4 12h16M4 18h10"/></svg></span>
+        <span class="txt">任务</span><span class="count">2</span>
+      </a>
+      <a class="nav-item" href="detail.html">
+        <span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.2"/></svg></span>
+        <span class="txt">专辑</span>
+      </a>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-label">System</div>
+      <a class="nav-item" href="settings.html">
+        <span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.1l2-1.5-2-3.4-2.3 1a7 7 0 0 0-1.9-1.1L14.3 3h-4.6l-.4 2.9a7 7 0 0 0-1.9 1.1l-2.3-1-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .4 0 .7.1 1.1l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 1.9 1.1l.4 2.9h4.6l.4-2.9a7 7 0 0 0 1.9-1.1l2.3 1 2-3.4-2-1.5c.1-.4.1-.7.1-1.1Z"/></svg></span>
+        <span class="txt">设置</span>
+      </a>
+    </div>
+
+    <div class="spacer"></div>
+
+    <div class="sys-card">
+      <div class="rowline"><span class="dot"></span> 服务运行中<span class="ver">:8765</span></div>
+      <div class="rowline" style="color:var(--text-3);font-size:11px;margin-top:6px">
+        本机 · 局域网可访问
+      </div>
+    </div>
+  </aside>
+
+  <!-- ── 主区 ───────────────────────────── -->
+  <main class="main">
+    <header class="topbar">
+      <div>
+        <h1>解析</h1>
+        <div class="en">MEDIA PROBE</div>
+      </div>
+      <span class="spacer"></span>
+      <span class="pill"><span class="dot"></span> 已连接 · 本机</span>
+      <button class="icon-btn" title="切换主题" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'">◐</button>
+      <a class="icon-btn" href="settings.html" title="设置" style="display:grid;place-items:center;text-decoration:none">⚙</a>
+    </header>
+
+    <div class="content">
+      <!-- 左列 -->
+      <div>
+        <section class="card">
+          <div class="card-head">
+            <h2>粘贴链接</h2>
+            <span class="en">SOURCE</span>
+            <span class="spacer"></span>
+            <span class="section-label">支持 6 个平台 + 直链</span>
+          </div>
+
+          <div class="probe-row">
+            <input class="input" spellcheck="false" value="https://www.bilibili.com/video/BV1viKV6mEA2">
+            <button class="btn primary">解析</button>
+          </div>
+
+          <div class="platform-row">
+            <span class="plat bili"><i></i>B站</span>
+            <span class="plat"><i></i>抖音</span>
+            <span class="plat music"><i></i>QQ 音乐</span>
+            <span class="plat music"><i></i>网易云</span>
+            <span class="plat music"><i></i>酷我 / 酷狗</span>
+            <span class="plat"><i></i>m3u8 / 直链</span>
+          </div>
+        </section>
+
+        <!-- 结果 -->
+        <section class="card">
+          <div class="media">
+            <div class="thumb">封面<span class="dur">03:21</span></div>
+            <div class="media-main">
+              <div class="title-row">
+                <h3>终末地武陵城地图导入UE（GPT神力）</h3>
+                <span class="badge bili">BILIBILI</span>
+              </div>
+              <div class="meta">
+                <span>UP 主 <b>6F978E</b></span>
+                <span>时长 <b class="mono">03:21</b></span>
+                <span>分P <b class="mono">3</b></span>
+                <span>发布 <b>2026-10-21</b></span>
+              </div>
+              <div class="src">https://www.bilibili.com/video/BV1viKV6mEA2?vd_source=…</div>
+              <p class="desc">GPT天天重置，20x瞪不完，于是昨晚睡觉前给 Codex cli 丢了几个 repo，本地工具、破甲 skill、mcp，然后全自动执行任务。</p>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+            <span class="section-label" style="width:32px">画质</span>
+            <div class="quality-tray">
+              <button class="q"><b>720P</b><span>31.14 MB</span></button>
+              <button class="q on"><b>1080P</b><span>81.54 MB</span></button>
+              <button class="q"><b>4K</b><span>257.90 MB</span></button>
+            </div>
+            <button class="btn ghost sm" style="margin-left:auto">预览</button>
+          </div>
+
+          <div class="divider"></div>
+
+          <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap">
+            <span class="section-label" style="width:32px">附属</span>
+            <label class="switch"><input type="checkbox" checked><span class="track"></span>封面</label>
+            <label class="switch"><input type="checkbox" checked><span class="track"></span>字幕</label>
+            <label class="switch"><input type="checkbox"><span class="track"></span>弹幕</label>
+            <span style="font-size:11px;color:var(--text-3)">字幕 / 弹幕会写同名 .srt / .danmaku.xml</span>
+          </div>
+
+          <div style="display:flex;justify-content:flex-end;margin-top:16px">
+            <button class="btn primary" style="height:40px">下载选中</button>
+          </div>
+        </section>
+
+        <!-- 分P -->
+        <section class="card">
+          <div class="card-head">
+            <h2>分P</h2><span class="en">PARTS</span>
+            <span class="spacer"></span>
+            <span class="section-label">已选 3 / 3 · 1080P 整批统一</span>
+          </div>
+          <div class="list">
+            <div class="list-row">
+              <input class="check" type="checkbox" checked>
+              <span class="idx">P01</span><span class="name">终末地武陵城地图导入UE（GPT神力）</span>
+              <span class="qn">1080P</span><span class="meta mono" style="margin:0">03:21</span>
+            </div>
+            <div class="list-row">
+              <input class="check" type="checkbox" checked>
+              <span class="idx">P02</span><span class="name">补充：KDA 皮肤材质在 UE 里的还原</span>
+              <span class="qn">1080P</span><span class="meta mono" style="margin:0">02:48</span>
+            </div>
+            <div class="list-row">
+              <input class="check" type="checkbox" checked>
+              <span class="idx">P03</span><span class="name">渲染参数与性能对比</span>
+              <span class="qn">1080P</span><span class="meta mono" style="margin:0">01:57</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- 音乐 + 警告 -->
+        <section class="card">
+          <div class="alert">
+            <span class="ico">⚠</span>
+            <div><b>未登录，仅匿名档</b>：320K / FLAC 需登录；本次未放行 320K MP3、无损 FLAC——歌曲付费或账号无对应会员。</div>
+          </div>
+          <div class="media" style="margin-top:16px">
+            <div class="thumb" style="width:112px;aspect-ratio:1">封面</div>
+            <div class="media-main">
+              <div class="title-row">
+                <h3 style="font-size:18px">轻轻</h3>
+                <span class="badge music">QQ 音乐</span>
+              </div>
+              <div class="meta"><span>歌手 <b>肖战</b></span><span>时长 <b class="mono">03:40</b></span></div>
+              <div style="display:flex;align-items:center;gap:12px;margin-top:10px;flex-wrap:wrap">
+                <div class="quality-tray">
+                  <button class="q on"><b>128K MP3</b><span>3.37 MB</span></button>
+                  <button class="q"><b>96K AAC</b><span>2.58 MB</span></button>
+                </div>
+                <button class="btn primary sm" style="height:40px;margin-left:auto">下载选中</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 任务 -->
+        <section class="card" id="jobs">
+          <div class="card-head">
+            <h2>任务</h2><span class="en">QUEUE</span>
+            <span class="spacer"></span>
+            <span class="section-label">并发 1</span>
+          </div>
+
+          <div class="job">
+            <div class="job-top">
+              <span class="name">【英雄联盟】K/DA官方MV - “FIRESTARTER（燃）”</span>
+              <span class="badge sys">下载中</span>
+            </div>
+            <div class="job-meta"><span>1080P</span><span>15.6 MB / 21.1 MB</span><span>74%</span><span>2.1 MB/s</span></div>
+            <div class="bar"><i style="width:74%"></i></div>
+            <div class="job-actions"><button class="btn ghost sm">取消</button></div>
+          </div>
+
+          <div class="job">
+            <div class="job-top">
+              <span class="name">轻轻 - 肖战（128K MP3）</span>
+              <span class="badge ok">完成</span>
+            </div>
+            <div class="job-meta"><span>3.39 MB</span><span>字幕 32 行</span><span>10:12:08</span></div>
+            <div class="bar done"><i style="width:100%"></i></div>
+            <div class="job-actions">
+              <button class="btn ghost sm">▶ 预览</button>
+              <button class="btn ghost sm">打开目录</button>
+            </div>
+          </div>
+
+          <div class="job">
+            <div class="job-top">
+              <span class="name">折1万次，会坏吗？iPhone Duo 深度评测（480P）</span>
+              <span class="badge fail">失败</span>
+            </div>
+            <div class="job-meta"><span>http_403</span><span>链接过期，重试会自动刷新地址</span></div>
+            <div class="bar fail"><i></i></div>
+            <div class="job-actions"><button class="btn ghost sm">↻ 重试</button></div>
+          </div>
+        </section>
+      </div>
+
+      <!-- 右栏 -->
+      <aside class="rail">
+        <section class="card">
+          <div class="card-head"><h2>运行状态</h2><span class="en">RUNTIME</span></div>
+          <div class="kv"><span class="k">输出目录</span><span class="v">下载\</span></div>
+          <div class="kv"><span class="k">下载限速</span><span class="v">不限速</span></div>
+          <div class="kv"><span class="k">并发</span><span class="v">1</span></div>
+          <div class="kv"><span class="k">ffmpeg</span><span class="v ok">n8.1.2</span></div>
+          <div class="kv"><span class="k">yt-dlp</span><span class="v ok">已安装</span></div>
+          <div class="kv"><span class="k">版本</span><span class="v">v3.2.0</span></div>
+        </section>
+
+        <section class="card">
+          <div class="card-head"><h2>最近完成</h2><span class="en">RECENT</span></div>
+          <div class="kv"><span class="k" style="width:auto;flex:1;font-family:var(--font-sans);color:var(--text-2);font-size:12px">鸟之诗 (原版)</span><span class="v">320K · 7.1 MB</span></div>
+          <div class="kv"><span class="k" style="width:auto;flex:1;font-family:var(--font-sans);color:var(--text-2);font-size:12px">K/DA - FIRESTARTER</span><span class="v">4K · 257 MB</span></div>
+          <div class="kv"><span class="k" style="width:auto;flex:1;font-family:var(--font-sans);color:var(--text-2);font-size:12px">葬送的芙莉莲 EP01</span><span class="v">1080P · 452 MB</span></div>
+        </section>
+
+        <section class="card">
+          <div class="card-head"><h2>待处理</h2><span class="en">NOTICE</span></div>
+          <div class="kv"><span class="k" style="width:auto;flex:1;color:var(--amber);font-size:12px">QQ 音乐未登录</span><span class="v">仅 128K</span></div>
+          <div class="kv"><span class="k" style="width:auto;flex:1;color:var(--amber);font-size:12px">B站 cookie 已失效</span><span class="v">1080P↓</span></div>
+        </section>
+      </aside>
+    </div>
+  </main>
+</div>
+
+<script>
+  // 让「暗色预览」用同一份页面：detail.html?theme=dark
+  const theme = new URLSearchParams(location.search).get('theme');
+  if (theme === 'dark' || theme === 'light') document.documentElement.dataset.theme = theme;
+</script>
+</body>
+</html>
