@@ -29,6 +29,35 @@
         <p class="hint">{{ t('hint') }}</p>
       </section>
 
+      <section v-if="album" class="card">
+        <div class="v-title">{{ album.title }}</div>
+        <div class="tags">
+          <span class="tag accent">{{ t('album') }}</span>
+          <span class="tag">{{ album.total }} {{ t('tracks') }}</span>
+        </div>
+        <p class="hint" v-if="album.dropped">{{ t('albumDropped') }} {{ album.dropped }}</p>
+
+        <label class="v-check v-all">
+          <input type="checkbox" :checked="allTracks" @change="toggleAllTracks">
+          <span>{{ t('selectAll') }} · {{ checkedTracks.length }}/{{ albumTracks.length }}</span>
+        </label>
+        <div class="v-part-list">
+          <label v-for="tr in albumTracks" :key="tr.id" class="v-part-item">
+            <input type="checkbox" :checked="checkedTracks.includes(tr.id)"
+                   @change="toggleTrack(tr.id)">
+            <span class="v-part-title">{{ tr.title }}</span>
+            <span class="v-num">{{ tr.author }}</span>
+          </label>
+        </div>
+
+        <div class="row v-actions">
+          <span class="spacer"></span>
+          <button class="primary" :disabled="!checkedTracks.length || busy" @click="download">
+            {{ t('download') }} ({{ checkedTracks.length }})
+          </button>
+        </div>
+      </section>
+
       <section v-if="result" class="card">
         <div class="v-title">{{ result.media.title }}</div>
         <div class="tags">

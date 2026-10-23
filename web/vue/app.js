@@ -5,6 +5,7 @@ const I18N = {
     probe: '解析', probing: '解析中…',
     hint: 'B站 分P / 番剧会自动列出集数；下载默认 1080P。',
     download: '下载选中', cover: '封面', subs: '字幕', danmaku: '弹幕', sidecar: '字幕/弹幕',
+    album: '专辑', tracks: '曲目', albumDropped: '超过 20 首，本次只列前 20，略过',
     sidecarHint: '同目录会额外写入 .srt / .danmaku.xml（仅 B站，字幕优先中文 / AI 中文字幕）',
     jobs: '任务', cancel: '取消', retry: '重试',
     selectAll: '全选', estimated: '预计', limitHint: '超过 20 个分集，请分批选择（硬上限 20）',
@@ -23,6 +24,7 @@ const I18N = {
     probe: 'Probe', probing: 'Probing…',
     hint: 'Multi-part videos and seasons are listed automatically. Default quality is 1080P.',
     download: 'Download', cover: 'Cover', subs: 'Subtitles', danmaku: 'Danmaku', sidecar: 'Subs/Danmaku',
+    album: 'Album', tracks: 'tracks', albumDropped: 'More than 20 tracks; only the first 20 are listed, skipped',
     sidecarHint: 'Writes .srt / .danmaku.xml next to the video (Bilibili only, Chinese subtitles preferred)',
     jobs: 'Jobs', cancel: 'Cancel', retry: 'Retry',
     selectAll: 'Select all', estimated: 'Est.', limitHint: 'More than 20 parts: select in batches (hard limit 20)',
@@ -61,6 +63,12 @@ createApp({
     // 附属产物开关：只对 B站 生效，持久化免得每次重开都要勾
     const withSubs = ref(localStorage.getItem('vdl-subs') === '1');
     const withDanmaku = ref(localStorage.getItem('vdl-danmaku') === '1');
+    // 专辑：与单条结果互斥，独立走 /api/album；默认一首都不勾（防误点整张专辑）
+    const album = ref(null);
+    const albumTracks = ref([]);
+    const checkedTracks = ref([]);
+    const allTracks = computed(() =>
+      albumTracks.value.length > 0 && checkedTracks.value.length === albumTracks.value.length);
     const settingsOpen = ref(false);
     const sOutDir = ref('');
     const sTheme = ref('light');
@@ -136,11 +144,40 @@ createApp({
       else selected.value.push(id);
     }
 
+    const isAlbumUrl = (value) =>
+      /music\.163\.com\/(?:#\/)?album/i.test(value) || /y\.qq\.com\/.*albumDetail/i.test(value);
+
     async function probeUrl(target) {
       const value = (target || url.value).trim();
       if (!value) return;
       busy.value = true;
       message.value = '';
+
+      // 专辑链接：先列曲目（上限 20），再按勾选逐首建任务
+      if (isAlbumUrl(value)) {
+        const data = await api('/api/album', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: { url: value },
+        });
+        busy.value = false;
+        if (!data.ok) {
+          message.value = (data.error && data.error.message) || 'failed';
+          return;
+        }
+        // dropped 在响应顶层，挂到 album 上给模板用（截断必须让用户看到）
+        album.value = { ...data.album, dropped: data.dropped || 0 };
+        albumTracks.value = data.tracks || [];
+        checkedTracks.value = [];
+        result.value = null;
+        selected.value = [];
+        url.value = value;
+        return;
+      }
+      album.value = null;
+      albumTracks.value = [];
+      checkedTracks.value = [];
+
       const data = await api('/api/probe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -166,7 +203,36 @@ createApp({
     const probe = () => probeUrl(url.value);
     const probePart = () => probeUrl(partUrl.value);
 
+    function toggleTrack(id) {
+      const at = checkedTracks.value.indexOf(id);
+      if (at >= 0) { checkedTracks.value.splice(at, 1); return; }
+      checkedTracks.value.push(id);
+    }
+
+    function toggleAllTracks() {
+      checkedTracks.value = allTracks.value ? [] : albumTracks.value.map((x) => x.id);
+    }
+
     async function download() {
+      // 专辑：每个勾选曲目一个 job（formatId 留空 = 各曲目用自己的推荐档）
+      if (album.value) {
+        const picked = albumTracks.value.filter((x) => checkedTracks.value.includes(x.id));
+        if (!picked.length) return;
+        busy.value = true;
+        let ok = 0;
+        for (const track of picked) {
+          const data = await api('/api/jobs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: { url: track.url, formatIds: [''], cover: withCover.value },
+          });
+          if (data.ok) { upsert(data.job); ok += 1; }
+        }
+        busy.value = false;
+        message.value = `${t('queued')} ${ok}/${picked.length}`;
+        return;
+      }
+
       if (!result.value || !selected.value.length) return;
 
       // 批量：每个勾选的分P 一个 job，清晰度整批统一
@@ -329,6 +395,7 @@ createApp({
       withCover, withSubs, withDanmaku, size, statusLabel, dur,
       settingsOpen, sOutDir, sTheme, sConcurrency, sGeneric, compStatus, compBusy, previewUrl,
       checkedParts, isBatch, allChecked, someChecked, estimated, toggleAll, togglePart,
+      album, albumTracks, checkedTracks, allTracks, toggleTrack, toggleAllTracks,
       toggleLang, toggleTheme, toggleFormat, persistSidecars, probe, probePart, download, cancel, retry,
       openSettings, saveSettings, installComponent, previewSelected, previewJob, closePreview,
     };

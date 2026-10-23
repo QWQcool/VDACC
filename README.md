@@ -21,7 +21,8 @@
 > 迁移状态：引擎 ✅（抖音 / 网易云 / QQ 音乐 / 酷我 / 酷狗 / B站 分P·番剧 / L2 直链·m3u8）、
 > 服务 ✅（probe / jobs / SSE / files / settings / cancel / retry / 持久化）、`auth` ✅（在线校验）、
 > **Skill ✅**、**TS 测试 53 个 ✅**、**yt-dlp 可选组件 ✅**、**设置面板 ✅**、**限速 ✅**（`--limit 2M`）、
-> **B站字幕 `--subs` / 弹幕 `--danmaku` ✅**（CLI 与 Web UI 都能开）、**专辑 `--album` ✅**（上限 20 + `--dry-run`）、
+> **B站字幕 `--subs` / 弹幕 `--danmaku` ✅**（CLI 与 Web UI 都能开）、
+> **专辑 `--album` ✅**（CLI 上限 20 + `--dry-run`；Web UI 列出前 20 首逐首勾选）、
 > **QQ 音乐 ✅**（`auth qq` 扫码；档位由账号会员权限决定）。
 >
 > 首次运行 `auth` 前需要装依赖：`cd ts && bun install`（只装 `playwright-core`，复用系统 Edge）。

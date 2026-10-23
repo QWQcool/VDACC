@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'no
 import { randomBytes } from 'node:crypto';
 import { dirname, join, normalize, resolve } from 'node:path';
 
+import { planAlbum } from './core/album';
 import { DownloadCancelled, setCancelCheck } from './core/cancel';
 import { loadConfig, saveConfig } from './core/config';
 import { VdlError } from './core/errors';
@@ -11,8 +12,8 @@ import { platformOf } from './core/platform';
 import { setProgressSink } from './core/progress';
 import { currentLimitBytesPerSec, setLimitBytesPerSec } from './core/rate';
 import { getDouyin, previewDouyin, probeDouyin } from './engines/douyin';
-import { formatUrls, getNetease, probeNetease } from './engines/netease';
-import { getQQ, previewQQ, probeQQ } from './engines/qq';
+import { albumTracks as neteaseAlbum, formatUrls, getNetease, probeNetease } from './engines/netease';
+import { albumTracks as qqAlbum, getQQ, previewQQ, probeQQ } from './engines/qq';
 import { getKuwo, probeKuwo } from './engines/kuwo';
 import { getKugou, probeKugou } from './engines/kugou';
 import { canHandle as canSniff, getSniff, probeSniff } from './engines/sniff';
@@ -306,6 +307,34 @@ const server = Bun.serve({
       if (!target) return json({ ok: false, error: { code: 'bad_input', message: '缺少 url' } }, 400);
       try {
         return json(await probeUrl(target));
+      } catch (err) {
+        return json(failBody('ts', err));
+      }
+    }
+
+    // 专辑曲目预览：只列前 20（planAlbum），下载仍由 /api/jobs 逐首建任务
+    if (path === '/api/album' && req.method === 'POST') {
+      const body = await req.json().catch(() => ({})) as any;
+      const target = String(body.url || '').trim();
+      if (!target) return json({ ok: false, error: { code: 'bad_input', message: '缺少 url' } }, 400);
+      const platform = platformOf(target);
+      if (platform !== 'netease' && platform !== 'qq') {
+        return json({
+          ok: false,
+          error: { code: 'unsupported', message: '专辑只支持 网易云 / QQ 音乐' },
+        }, 400);
+      }
+      try {
+        const info = platform === 'netease' ? await neteaseAlbum(target) : await qqAlbum(target);
+        const plan = planAlbum(info.tracks);
+        return json({
+          ok: true,
+          album: {
+            id: info.id, title: info.title, cover: info.cover, total: info.tracks.length,
+          },
+          tracks: plan.take,
+          dropped: plan.dropped,
+        });
       } catch (err) {
         return json(failBody('ts', err));
       }
