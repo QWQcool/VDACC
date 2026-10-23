@@ -54,7 +54,7 @@
 | 网易云播放地址 | `GET /api/song/enhance/player/url?ids=[id]&br=999000` + `MUSIC_U` 直接返回 `level=lossless` 的 FLAC；**不需要 eapi/weapi 加密** |
 | B站清晰度归档 | 必须按**宽度**（3840/2560/1920/1280/854）；宽银幕（1920×816、4096×1740）按高度会整体下移一档 |
 | B站格式结构 | 全部是 video-only + audio-only，必须成对合并；带 cookie 才看得到 4K/1080P |
-| 路由顺序 | 专用引擎（抖音/网易云/QQ/B站）→ `ytdlp-generic` 兜底。抖音裸 ID 规则最宽，必须排最前；QQ 只认域名（14 位 mid 裸串不路由） |
+| 路由顺序 | 专用引擎（抖音/网易云/QQ/酷我/酷狗/B站）→ `ytdlp-generic` 兜底。抖音裸 ID 规则最宽，必须排最前；QQ/酷我/酷狗 只认域名（裸串不路由） |
 | ffmpeg | 本机 n8.1.2（winget，走 PATH）。TS 主线用 `VDL_FFMPEG` 或 PATH；legacy 的查找顺序 `venv\Scripts` → `PATH`（`legacy/python/vdl/core/env.py`）。缺失会让 B站/YouTube 变无声视频 |
 | Playwright | 1.64.0，用 `channel=msedge` 复用系统 Edge，不下载 chromium |
 | venv | 本机实际 **Python 3.12.0**（计划里写的 3.13.4 未复现）；必须带 tkinter |
@@ -68,7 +68,7 @@ ffmpeg 为什么是硬前提：B站/YouTube 全是 DASH 音视频分离，yt-dlp
 ```
 ├─ ts/src/           主线（Bun）：cli.ts / server.ts / auth.ts / skill_cli.ts
 │  ├─ core/          契约层：types / platform / config / http / progress / cancel / rate / naming / errors
-│  └─ engines/       douyin / netease / qq / bilibili(_api) / generic(yt-dlp)
+│  └─ engines/       douyin / netease / qq / kuwo / kugou / bilibili(_api) / generic(yt-dlp)
 ├─ ts/tests/         bun test（当前 22 个）
 ├─ web/              Vue 3 界面（默认入口 /）+ vendor / assets（无 PWA：sw/manifest 已删）
 ├─ ts/skill/         TS Skill 源（SKILL.md + references），由 tools/build_skill_ts.py 组装

@@ -409,6 +409,11 @@ export async function getQQ(input: string, formatId: string | null, outDir: stri
   return { path: dest, bytes: statSync(dest).size, skipped: false, warnings };
 }
 
+/** 供下载前预览：返回 probe 时缓存的 purl（qq 音乐 CDN 只给 http，服务端白名单已单独放行）。 */
+export function previewQQ(formatId: string): string {
+  return urlCache.get(formatId)?.url || '';
+}
+
 /** 专辑链接：`/n/ryqq/albumDetail/<mid>`、`?albummid=`，或裸 mid。 */
 export function parseAlbumMid(input: string): string {
   const raw = (input || '').trim();

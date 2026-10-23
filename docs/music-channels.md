@@ -20,24 +20,24 @@
 
 | 项 | 值 |
 |---|---|
-| 接口 | `https://www.kuwo.cn/api/www/*` |
-| 必需 header | `Referer: https://www.kuwo.cn/`、`csrf`、`Cookie: kw_token=...` |
-| 凭据 | `kw_token`（另有 `Hm_lvt_*` 等统计 cookie，可选） |
-| 搜索/详情 | `/api/www/search/searchMusicBykeyWord`、`/api/www/music/musicInfo` |
-| 播放地址 | `/api/www/music/playUrl?mid=...&type=convert_url3`（返回直链） |
-| 匿名 | 常见 128k，部分 320k |
-| 优先级 | **2（最快出结果）** |
+| 本仓实现 | `ts/src/engines/kuwo.ts`（公开接口，不需要登录/签名） |
+| 详情/歌词 | `GET https://m.kuwo.cn/newh5/singles/songinfoandlrc?musicId=<rid>` → `data.songinfo` + `data.lrclist` |
+| 播放地址 | `GET https://mobi.kuwo.cn/mobi.s?f=web&source=jiakong&type=convert_url_with_sign&rid=<rid>&br=2000kflac` → `data.url/format/bitrate`；`http://antiserver.kuwo.cn/anti.s?type=convert_url&format=mp3&response=url&rid=MUSIC_<rid>` 兜底 |
+| 搜索补字段 | `http://search.kuwo.cn/r.s?ft=music&itemset=web_2013&client=kt&rformat=json&encoding=utf8&all=<kw>`（单引号伪 JSON，按字段抠） |
+| 匿名实测 | 128kbps mp3；`br=2000kflac` 未放行；`Range` 能取真实总字节 |
+| 登录/会员 | 未接。无损走签名接口，本仓不逆向签名、不伪造会员 |
 
 ## 酷狗音乐
 
 | 项 | 值 |
 |---|---|
-| 接口 | `https://wwwapi.kugou.com/yy/index.php`、`https://trackercdn.kugou.com/i/v2/` |
-| 签名 | `key = md5(hash + 'kgcloudv2')`，hash 来自歌曲详情 |
-| 凭据 | `KuGoo`、`kg_mid`、`kg_dfid`、`userid`、`token` |
-| 播放地址 | `trackercdn` 返回 `url[]`（需 `key`、`pid`、`behavior`） |
-| 匿名 | 128k；320k/FLAC 需 VIP |
-| 优先级 | **3** |
+| 本仓实现 | `ts/src/engines/kugou.ts` |
+| 详情 | `GET https://m.kugou.com/app/i/getSongInfo.php?cmd=playInfo&hash=<hash>` → `songName/singerName/album_img/url(128k)/bitRate/timeLength` |
+| 搜索 | `https://mobiles.kugou.com/api/v3/search/song?format=json&keyword=<kw>` → `sqhash` / `320hash` + `pay_type_*` |
+| 播放地址 | `http://trackercdn.kugou.com/i/?cmd=4&pid=1&acceptMp3=1&hash=<hash>&key=md5(hash+'kgcloud')` |
+| 匿名实测 | 付费曲 trackerCdn 返回 `The Resource Needs to be Paid`（`status=0`），只剩 getSongInfo 的 128k 地址 |
+| 签名 | 用的是 v1 `kgcloud`；文档里 v2 `kgcloudv2` 未验证 |
+| 登录 | 未接，不做 `.kgm` 解密 |
 
 ## 实现顺序与验收
 
@@ -73,5 +73,7 @@
   上限 20（`core/album.ts` 的 `planAlbum`），`--dry-run` 先看曲目；逐首下载，单首失败继续并在结尾汇总。
 - **歌词已落盘**：`fcg_query_lyric_new.fcg`（`nobase64=1`）→ 同名 `.lrc`，失败不影响音频。
 - 未做（不假装支持）：会员档位实测（当前账号 320K/FLAC 仍 104003）、歌单。
-- 酷我 / 酷狗：未开始。
+- **酷我 / 酷狗已接入**：公开接口 probe + 下载（`.part` 续传 + 限速）+ ffmpeg 标签/封面，
+  酷我另落 `.lrc`；已注册 `platformOf` / server / cli。实测：酷我《花海》128kbps 3,368,054 字节，
+  酷狗《恒星不忘》128kbps 4,631,150 字节（带 `mjpeg` 封面）。会员档（320K/FLAC）被拒时如实报试听档。
 - 服务端设置页后续加「音乐账号」页签（与 B站/网易云并列）。

@@ -4,6 +4,8 @@ import { albumTracks as neteaseAlbum, getNetease, probeNetease } from './engines
 import { probeBilibili } from './engines/bilibili';
 import { getBilibiliApi, probeBilibiliApi } from './engines/bilibili_api';
 import { albumTracks as qqAlbum, getQQ, probeQQ } from './engines/qq';
+import { getKuwo, probeKuwo } from './engines/kuwo';
+import { getKugou, probeKugou } from './engines/kugou';
 import { loadConfig } from './core/config';
 import { VdlError, fail } from './core/errors';
 import { platformOf } from './core/platform';
@@ -26,6 +28,8 @@ async function probe(url: string): Promise<ProbeResult> {
     case 'douyin': return probeDouyin(url);
     case 'netease': return probeNetease(url);
     case 'qq': return probeQQ(url);
+    case 'kuwo': return probeKuwo(url);
+    case 'kugou': return probeKugou(url);
     case 'bilibili':
       return process.env.VDL_BILI_ENGINE === 'ytdlp'
         ? probeBilibili(url)
@@ -52,6 +56,8 @@ function human(res: ProbeResult) {
     const size = f.bytes ? `${(f.bytes / 1048576).toFixed(2)} MB` : '未知';
     console.log(`  ${f.id.padEnd(14)} ${f.label.padEnd(8)} ${size}${f.recommended ? '  推荐' : ''}`);
   }
+  // warnings 是「不假装支持」的落点（未登录、试听片段、会员档被拒），人读输出也必须看到
+  for (const w of res.warnings || []) console.log(`  注意：${w}`);
 }
 
 async function main() {
@@ -177,7 +183,7 @@ async function main() {
     }
 
     const platform = platformOf(url);
-    if (['douyin', 'bilibili', 'netease', 'qq'].includes(platform)) {
+    if (['douyin', 'bilibili', 'netease', 'qq', 'kuwo', 'kugou'].includes(platform)) {
       if ((has('--subs') || has('--danmaku')) && platform !== 'bilibili') {
         console.error(`--subs / --danmaku 目前只支持 B站，${platform} 会忽略这些参数`);
       }
@@ -187,7 +193,11 @@ async function main() {
           ? await getNetease(url, flag('--format'), flag('-o', '下载') || '下载')
           : platform === 'qq'
             ? await getQQ(url, flag('--format'), flag('-o', '下载') || '下载')
-            : await getBilibiliApi(
+            : platform === 'kuwo'
+              ? await getKuwo(url, flag('--format'), flag('-o', '下载') || '下载')
+              : platform === 'kugou'
+                ? await getKugou(url, flag('--format'), flag('-o', '下载') || '下载')
+                : await getBilibiliApi(
               url, flag('--format'), flag('-o', '下载') || '下载',
               { subs: has('--subs'), danmaku: has('--danmaku') });
       if (has('--json')) {

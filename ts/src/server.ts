@@ -12,7 +12,9 @@ import { setProgressSink } from './core/progress';
 import { currentLimitBytesPerSec, setLimitBytesPerSec } from './core/rate';
 import { getDouyin, previewDouyin, probeDouyin } from './engines/douyin';
 import { formatUrls, getNetease, probeNetease } from './engines/netease';
-import { getQQ, probeQQ } from './engines/qq';
+import { getQQ, previewQQ, probeQQ } from './engines/qq';
+import { getKuwo, probeKuwo } from './engines/kuwo';
+import { getKugou, probeKugou } from './engines/kugou';
 import { getBilibiliApi, previewBilibili, probeBilibiliApi } from './engines/bilibili_api';
 import { componentPath, genericInstalled, getGeneric, probeGeneric } from './engines/generic';
 import type { ProbeResult } from './core/types';
@@ -126,6 +128,8 @@ async function probeUrl(url: string): Promise<ProbeResult> {
     case 'douyin': return probeDouyin(url);
     case 'netease': return probeNetease(url);
     case 'qq': return probeQQ(url);
+    case 'kuwo': return probeKuwo(url);
+    case 'kugou': return probeKugou(url);
     case 'bilibili': return probeBilibiliApi(url);
     default: {
       if (loadConfig().allowGeneric && genericInstalled()) return probeGeneric(url);
@@ -140,6 +144,8 @@ async function downloadUrl(url: string, formatId: string) {
     case 'douyin': return getDouyin(url, formatId, OUT);
     case 'netease': return getNetease(url, formatId, OUT);
     case 'qq': return getQQ(url, formatId, OUT);
+    case 'kuwo': return getKuwo(url, formatId, OUT);
+    case 'kugou': return getKugou(url, formatId, OUT);
     case 'bilibili': return getBilibiliApi(url, formatId, OUT);
     default: {
       if (loadConfig().allowGeneric && genericInstalled()) {
@@ -336,6 +342,7 @@ const server = Bun.serve({
         case 'douyin': src = previewDouyin(formatId); ref = 'https://www.douyin.com/'; break;
         case 'bilibili': src = previewBilibili(formatId); ref = 'https://www.bilibili.com/'; break;
         case 'netease': src = formatUrls.get(formatId) || ''; ref = 'https://music.163.com/'; break;
+        case 'qq': src = previewQQ(formatId); ref = 'https://y.qq.com/'; break;
         default: break;
       }
       if (!src) {
@@ -352,7 +359,14 @@ const server = Bun.serve({
       try { host = new URL(src).hostname.toLowerCase(); } catch { /* 非法 URL */ }
       const allow = ['douyin.com', 'douyinvod.com', 'byteicdn.com',
         'bilivideo.com', 'bilivideo.cn', '126.net', '127.net'];
-      if (!src.startsWith('https://') || !allow.some((h) => host === h || host.endsWith(`.${h}`))) {
+      // QQ 音乐 CDN 只给 http（aqqmusic.tc.qq.com / *.stream.qqmusic.qq.com），
+      // 所以只对这两个后缀放行 http；其它站点仍然强制 https，不顺手放大 http 面
+      const qqHosts = ['qqmusic.qq.com', 'tc.qq.com'];
+      const hostOk = allow.some((h) => host === h || host.endsWith(`.${h}`)) ||
+        qqHosts.some((h) => host === h || host.endsWith(`.${h}`));
+      const schemeOk = src.startsWith('https://') ||
+        (src.startsWith('http://') && qqHosts.some((h) => host === h || host.endsWith(`.${h}`)));
+      if (!hostOk || !schemeOk) {
         return json({ ok: false, error: { code: 'forbidden', message: '不允许的流地址' } }, 403);
       }
       const headers: Record<string, string> = { 'User-Agent': UA, Referer: ref || src };

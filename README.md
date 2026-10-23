@@ -17,7 +17,7 @@
 > bun ts/src/cli.ts auth <bilibili|netease|qq>            # 失效就重扫（弹独立 Edge）
 > ```
 >
-> 迁移状态：引擎 ✅（抖音 / 网易云 / QQ 音乐 / B站 分P·番剧）、服务 ✅（probe / jobs / SSE / files /
+> 迁移状态：引擎 ✅（抖音 / 网易云 / QQ 音乐 / 酷我 / 酷狗 / B站 分P·番剧）、服务 ✅（probe / jobs / SSE / files /
 > settings / cancel / retry / 持久化）、`auth` ✅、**Skill ✅**、**TS 测试 27 个 ✅**、
 > **yt-dlp 可选组件 ✅**、**设置面板 ✅**、**限速 ✅**（`--limit 2M`）、
 > **QQ 音乐 ✅**（`auth qq` 扫码；档位由账号会员权限决定）、**B站字幕 `--subs` ✅**。
@@ -160,7 +160,7 @@ VDACC\
 ├─ ts\
 │  ├─ src\            主线：cli / server / auth / skill_cli
 │  │  ├─ core\        契约层：types / platform / config / http / progress / cancel / rate
-│  │  └─ engines\     douyin / netease / qq / bilibili(_api) / generic(yt-dlp)
+│  │  └─ engines\     douyin / netease / qq / kuwo / kugou / bilibili(_api) / generic(yt-dlp)
 │  ├─ tests\          bun test（27 个）
 │  └─ skill\          TS Skill 源（SKILL.md + references）
 ├─ web\               Vue 3 界面（默认入口 /）
