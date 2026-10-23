@@ -13,6 +13,7 @@
 > bun ts/src/cli.ts get "<url>" --danmaku           # 落同名 .danmaku.xml（B站 弹幕）
 > bun ts/src/cli.ts get "<album-url>" --album --dry-run   # 专辑曲目预览（上限 20）
 > bun ts/src/cli.ts get "<album-url>" --album             # 逐首下载（失败继续并汇总）
+> bun ts/src/cli.ts get "<m3u8 或直链 mp4>"               # L2：HLS 用 ffmpeg 合成 mp4
 > bun ts/src/cli.ts auth <bilibili|netease|qq> --status   # 默认在线校验 cookie 是否还有效
 > bun ts/src/cli.ts auth <bilibili|netease|qq>            # 失效就重扫（弹独立 Edge）
 > ```

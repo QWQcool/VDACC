@@ -6,6 +6,7 @@ import { getBilibiliApi, probeBilibiliApi } from './engines/bilibili_api';
 import { albumTracks as qqAlbum, getQQ, probeQQ } from './engines/qq';
 import { getKuwo, probeKuwo } from './engines/kuwo';
 import { getKugou, probeKugou } from './engines/kugou';
+import { canHandle as canSniff, getSniff, probeSniff } from './engines/sniff';
 import { loadConfig } from './core/config';
 import { VdlError, fail } from './core/errors';
 import { platformOf } from './core/platform';
@@ -35,6 +36,8 @@ async function probe(url: string): Promise<ProbeResult> {
         ? probeBilibili(url)
         : probeBilibiliApi(url);
     default: {
+      // L2：直链 / m3u8 自己吃，不依赖 yt-dlp 组件
+      if (canSniff(url)) return probeSniff(url);
       if (loadConfig().allowGeneric && genericInstalled()) return probeGeneric(url);
       throw new VdlError('engine_unavailable', `不支持的站点: ${url}`,
         genericInstalled() ? '启用通用解析后重试：bun ts/src/cli.ts config? 或设置 allowGeneric'
@@ -217,6 +220,22 @@ async function main() {
           else if (dm.danmaku) console.log(`弹幕 ${dm.danmaku}（${dm.danmakuCount} 条）`);
           else console.log('弹幕：该视频没有弹幕');
         }
+      }
+      process.exit(0);
+    }
+
+    // L2 嗅探：直链 / m3u8 不依赖 yt-dlp 组件
+    if (platform === 'unsupported' && canSniff(url)) {
+      if (has('--subs') || has('--danmaku')) {
+        console.error('--subs / --danmaku 只支持 B站，嗅探会忽略这些参数');
+      }
+      const out = await getSniff(url, flag('--format'), flag('-o', '下载') || '下载');
+      if (has('--json')) {
+        console.log(JSON.stringify({
+          schema: 2, ok: true, path: out.path, bytes: out.bytes, skipped: out.skipped,
+        }, null, 2));
+      } else {
+        console.log(`完成 ${out.path} (${(out.bytes / 1048576).toFixed(2)} MB)`);
       }
       process.exit(0);
     }

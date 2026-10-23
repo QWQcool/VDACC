@@ -1,5 +1,5 @@
 export type Platform =
-  | 'douyin' | 'netease' | 'bilibili' | 'qq' | 'kuwo' | 'kugou' | 'unsupported';
+  | 'douyin' | 'netease' | 'bilibili' | 'qq' | 'kuwo' | 'kugou' | 'sniff' | 'unsupported';
 
 /** 纯函数，CLI / Skill / 服务端共用，避免三处正则漂移。 */
 export function platformOf(input: string): Platform {

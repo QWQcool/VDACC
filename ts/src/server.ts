@@ -15,6 +15,7 @@ import { formatUrls, getNetease, probeNetease } from './engines/netease';
 import { getQQ, previewQQ, probeQQ } from './engines/qq';
 import { getKuwo, probeKuwo } from './engines/kuwo';
 import { getKugou, probeKugou } from './engines/kugou';
+import { canHandle as canSniff, getSniff, probeSniff } from './engines/sniff';
 import { getBilibiliApi, previewBilibili, probeBilibiliApi } from './engines/bilibili_api';
 import { componentPath, genericInstalled, getGeneric, probeGeneric } from './engines/generic';
 import type { ProbeResult } from './core/types';
@@ -132,6 +133,7 @@ async function probeUrl(url: string): Promise<ProbeResult> {
     case 'kugou': return probeKugou(url);
     case 'bilibili': return probeBilibiliApi(url);
     default: {
+      if (canSniff(url)) return probeSniff(url);
       if (loadConfig().allowGeneric && genericInstalled()) return probeGeneric(url);
       throw new VdlError('engine_unavailable', `暂不支持这个站点: ${url}`,
         genericInstalled() ? '在设置里启用「通用解析」后重试' : '在设置里下载 yt-dlp 组件');
@@ -148,6 +150,7 @@ async function downloadUrl(url: string, formatId: string) {
     case 'kugou': return getKugou(url, formatId, OUT);
     case 'bilibili': return getBilibiliApi(url, formatId, OUT);
     default: {
+      if (canSniff(url)) return getSniff(url, formatId, OUT);
       if (loadConfig().allowGeneric && genericInstalled()) {
         return getGeneric(url, formatId, OUT);
       }
