@@ -314,6 +314,20 @@ function ffmpeg(args: string[]) {
   return spawnSync(ff, args, { encoding: 'utf8', windowsHide: true });
 }
 
+/** 歌词单独落 .lrc（与网易云一致）；拿不到就返回空串，不影响音频。 */
+async function fetchLyric(mid: string): Promise<string> {
+  try {
+    const res = await request(
+      'https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?' +
+      `songmid=${mid}&format=json&nobase64=1&g_tk=5381`,
+      { headers: { Referer: 'https://y.qq.com/portal/player.html' } });
+    const json = await res.json() as any;
+    return json?.code === 0 ? String(json?.lyric || '').trim() : '';
+  } catch {
+    return '';
+  }
+}
+
 /**
  * 下载单曲。流程与网易云一致：流式落盘（.part）→ 封面/标签同一次 ffmpeg 写入 →
  * 失败就把原始音频改名留着，不因为“标签写不进去”丢掉已经下好的内容。
@@ -338,6 +352,10 @@ export async function getQQ(input: string, formatId: string | null, outDir: stri
     unlinkSync(part);
     throw new VdlError('bad_payload', '文件过小，多半是试听片段或错误页');
   }
+
+  // 歌词是附属产物：失败了也照样出音频，不往上抛
+  const lyric = await fetchLyric(probe.media!.id);
+  if (lyric) writeFileSync(dest.replace(/\.\w+$/, '.lrc'), lyric + '\n', 'utf8');
 
   const warnings: string[] = [];
   const rawCover = join(outDir, '__vdl_cover.img');
