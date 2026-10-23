@@ -12,8 +12,9 @@
 > ```
 >
 > 迁移状态：引擎 ✅（抖音 / 网易云下载 / B站 分P·番剧）、服务 ✅（probe / jobs / SSE / files /
-> settings / cancel / retry / 持久化）、`auth` ✅、**Skill ✅**、**TS 测试 22 个 ✅**、
-> **yt-dlp 可选组件 ✅**、**设置面板 ✅**、**限速 ✅**（`--limit 2M`）。
+> settings / cancel / retry / 持久化）、`auth` ✅、**Skill ✅**、**TS 测试 27 个 ✅**、
+> **yt-dlp 可选组件 ✅**、**设置面板 ✅**、**限速 ✅**（`--limit 2M`）、
+> **QQ 音乐 probe 骨架 ✅**（匿名档位，未接路由）。
 >
 > 首次运行 `auth` 前需要装依赖：`cd ts && bun install`（只装 `playwright-core`，复用系统 Edge）。
 >
@@ -90,13 +91,14 @@ Playwright 起一个独立 Edge（独立 profile，不碰你正在用的）
 
 ![界面](docs/design/screenshots/vdl-web-m3.png)
 
-## 安装成桌面应用（PWA）
+## 桌面快捷方式
 
-用 Chrome/Edge 打开 `vdl serve` 打印的地址，地址栏会出现「安装」，装完可从开始菜单启动。
+**没有 PWA 了**：`sw.js` 与 manifest 的引用随旧版原生界面一起删掉了，地址栏不会出现「安装」。
 
-- 首次带 token 打开后，token 会存进浏览器本地，之后从图标启动不用再带参数；
-- Service Worker **只缓存界面外壳**，任务与进度始终走网络；
-- 用局域网 IP（http）打开时浏览器不允许注册 SW，所以手机上不能"安装"，只能直接访问。
+- 想固定入口就在浏览器里手动「创建快捷方式」，指向 `VDACC.bat` 启动时打开的那个地址；
+- token 会存进 localStorage，但服务端每次启动都**重新生成** token，所以旧快捷方式在重启后会 401——
+  正常用法是用 `VDACC.bat` 启动（它会自动打开带新 token 的地址）；
+- 需要长期固定的快捷方式，就自己用 `--token <固定值>` 启动，并接受这个 token 落在本机 URL/本地存储里。
 
 ## 浏览器扩展
 

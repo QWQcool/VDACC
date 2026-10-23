@@ -250,7 +250,8 @@ const server = Bun.serve({
 
     if (path === '/api/health') {
       return json({
-        ok: true, version: '3.0.0', schema: 2, outDir: OUT,
+        // 与根 package.json / ts/package.json 保持一致（server 要能单独编译成 exe，不读文件）
+        ok: true, version: '3.1.0', schema: 2, outDir: OUT,
         jobs: order.length, engine: 'ts',
         theme: (loadConfig().theme || 'light'),
         limitRate: currentLimitBytesPerSec(),

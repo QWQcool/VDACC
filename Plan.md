@@ -1,6 +1,6 @@
 # Plan.md —— 计划、架构与决策（唯一计划来源）
 
-> 状态：**3.0.0 已发布，3.1 开发中**（最新提交 `33222ae`）。后端主线已是 TypeScript（Bun），
+> 状态：**3.1.0 已发布**（tag `v3.1.0`，2026-10-23）。后端主线已是 TypeScript（Bun），
 > Python 冻结并归档在 `legacy/python/`。硬性约束见 `AGENTS.md`，使用说明见 `README.md`，
 > 逐版本历史见 `docs/CHANGELOG.md`，后续计划见 §2.2。
 
@@ -51,7 +51,7 @@
 |---|---|---|
 | 运行时决策 | ✅ 已解决（2026-10-23）：本机 `bun` 命令修好（`@oven/bun-windows-x64` 1.4.3 + 指向它的 shim），实测 `bun --version` / `bun test` / `bun ts/src/server.ts` 均通过。64 处无 `.ts` 后缀的相对 import 由 Bun 直接解析，不需要为 Node ESM 改扩展名 | `bun run probe "<url>"` 或等效 Node 入口可用 |
 | 启动器 | ✅ 已解决（2026-10-23）：`抖音下载器.bat` 已删，改为 `VDACC.bat`（起服务 + `--open` 打开浏览器）；实测双击后 `/` 200、无 token 的 `/api/health` 401 | 双击起 Web 界面并自动打开浏览器 |
-| 版本号 | `package.json` 仍是 3.0.0，代码已是 3.1 内容 | 3.1.0 + tag + CHANGELOG 对齐 |
+| 版本号 | ✅ 已解决（2026-10-23）：两个 `package.json` 与 `/api/health` 均为 3.1.0，`server.test.ts` 断言同步改为 3.1.0，CHANGELOG 补 v3.1.0，tag `v3.1.0` | 3.1.0 + tag + CHANGELOG 对齐 |
 
 #### 2.2.2 P1 功能补齐
 
@@ -136,6 +136,7 @@ parity 稳定后再决定 Python 是否退化为 yt-dlp helper。
 | 已补（3.1） | QQ 音乐引擎骨架：匿名 `probe`（仅接口真放行的档位），**未接路由**、无下载 |
 | 3.0.0 | 正式版：Vue 默认、B站 进度聚合、4K avc 兼容优先、CI 手动 |
 | 3.0.1 | ✅ 已完成：Python 物理归档 `legacy/python/`、删 `/legacy/` 路由与旧 UI（Vue 唯一入口） |
+| 3.1.0 | 限速 + QQ 音乐探测骨架（未接路由）+ 双击启动 + 版本/文档对齐（tag `v3.1.0`） |
 | 已知边界 | SSE 百分比按单条流；番剧 4K 选流与 yt-dlp 有差异 |
 
 契约不变：仍是 `schema=2`，`ts/src/core/types.ts` 与 `legacy/python/vdl/core/models.py` 字段一致。

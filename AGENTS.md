@@ -70,7 +70,7 @@ ffmpeg 为什么是硬前提：B站/YouTube 全是 DASH 音视频分离，yt-dlp
 │  ├─ core/          契约层：types / platform / config / http / progress / cancel / rate / naming / errors
 │  └─ engines/       douyin / netease / bilibili(_api) / generic(yt-dlp) / music(骨架，未注册)
 ├─ ts/tests/         bun test（当前 22 个）
-├─ web/              Vue 3 界面（默认入口 /）+ vendor / assets / manifest
+├─ web/              Vue 3 界面（默认入口 /）+ vendor / assets（无 PWA：sw/manifest 已删）
 ├─ ts/skill/         TS Skill 源（SKILL.md + references），由 tools/build_skill_ts.py 组装
 ├─ legacy/python/    Python 归档：vdl / skill / tests / tools / dy_* / VDACC.bat（冻结，仅参考）
 ├─ docs/             CHANGELOG.md、music-channels.md、design/
