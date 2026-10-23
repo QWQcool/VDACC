@@ -279,6 +279,46 @@ async function streamTo(url: string, part: string,
   return statSync(part).size;
 }
 
+/** 从 `content-range: bytes 0-0/21154992` 里取总字节；`*` 或畸形值返回 0。 */
+export function parseContentRangeTotal(header: string | null): number {
+  const m = /\/(\d+)\s*$/.exec(header || '');
+  return m ? Number(m[1]) : 0;
+}
+
+/**
+ * 进度折算：两条流共用同一个分母。
+ * planned 是「探测到的视频+音频真实总字节」（探不到时退回 bandwidth 估算），
+ * 它非 0 就一直用它，否则退回「已完成 + 当前流总量」——后者在切到音轨时分会变，
+ * 但至少不会卡在 100% 不动。
+ */
+export function aggregateProgress(
+  base: number, written: number, planned: number, streamTotal: number,
+): [number, number] {
+  if (planned > 0) return [base + written, planned];
+  return [base + written, streamTotal > 0 ? base + streamTotal : 0];
+}
+
+/**
+ * 用 `Range: bytes=0-0` 探真实总字节。B站 CDN 支持 Range（续传就靠它），
+ * 只读响应头、立刻取消 body，不会真下一个字节；失败返回 0 由调用方回退。
+ */
+async function probeStreamSize(url: string): Promise<number> {
+  if (!url) return 0;
+  try {
+    const res = await fetch(url, {
+      headers: { 'User-Agent': UA, Referer: 'https://www.bilibili.com/', Range: 'bytes=0-0' },
+    });
+    const ranged = parseContentRangeTotal(res.headers.get('content-range'));
+    const length = Number(res.headers.get('content-length') || 0);
+    await res.body?.cancel();
+    if (ranged > 0) return ranged;
+    // 服务端忽略 Range 返回 200 时，Content-Length 就是完整大小
+    return res.status === 200 && length > 0 ? length : 0;
+  } catch {
+    return 0;
+  }
+}
+
 export async function getBilibiliApi(input: string, formatId: string | null, outDir: string) {
   const probe = await probeBilibiliApi(input);
   const fmt = probe.formats.find((f) => f.id === formatId) ||
@@ -297,16 +337,29 @@ export async function getBilibiliApi(input: string, formatId: string | null, out
   const vPart = dest + '.video.m4s';
   const aPart = dest + '.audio.m4s';
 
-  // 视频+音频两条流，按「已完成字节 + 当前流」聚合，避免百分比到 99.9 后卡住
+  // 视频+音频两条流共用一个分母：优先用 Range 探到的真实总字节（精确），
+  // 探不到才退回 playurl 的带宽估算（实测差 0.3%，且带宽缺失时会先到 100% 再回落）
   const expected = fmt.bytes || 0;
+  const [vPlanned, aPlanned] = await Promise.all([
+    probeStreamSize(urls.video),
+    urls.audio ? probeStreamSize(urls.audio) : Promise.resolve(0),
+  ]);
+  let planned = 0;
+  if (vPlanned) planned = urls.audio ? (aPlanned ? vPlanned + aPlanned : 0) : vPlanned;
+  if (!planned) planned = expected;
+
   let base = 0;
   const sink = (written: number, total: number) => {
-    if (expected) report(base + written, expected);
-    else report(base + written, total ? base + total : 0);
+    const [w, t] = aggregateProgress(base, written, planned, total);
+    report(w, t);
   };
   await streamTo(urls.video, vPart, sink);
   base = statSync(vPart).size;
   if (urls.audio) await streamTo(urls.audio, aPart, sink);
+  if (process.env.VDL_DEBUG_SIZE) {
+    console.log('[size] vPlanned', vPlanned, 'aPlanned', aPlanned, 'planned', planned,
+      'expected', expected, 'vPart', statSync(vPart).size, 'aPart', statSync(aPart).size);
+  }
 
   const ff = process.env.VDL_FFMPEG || 'ffmpeg';
   const args = urls.audio
