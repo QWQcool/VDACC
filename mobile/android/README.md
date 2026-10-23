@@ -42,18 +42,37 @@ adb exec-out screencap -p > shot.png
 ## 四、自己构建
 
 ```bat
-set JAVA_HOME=%LOCALAPPDATA%\vdacc-tools\jdk17
+set JAVA_HOME=C:\Program Files\Eclipse Adoptium\jdk-17.0.20.101-hotspot
 set ANDROID_HOME=%LOCALAPPDATA%\vdacc-tools\android-sdk
 %LOCALAPPDATA%\vdacc-tools\gradle-8.7\bin\gradle.bat -p mobile\android assembleDebug
 ```
 
-工具链（本机已装，均不入库）：
+工具链（本机已装，均不入库；2026-10-24 实装并验证）：
 
-| 组件 | 位置 |
-|---|---|
-| JDK 17（Temurin） | `%LOCALAPPDATA%\vdacc-tools\jdk17` |
-| Android SDK（platform 34 / build-tools 34.0.0） | `%LOCALAPPDATA%\vdacc-tools\android-sdk` |
-| Gradle 8.7 | `%LOCALAPPDATA%\vdacc-tools\gradle-8.7` |
+| 组件 | 版本 | 位置 | 安装方式 |
+|---|---|---|---|
+| JDK 17（Temurin） | 17.0.20.1 | `C:\Program Files\Eclipse Adoptium\jdk-17.0.20.101-hotspot` | `winget install EclipseAdoptium.Temurin.17.JDK` |
+| Android SDK | platform-tools / platform-34 / build-tools 34.0.0 | `%LOCALAPPDATA%\vdacc-tools\android-sdk` | cmdline-tools + `sdkmanager` |
+| Gradle | 8.7 | `%LOCALAPPDATA%\vdacc-tools\gradle-8.7` | zip；**用腾讯镜像**（`https://mirrors.cloud.tencent.com/gradle/`，12s）而不是官方源（超时） |
+
+换机复现：
+
+```bat
+winget install EclipseAdoptium.Temurin.17.JDK
+
+rem 下载 commandlinetools-win-*_latest.zip，解压到 android-sdk 后必须再套一层
+rem cmdline-tools 目录，最终是 android-sdk\cmdline-tools\latest\bin\sdkmanager.bat
+rem （少了这层 sdkmanager 会找不到自己的 SDK 根）
+%LOCALAPPDATA%\vdacc-tools\android-sdk\cmdline-tools\latest\bin\sdkmanager.bat ^
+  --sdk_root=%LOCALAPPDATA%\vdacc-tools\android-sdk ^
+  --licenses
+%LOCALAPPDATA%\vdacc-tools\android-sdk\cmdline-tools\latest\bin\sdkmanager.bat ^
+  --sdk_root=%LOCALAPPDATA%\vdacc-tools\android-sdk ^
+  "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+```
+
+实测构建：`BUILD SUCCESSFUL in 2m 43s`（首次含 AGP 8.5.2 下载），产物
+`app/build/outputs/apk/debug/app-debug.apk` **9.2KB**。
 
 ## 不做的部分
 
