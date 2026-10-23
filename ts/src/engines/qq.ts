@@ -65,19 +65,31 @@ export function canHandle(input: string): boolean {
   return parseSongmid(input) !== '';
 }
 
+interface Credential { uin: string; authst: string }
+
 /**
- * 是否放了 QQ 音乐凭据。只判断存在性，不读取/打印 cookie 值。
- * 目前只用于给用户一句**真话**：凭据在，但登录链路还没接。
+ * 读 `auth qq` 写下的 storage_state，凑 vkey 需要的 uin + qm_keyst。
+ * cookie 里 `uin` 常带前导 `o`（o1234567890），接口要纯数字；qm_keyst 可能要 decode。
+ * 返回值只用于请求参数，不打印、不入日志。
  */
-function hasCredential(): boolean {
+function loadCredential(): Credential | null {
   const file = join(process.env.LOCALAPPDATA || '', 'vdl', 'auth', 'qq.json');
-  if (!existsSync(file)) return false;
+  if (!existsSync(file)) return null;
   try {
     const state = JSON.parse(readFileSync(file, 'utf8'));
-    const names = new Set((state.cookies || []).map((c: any) => String(c.name || '')));
-    return names.has('qm_keyst') || names.has('qqmusic_key') || names.has('skey');
+    const now = Date.now() / 1000;
+    const cookies = (state.cookies || []).filter((c: any) =>
+      String(c.domain || '').includes('qq.com') &&
+      (!c.expires || c.expires < 0 || c.expires > now));
+    const get = (name: string) =>
+      String(cookies.find((c: any) => c.name === name)?.value || '');
+    const uin = (get('uin') || get('p_uin') || get('pt2gguin'))
+      .replace(/^o/i, '').replace(/\D/g, '');
+    let authst = get('qm_keyst') || get('qqmusic_key');
+    try { authst = decodeURIComponent(authst); } catch { /* 保持原值 */ }
+    return uin && authst ? { uin, authst } : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -135,11 +147,15 @@ interface MidUrl {
   result: number;
 }
 
-async function fetchVkeys(mid: string): Promise<{ sip: string; items: MidUrl[] }> {
+async function fetchVkeys(mid: string, cred: Credential | null): Promise<{ sip: string; items: MidUrl[] }> {
   // 一个 songmid 对应多个 filename 时，接口按**下标**配对，所以 songmid/songtype 要重复
   const filenames = QUALITIES.map((q) => `${q.prefix}${mid}.${q.ext}`);
+  const comm: Record<string, unknown> = {
+    uin: cred ? Number(cred.uin) : 0, format: 'json', ct: 24, cv: 0,
+  };
+  if (cred) comm.authst = cred.authst;
   const payload = {
-    comm: { uin: 0, format: 'json', ct: 24, cv: 0 },
+    comm,
     req_1: {
       module: 'vkey.GetVkeyServer',
       method: 'CgiGetVkey',
@@ -147,7 +163,7 @@ async function fetchVkeys(mid: string): Promise<{ sip: string; items: MidUrl[] }
         guid: guid(),
         songmid: QUALITIES.map(() => mid),
         songtype: QUALITIES.map(() => 0),
-        uin: '0',
+        uin: cred ? cred.uin : '0',
         loginflag: 1,
         platform: '20',
         filename: filenames,
@@ -191,7 +207,8 @@ export async function probeQQ(input: string): Promise<ProbeResult> {
   if (!mid) throw new VdlError('bad_input', `识别不出 QQ 音乐 songmid: ${input}`);
 
   const detail = await fetchDetail(mid);
-  const { sip, items } = await fetchVkeys(mid);
+  const cred = loadCredential();
+  const { sip, items } = await fetchVkeys(mid, cred);
 
   const formats: Format[] = [];
   const denied: string[] = [];
@@ -219,10 +236,15 @@ export async function probeQQ(input: string): Promise<ProbeResult> {
   }
   formats[0].recommended = true;
 
-  const warnings = ['未登录，仅匿名档（320K/FLAC 需登录，本次不包含）'];
-  if (denied.length) warnings.push(`本次接口未放行：${denied.join('、')}`);
-  if (hasCredential()) {
-    warnings.push('检测到 QQ 音乐凭据，但登录链路尚未接入，本次仍按匿名探测');
+  // 有登录就说登录，没登录就说「仅匿名档」——实测同一首歌登录与否可能完全一样，
+  // 差别在账号会员权限，不能因为 cookie 存在就暗示档位更高
+  const warnings: string[] = [];
+  if (cred) {
+    warnings.push('已登录，档位以账号权限为准');
+    if (denied.length) warnings.push(`本次未放行：${denied.join('、')}——歌曲付费或账号无对应会员`);
+  } else {
+    warnings.push('未登录，仅匿名档（320K/FLAC 需登录，本次不包含）');
+    if (denied.length) warnings.push(`本次接口未放行：${denied.join('、')}`);
   }
 
   return {
@@ -244,10 +266,10 @@ export async function probeQQ(input: string): Promise<ProbeResult> {
 
 /**
  * 未做（不假装支持）：
- * - cookie / uin / qm_keyst 登录链路：没有账号，写了也验证不了。真正接入时要同时改
- *   `comm.uin`（+ `authst`）与 `param.uin`，并把 320K/FLAC 的放行结果重新实测一遍。
- * - `download()`：MusicEngine 要求的另一半个接口，等登录链路与编码/标签策略定了再补。
- * - 搜索：`musicu.fcg` 的 `DoSearchForQQMusicDesktop` 匿名返回 code 2001 + 登录页，
- *   所以只能吃用户给的 mid / 分享链接，不做关键词搜索。
- * - 其它容器（APE / 192K AAC / DTS）：匿名一律 104003，先不铺。
+ * - `download()`：还没写，所以**没有注册到 platformOf / server / cli**。
+ * - 320K/FLAC：登录后仍实测 104003（《雨爱》《我怀念的》《告白气球》等），
+ *   档位由账号会员权限决定；代码已带 uin+authst，换会员账号会自动生效，但没有验证过。
+ * - 搜索：`DoSearchForQQMusicDesktop` 时好时坏——同一账号一次 code=0 返回 3 条，
+ *   下一次 2001；不接关键词搜索，只吃 mid / 分享链接。
+ * - 其它容器（APE / 192K AAC / DTS）：没验证，先不铺。
  */

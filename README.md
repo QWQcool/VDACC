@@ -9,8 +9,8 @@
 > bun ts/src/cli.ts probe "<url>" --json
 > bun ts/src/cli.ts get "<url>" -o 下载
 > bun ts/src/cli.ts get "<url>" -o 下载 --limit 2M  # 可选限速（K/M 后缀）
-> bun ts/src/cli.ts auth bilibili --status          # 默认在线校验 cookie 是否还有效
-> bun ts/src/cli.ts auth bilibili                   # 已失效就重扫（弹独立 Edge）
+> bun ts/src/cli.ts auth <bilibili|netease|qq> --status   # 默认在线校验 cookie 是否还有效
+> bun ts/src/cli.ts auth <bilibili|netease|qq>            # 失效就重扫（弹独立 Edge）
 > ```
 >
 > 迁移状态：引擎 ✅（抖音 / 网易云下载 / B站 分P·番剧）、服务 ✅（probe / jobs / SSE / files /

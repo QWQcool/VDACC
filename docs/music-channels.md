@@ -47,10 +47,16 @@
 4. 有账号后再补 320k/FLAC 与 cookie 过期提示；
 5. **不做**：歌单/专辑批量（后续单独评估）、DRM、客户端私有加密容器。
 
-## 当前状态（2026-10-22）
+## 当前状态（2026-10-23）
 
 - **QQ 音乐骨架已实现**：`ts/src/engines/qq.ts` 的 `canHandle` / `probeQQ`，**未注册到路由**
-  （`platformOf` / `server` / `cli` 都不引用，`musicEngines` 仍为空）。没有账号，下载链路验证不了。
+  （`platformOf` / `server` / `cli` 都不引用，`musicEngines` 仍为空）。`download()` 未实现，所以先不接路由——
+  接上去会把现在能落到 yt-dlp 通用引擎的 QQ 链接换成“只有探测没有下载”。
+- **登录已接**：`bun ts/src/cli.ts auth qq` 扫码写 `%LOCALAPPDATA%\vdl\auth\qq.json`（实测 49 cookies），
+  `probeQQ` 自动带 `comm.uin` + `comm.authst`(qm_keyst) 与 `param.uin`；`auth --status` 可在线校验（返回昵称）。
+- 登录实测（2026-10-23，账号非会员）：**同一批歌曲登录前后档位完全一致**——
+  《雨爱》《我怀念的》《告白气球》三档全 `104003`，《轻轻》仍只有 128K MP3 / 96K AAC。
+  即 320K/FLAC 由**账号会员权限**决定，代码已把凭据带上，换会员账号会自动生效（但未验证过）。
 - 匿名实测（2026-10-22）：
   - 单曲详情 `c.y.qq.com/v8/fcg-bin/fcg_play_single_song.fcg?songmid=<mid>&platform=yqq&format=json` 可用；
   - 播放地址走 `u.y.qq.com/cgi-bin/musicu.fcg` 的 `vkey.GetVkeyServer` / `CgiGetVkey`，
@@ -58,8 +64,9 @@
   - 匿名只对**部分免费曲**放行：实测《轻轻》拿到 `M500`（3,529,853 字节）与 `C400`（2,703,704 字节），
     分别等于 `file.size_128mp3` / `file.size_96aac`；其余档位 `result=104003`（需登录），
     320K/FLAC 匿名一律拿不到；
-  - 搜索匿名不可用：`musicu.fcg` 的 `DoSearchForQQMusicDesktop` 返回 `req_1.code=2001` +
-    `feedbackURL`（登录页），`c.y.qq.com/soso/...` 返回空列表。所以只吃 songmid / 分享链接，不做关键词搜索。
-- 未做（不假装支持）：cookie 登录（`uin` / `qm_keyst`）、`download()`、标签与封面写入、歌单/专辑。
+  - 搜索不稳定：`musicu.fcg` 的 `DoSearchForQQMusicDesktop` 匿名返回 `req_1.code=2001` +
+    `feedbackURL`（登录页）；登录后实测一次 `code=0` 返回 3 条，下一次又回到 2001。
+    因此不做关键词搜索，只吃 songmid / 分享链接。
+- 未做（不假装支持）：`download()`、标签与封面写入、歌单/专辑、会员档位实测。
 - 酷我 / 酷狗：未开始。
 - 服务端设置页后续加「音乐账号」页签（与 B站/网易云并列）。

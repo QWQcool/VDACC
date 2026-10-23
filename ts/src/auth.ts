@@ -20,6 +20,13 @@ export const SITES: Record<string, { url: string; keys: string[]; label: string;
     label: '网易云',
     domain: '163.com',
   },
+  qq: {
+    // 扫码入口在首页右上角「登录」；login() 里会尝试点一下，点不到就手点
+    url: 'https://y.qq.com/',
+    keys: ['qm_keyst'],
+    label: 'QQ音乐',
+    domain: 'qq.com',
+  },
 };
 
 export function status() {
@@ -70,18 +77,64 @@ export interface VerifyRow {
   message: string;
 }
 
-const CHECKS: Record<string, { url: string; inspect: (json: any) => { ok: boolean; message: string } }> = {
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
+  '(KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36';
+
+async function fetchJson(url: string, init: RequestInit = {}, referer = ''): Promise<any> {
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      'User-Agent': UA,
+      ...(referer ? { Referer: referer } : {}),
+      ...(init.headers || {}),
+    },
+    signal: AbortSignal.timeout(8000),
+  });
+  return res.json();
+}
+
+const CHECKS: Record<string, {
+  label?: string;
+  run: (cookie: string) => Promise<{ ok: boolean; message: string }>;
+}> = {
   bilibili: {
-    url: 'https://api.bilibili.com/x/web-interface/nav',
-    inspect: (j) => (j?.data?.isLogin
-      ? { ok: true, message: String(j.data.uname || '') }
-      : { ok: false, message: `未登录（code=${j?.code ?? '?'}）` }),
+    run: async (cookie) => {
+      const j = await fetchJson('https://api.bilibili.com/x/web-interface/nav',
+        { headers: { Cookie: cookie } }, 'https://www.bilibili.com/');
+      return j?.data?.isLogin
+        ? { ok: true, message: String(j.data.uname || '') }
+        : { ok: false, message: `未登录（code=${j?.code ?? '?'}）` };
+    },
   },
   netease: {
-    url: 'https://music.163.com/api/nuser/account/get',
-    inspect: (j) => (j?.account?.id
-      ? { ok: true, message: String(j?.profile?.nickname || j.account.id) }
-      : { ok: false, message: `未登录（code=${j?.code ?? '?'}）` }),
+    run: async (cookie) => {
+      const j = await fetchJson('https://music.163.com/api/nuser/account/get',
+        { headers: { Cookie: cookie } }, 'https://music.163.com/');
+      return j?.account?.id
+        ? { ok: true, message: String(j?.profile?.nickname || j.account.id) }
+        : { ok: false, message: `未登录（code=${j?.code ?? '?'}）` };
+    },
+  },
+  qq: {
+    run: async (cookie) => {
+      const uin = /(?:^|;\s*)uin=o?(\d+)/.exec(cookie)?.[1] || '';
+      if (!uin) return { ok: false, message: 'cookie 里没有 uin' };
+      // 只带 uin 不够（实测 code=1000），还要带 qm_keyst 当 authst
+      let authst = /(?:^|;\s*)qm_keyst=([^;]+)/.exec(cookie)?.[1] || '';
+      try { authst = decodeURIComponent(authst); } catch { /* 保持原值 */ }
+      if (!authst) return { ok: false, message: 'cookie 里没有 qm_keyst' };
+      const data = JSON.stringify({
+        comm: { ct: 24, cv: 0, uin: Number(uin), authst },
+        req_1: { module: 'music.UserInfo.userInfoServer', method: 'GetLoginUserInfo', param: {} },
+      });
+      const j = await fetchJson(
+        `https://u.y.qq.com/cgi-bin/musicu.fcg?format=json&data=${encodeURIComponent(data)}`,
+        {}, 'https://y.qq.com/');
+      const nick = j?.req_1?.data?.info?.nick;
+      return j?.req_1?.code === 0 && nick
+        ? { ok: true, message: String(nick) }
+        : { ok: false, message: `未登录（code=${j?.req_1?.code ?? '?'}）` };
+    },
   },
 };
 
@@ -113,16 +166,7 @@ export async function verify(): Promise<VerifyRow[]> {
       continue;
     }
     try {
-      const res = await fetch(check.url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
-            '(KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36',
-          Referer: info.url,
-          Cookie: cookie,
-        },
-        signal: AbortSignal.timeout(8000),
-      });
-      rows.push({ site, label: info.label, ...check.inspect(await res.json()) });
+      rows.push({ site, label: info.label, ...(await check.run(cookie)) });
     } catch (err) {
       rows.push({ site, label: info.label, ok: null, message: `校验失败：${(err as Error).message}` });
     }
@@ -155,6 +199,10 @@ export async function login(site: string, timeoutMs = 300000) {
   try {
     const page = context.pages()[0] || await context.newPage();
     await page.goto(info.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    if (site === 'qq') {
+      // 尽量把二维码弹出来，省得用户自己找入口；找不到也不影响手动登录
+      await page.locator('text=登录').first().click({ timeout: 5000 }).catch(() => {});
+    }
 
     const deadline = Date.now() + timeoutMs;
     let ok = false;

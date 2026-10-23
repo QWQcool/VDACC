@@ -90,6 +90,7 @@ async function main() {
       process.exit(0);
     }
     try {
+      console.error(`已打开独立 Edge（${site}），请在窗口里完成登录，成功后自动保存并关闭`);
       const out = await auth.login(site, Number(flag('--timeout', '300')) * 1000);
       console.log(JSON.stringify(out));
       process.exit(0);
