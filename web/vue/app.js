@@ -4,7 +4,8 @@ const I18N = {
     placeholder: '粘贴抖音 / B站 / 网易云链接',
     probe: '解析', probing: '解析中…',
     hint: 'B站 分P / 番剧会自动列出集数；下载默认 1080P。',
-    download: '下载选中', cover: '封面',
+    download: '下载选中', cover: '封面', subs: '字幕', danmaku: '弹幕', sidecar: '字幕/弹幕',
+    sidecarHint: '同目录会额外写入 .srt / .danmaku.xml（仅 B站，字幕优先中文 / AI 中文字幕）',
     jobs: '任务', cancel: '取消', retry: '重试',
     selectAll: '全选', estimated: '预计', limitHint: '超过 20 个分集，请分批选择（硬上限 20）',
     settings: '设置', outDir: '输出目录', defaultHint: '留空使用默认',
@@ -21,7 +22,8 @@ const I18N = {
     placeholder: 'Paste a Douyin / Bilibili / NetEase link',
     probe: 'Probe', probing: 'Probing…',
     hint: 'Multi-part videos and seasons are listed automatically. Default quality is 1080P.',
-    download: 'Download', cover: 'Cover',
+    download: 'Download', cover: 'Cover', subs: 'Subtitles', danmaku: 'Danmaku', sidecar: 'Subs/Danmaku',
+    sidecarHint: 'Writes .srt / .danmaku.xml next to the video (Bilibili only, Chinese subtitles preferred)',
     jobs: 'Jobs', cancel: 'Cancel', retry: 'Retry',
     selectAll: 'Select all', estimated: 'Est.', limitHint: 'More than 20 parts: select in batches (hard limit 20)',
     settings: 'Settings', outDir: 'Output folder', defaultHint: 'Leave empty for default',
@@ -56,6 +58,9 @@ createApp({
     const message = ref('');
     const version = ref('');
     const withCover = ref(true);
+    // 附属产物开关：只对 B站 生效，持久化免得每次重开都要勾
+    const withSubs = ref(localStorage.getItem('vdl-subs') === '1');
+    const withDanmaku = ref(localStorage.getItem('vdl-danmaku') === '1');
     const settingsOpen = ref(false);
     const sOutDir = ref('');
     const sTheme = ref('light');
@@ -174,7 +179,10 @@ createApp({
           const data = await api('/api/jobs', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: { url: part.url, formatIds: [fmt], cover: withCover.value },
+            body: {
+              url: part.url, formatIds: [fmt], cover: withCover.value,
+              subs: withSubs.value, danmaku: withDanmaku.value,
+            },
           });
           if (data.ok) { upsert(data.job); ok += 1; }
         }
@@ -189,6 +197,7 @@ createApp({
           url: result.value.media.source_url || url.value,
           formatIds: [...selected.value],
           cover: withCover.value,
+          subs: withSubs.value, danmaku: withDanmaku.value,
         },
       });
       if (data.ok) {
@@ -197,6 +206,11 @@ createApp({
       } else {
         message.value = (data.error && data.error.message) || 'failed';
       }
+    }
+
+    function persistSidecars() {
+      localStorage.setItem('vdl-subs', withSubs.value ? '1' : '0');
+      localStorage.setItem('vdl-danmaku', withDanmaku.value ? '1' : '0');
     }
 
     function upsert(job) {
@@ -312,10 +326,10 @@ createApp({
 
     return {
       t, lang, url, partUrl, result, selected, jobs, busy, message, version,
-      withCover, size, statusLabel, dur,
+      withCover, withSubs, withDanmaku, size, statusLabel, dur,
       settingsOpen, sOutDir, sTheme, sConcurrency, sGeneric, compStatus, compBusy, previewUrl,
       checkedParts, isBatch, allChecked, someChecked, estimated, toggleAll, togglePart,
-      toggleLang, toggleTheme, toggleFormat, probe, probePart, download, cancel, retry,
+      toggleLang, toggleTheme, toggleFormat, persistSidecars, probe, probePart, download, cancel, retry,
       openSettings, saveSettings, installComponent, previewSelected, previewJob, closePreview,
     };
   },

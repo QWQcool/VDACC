@@ -363,18 +363,24 @@ interface SubEntry { lan: string; name: string; url: string }
 async function fetchSubtitleList(): Promise<SubEntry[]> {
   if (!subCtx) return [];
   const query = subCtx.bvid ? `bvid=${subCtx.bvid}&cid=${subCtx.cid}` : `ep_id=${subCtx.epId}`;
-  try {
-    const data = await apiJson(`/x/player/v2?${query}`, 'https://www.bilibili.com/');
-    return (data?.subtitle?.subtitles || [])
-      .map((s: any) => ({
-        lan: String(s.lan || ''),
-        name: String(s.lan_doc || s.lan || ''),
-        url: String(s.subtitle_url || ''),
-      }))
-      .filter((s: SubEntry) => s.url);
-  } catch {
-    return [];
+  // player/v2 偶发返回空（风控/抖动），空一次就重试一次，别把「暂时没拿到」当成「没有字幕」
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const data = await apiJson(`/x/player/v2?${query}`, 'https://www.bilibili.com/');
+      const list = (data?.subtitle?.subtitles || [])
+        .map((s: any) => ({
+          lan: String(s.lan || ''),
+          name: String(s.lan_doc || s.lan || ''),
+          url: String(s.subtitle_url || ''),
+        }))
+        .filter((s: SubEntry) => s.url);
+      if (list.length) return list;
+    } catch {
+      // 重试
+    }
+    if (attempt === 0) await new Promise((r) => setTimeout(r, 400));
   }
+  return [];
 }
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
@@ -402,11 +408,13 @@ async function saveSubtitle(videoPath: string): Promise<{ srt: string | null; co
     const res = await fetch(url, { headers: { 'User-Agent': UA, Referer: 'https://www.bilibili.com/' } });
     if (!res.ok) return { srt: null, count: list.length };
     const json = await res.json() as any;
-    const text = toSrt(json?.body || []);
-    if (!text.trim()) return { srt: null, count: list.length };
+    const lines: Array<{ from: number; to: number; content: string }> = json?.body || [];
+    const text = toSrt(lines);
+    if (!text.trim()) return { srt: null, count: 0 };
     const target = videoPath.replace(/\.mp4$/i, '.srt');
     writeFileSync(target, text, 'utf8');
-    return { srt: target, count: list.length };
+    // count 是字幕行数（跟弹幕条数同量纲），不是字幕轨数
+    return { srt: target, count: lines.length };
   } catch {
     return { srt: null, count: list.length };
   }

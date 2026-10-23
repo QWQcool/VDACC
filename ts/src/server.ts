@@ -52,6 +52,12 @@ interface Job {
   createdAt: number;
   finishedAt?: number;
   cancelRequested?: boolean;
+  /** 附属产物开关（目前只有 B站 认这两个字段，其它平台忽略）。 */
+  subs?: boolean;
+  danmaku?: boolean;
+  /** 附属产物条数，仅用于界面显示实际拿到了多少。 */
+  srtCount?: number;
+  danmakuCount?: number;
 }
 
 const jobs = new Map<string, Job>();
@@ -141,14 +147,15 @@ async function probeUrl(url: string): Promise<ProbeResult> {
   }
 }
 
-async function downloadUrl(url: string, formatId: string) {
+async function downloadUrl(url: string, formatId: string,
+                             opts: { subs?: boolean; danmaku?: boolean } = {}) {
   switch (platformOf(url)) {
     case 'douyin': return getDouyin(url, formatId, OUT);
     case 'netease': return getNetease(url, formatId, OUT);
     case 'qq': return getQQ(url, formatId, OUT);
     case 'kuwo': return getKuwo(url, formatId, OUT);
     case 'kugou': return getKugou(url, formatId, OUT);
-    case 'bilibili': return getBilibiliApi(url, formatId, OUT);
+    case 'bilibili': return getBilibiliApi(url, formatId, OUT, opts);
     default: {
       if (canSniff(url)) return getSniff(url, formatId, OUT);
       if (loadConfig().allowGeneric && genericInstalled()) {
@@ -160,10 +167,12 @@ async function downloadUrl(url: string, formatId: string) {
   }
 }
 
-function createJob(url: string, formatId: string): Job {
+function createJob(url: string, formatId: string, opts: { subs?: boolean; danmaku?: boolean } = {}): Job {
   const job: Job = {
     id: randomBytes(4).toString('hex'), url, formatId: formatId || '',
     status: 'queued', percent: 0, bytes: 0, total: 0, createdAt: Date.now(),
+    ...(opts.subs ? { subs: true } : {}),
+    ...(opts.danmaku ? { danmaku: true } : {}),
   };
   jobs.set(job.id, job);
   order.push(job.id);
@@ -196,10 +205,14 @@ async function pump() {
       emit(job);
     });
     try {
-      const out = await downloadUrl(job.url, job.formatId);
+      const out = await downloadUrl(job.url, job.formatId,
+        { subs: job.subs, danmaku: job.danmaku });
+      const extra = out as any;
       Object.assign(job, {
         status: 'done', percent: 100, bytes: out.bytes, total: out.bytes,
         path: out.path, finishedAt: Date.now(),
+        ...(extra.srtCount ? { srtCount: extra.srtCount } : {}),
+        ...(extra.danmakuCount ? { danmakuCount: extra.danmakuCount } : {}),
       });
     } catch (err) {
       if (err instanceof DownloadCancelled) {
@@ -419,7 +432,9 @@ const server = Bun.serve({
       const ids: string[] = Array.isArray(body.formatIds) && body.formatIds.length
         ? body.formatIds.filter((x: any) => typeof x === 'string')
         : [String(body.formatId || '')];
-      const created = ids.map((formatId) => createJob(target, formatId));
+      // 附属产物开关：只认显式 true，避免字符串 "false" 之类被当成开启
+      const opts = { subs: body.subs === true, danmaku: body.danmaku === true };
+      const created = ids.map((formatId) => createJob(target, formatId, opts));
       for (const job of created) enqueue(job.id);
       return json({ ok: true, jobs: created, job: created[0] }, 202);
     }
@@ -450,7 +465,7 @@ const server = Bun.serve({
         return json({ ok: true, job });
       }
 
-      const next = createJob(job.url, job.formatId);
+      const next = createJob(job.url, job.formatId, { subs: job.subs, danmaku: job.danmaku });
       enqueue(next.id);
       return json({ ok: true, job: next }, 202);
     }

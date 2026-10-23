@@ -68,6 +68,12 @@
           <label class="v-check" v-if="result.media.thumbnail">
             <input type="checkbox" v-model="withCover"> {{ t('cover') }}
           </label>
+          <label class="v-check" v-if="result.platform === 'bilibili'">
+            <input type="checkbox" v-model="withSubs" @change="persistSidecars"> {{ t('subs') }}
+          </label>
+          <label class="v-check" v-if="result.platform === 'bilibili'">
+            <input type="checkbox" v-model="withDanmaku" @change="persistSidecars"> {{ t('danmaku') }}
+          </label>
           <button class="ghost" :disabled="!selected.length" @click="previewSelected">
             {{ t('preview') }}
           </button>
@@ -78,6 +84,9 @@
             {{ t('download') }} ({{ isBatch ? checkedParts.length : selected.length }})
           </button>
         </div>
+        <div class="v-hint" v-if="result.platform === 'bilibili' && (withSubs || withDanmaku)">
+          {{ t('sidecarHint') }}
+        </div>
       </section>
 
       <section v-if="jobs.length" class="card">
@@ -87,6 +96,9 @@
           <span :class="['v-state', j.status]">{{ statusLabel(j.status) }}</span>
           <span class="v-num">{{ j.percent }}%</span>
           <span class="v-num">{{ size(j.bytes) }}</span>
+          <span class="v-num" v-if="j.srtCount || j.danmakuCount">
+            {{ t('sidecar') }} {{ j.srtCount || 0 }}/{{ j.danmakuCount || 0 }}
+          </span>
           <button v-if="j.status === 'running' || j.status === 'queued'"
                   class="ghost" @click="cancel(j.id)" :title="t('cancel')">✕</button>
           <button v-if="j.status === 'failed' || j.status === 'cancelled'"
