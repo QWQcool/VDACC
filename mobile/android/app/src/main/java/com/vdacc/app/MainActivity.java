@@ -41,6 +41,10 @@ public class MainActivity extends Activity {
         address.setHint("http://电脑IP:8765/?token=...");
         address.setText(prefs.getString("url", DEFAULT_URL));
 
+        // 允许 `adb shell am start ... -e url http://...` 直接带地址（装机联调用，也方便脚本）
+        String launch = getIntent() != null ? getIntent().getStringExtra("url") : null;
+        if (launch != null && !launch.trim().isEmpty()) address.setText(launch.trim());
+
         Button connect = new Button(this);
         connect.setText("连接");
         connect.setOnClickListener(v -> load());

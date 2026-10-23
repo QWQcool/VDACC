@@ -26,7 +26,20 @@ bun ts/src/server.ts --port 8765 --token <随便一串> --lan
 - 只支持 `http://`（服务端没上 TLS），所以 `usesCleartextTraffic=true`；
 - 界面里所有操作（解析、下载、预览、设置）都走回电脑，手机只当屏幕。
 
-## 三、自己构建
+## 三、联调接口（留给自测/自动化）
+
+地址可以不带界面手输，直接由启动参数带进去：
+
+```bat
+adb install -r mobile\android\app\build\outputs\apk\debug\app-debug.apk
+adb shell am start -n com.vdacc.app/.MainActivity -e url "http://192.168.1.23:8765/?token=xxx"
+adb exec-out screencap -p > shot.png
+```
+
+`-e url` 会填进地址栏并立即加载；不传则用上次保存的地址。当前 APK **没有在这个开发机上安装过**
+（连接的那台是别人的手机），等正式测试机接上再走上面三步。
+
+## 四、自己构建
 
 ```bat
 set JAVA_HOME=%LOCALAPPDATA%\vdacc-tools\jdk17

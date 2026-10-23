@@ -14,7 +14,8 @@
 - **局域网模式 `--lan`**：服务绑 `0.0.0.0`，启动打印仅内网 IPv4 的带 token 地址与风险提示；
   `Origin` 只放行「与本请求 Host 一致」的来源（外来源仍 403）。实测同机走局域网 IP 访问 200
 - **Android 手机壳**：`mobile/android/` 极薄 WebView 壳（无第三方依赖，APK 9,637 字节），
-  粘 `http://<电脑IP>:8765/?token=...` 即可用电脑端的界面与下载；地址存 SharedPreferences
+  粘 `http://<电脑IP>:8765/?token=...` 即可用电脑端的界面与下载；地址存 SharedPreferences；
+  预留 `am start -e url <地址>` 联调参数（未在真机安装验证，等正式测试机）
 
 ## v3.2.0 — 2026-10-23
 
