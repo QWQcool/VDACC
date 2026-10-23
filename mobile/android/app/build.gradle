@@ -1,0 +1,30 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.vdacc.app'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.vdacc.app'
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+// 刻意不引第三方依赖：壳子只做 WebView 包装，体积与构建时间都压到最小
+dependencies {}

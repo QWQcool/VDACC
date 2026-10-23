@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
+import { networkInterfaces } from 'node:os';
 import { dirname, join, normalize, resolve } from 'node:path';
 
 import { planAlbum } from './core/album';
@@ -248,12 +249,22 @@ function authorized(req: Request, url: URL): boolean {
 function originOk(req: Request): boolean {
   const origin = req.headers.get('origin');
   if (!origin) return true;
-  return origin.startsWith('http://127.0.0.1') || origin.startsWith('http://localhost') ||
-    origin === (process.env.VDL_ALLOW_ORIGIN || '');
+  if (origin.startsWith('http://127.0.0.1') || origin.startsWith('http://localhost')) return true;
+  if (origin === (process.env.VDL_ALLOW_ORIGIN || '')) return true;
+  // 局域网模式：手机从 http://<lan-ip>:<port> 打开，Origin 与 Host 同源。
+  // 只放行「与本次请求 Host 完全一致」的来源，别放成任意来源。
+  try {
+    const host = req.headers.get('host') || '';
+    if (host && new URL(origin).host === host) return true;
+  } catch {
+    // Origin 不是合法 URL，按拒绝处理
+  }
+  return false;
 }
 
+const LAN = argv.includes('--lan');
 const server = Bun.serve({
-  hostname: '127.0.0.1',
+  hostname: LAN ? '0.0.0.0' : '127.0.0.1',
   port: PORT,
   async fetch(req) {
     const url = new URL(req.url);
@@ -535,6 +546,19 @@ const server = Bun.serve({
 
 console.log(`vdl-ts ${server.port} 已启动`);
 console.log(`  地址: http://127.0.0.1:${server.port}/?token=${TOKEN}`);
+if (LAN) {
+  // 只报内网地址（10/8、172.16/12、192.168/16）：VPN/虚拟网卡的地址手机连不上，列出来只会误导
+  const lan = Object.values(networkInterfaces()).flat()
+    .filter((x): x is NonNullable<typeof x> => !!x && x.family === 'IPv4' && !x.internal)
+    .map((x) => x.address)
+    .filter((ip) => /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(ip));
+  console.warn('');
+  console.warn('  ⚠️  --lan：服务已绑定 0.0.0.0，同一局域网内的设备都能访问（仍需 token）。');
+  console.warn('      公共网络下不要开；用完记得关掉服务。');
+  console.warn('      Windows 首次运行可能弹防火墙授权，需允许「专用网络」。');
+  for (const ip of lan) console.log(`  手机访问: http://${ip}:${server.port}/?token=${TOKEN}`);
+  console.warn('');
+}
 console.log(`  输出: ${OUT}`);
 
 /** 打开默认浏览器。失败不致命——地址已经打印在上面，复制粘贴照样能用。 */

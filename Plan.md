@@ -74,7 +74,7 @@
 
 | 项 | 前提 |
 |---|---|
-| 移动原生壳 | 需 JDK / Android SDK / DevEco，本机都没有；端上只跑纯 HTTP 引擎，B站必须遥控 |
+| 移动原生壳 | 🟡 Android 已做（2026-10-23）：`mobile/android/` 极薄 WebView 壳（无第三方依赖，APK 9,637 字节），配合服务端新增的 `--lan`；手机只当屏幕，解析/下载都在电脑上。HarmonyOS NEXT（HAP）待华为开发者账号；端上仍不跑引擎 |
 | L2 通用嗅探（m3u8 / 直链） | ✅ 已完成（2026-10-23）：扩展名接管（mp4/webm/mov/mkv/m4v/flv/m3u8），m3u8 解析 master 变体（时长/体积估算）并用 ffmpeg 合成 mp4（进度/取消）；直链复用 `.part` 续传。实测公开 HLS 184P 20,049,937 字节、直链 mp4 991,017 字节。**不跑页面 JS、不做 blob/MSE**，网页仍交给 yt-dlp |
 
 #### 2.2.5 不做

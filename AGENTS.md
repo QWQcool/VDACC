@@ -74,6 +74,7 @@ ffmpeg 为什么是硬前提：B站/YouTube 全是 DASH 音视频分离，yt-dlp
 ├─ ts/skill/         TS Skill 源（SKILL.md + references），由 tools/build_skill_ts.py 组装
 ├─ legacy/python/    Python 归档：vdl / skill / tests / tools / dy_* / VDACC.bat（冻结，仅参考）
 ├─ docs/             CHANGELOG.md、music-channels.md、design/
+├─ mobile/android/   Android WebView 壳（源码入库，build/ 与 .gradle/ 不入库）
 ├─ tools/            构建脚本（build_skill_ts.py；legacy 构建在 legacy/python/tools/）
 ├─ VDACC.bat         双击启动：起服务 + --open 打开浏览器
 ├─ 下载/             输出目录（不入库）
@@ -104,8 +105,9 @@ bun test ts/tests
 - **本地服务的安全约束别松。** `ts/src/server.ts` 必须：默认只绑 `127.0.0.1`、`/api/*` 校验 token、
   带 `Origin` 的请求校验同源（`VDL_ALLOW_ORIGIN` 才放行宿主）、`/api/reveal` 与 `/api/files`
   只能访问输出目录内的路径、`/api/stream` 只代理白名单域名。少任何一条，任意网页都能向本机提交任务或读走文件。
-- `--lan` 只在 legacy（`legacy/python/vdl`）里有；TS 主线固定只绑 `127.0.0.1`，
-  要暴露到局域网必须自己加，并且打印醒目警告、不要在公共网络下默认开启。
+- **局域网模式**：TS 主线默认绑 `127.0.0.1`；`--lan` 会绑 `0.0.0.0` 供手机壳访问，
+  必须同时满足：token 校验不变、`Origin` 只放行「与本请求 Host 完全一致」的来源、
+  启动时打印醒目警告与仅内网 IP。公共网络下不要开。
 - **凭据只在用户目录。** `bun ts/src/cli.ts auth`（legacy：`python -m vdl auth`）写
   `%LOCALAPPDATA%\vdl\auth\`（`storage_state` 里是 HttpOnly cookie），profile 在
   `%LOCALAPPDATA%\vdl\profile`。两者永不入库、永不打印值——日志只报 cookie 名与数量。

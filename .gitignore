@@ -37,3 +37,9 @@ dist/
 # TS 依赖与产物
 ts/node_modules/
 ts/dist/
+
+# Android 壳构建产物（源码入库，产物不入库）
+mobile/android/.gradle/
+mobile/android/build/
+mobile/android/app/build/
+mobile/android/local.properties
