@@ -4,7 +4,7 @@
 
     python tools/build_skill_ts.py --zip
 
-需要 Bun：优先环境变量 BUN，其次 PATH，最后 %TEMP%\\vdacc-ts 的下载副本。
+需要 Bun：优先环境变量 BUN，其次 PATH、WinGet shim，最后临时下载副本。
 产物在 dist/video-acquire-ts/，不入库。
 """
 
@@ -15,6 +15,11 @@ import shutil
 import subprocess
 import sys
 import zipfile
+
+# Windows runner 的重定向标准输出可能是 cp1252，中文日志会在编译前直接崩溃。
+for stream in (sys.stdout, sys.stderr):
+    if hasattr(stream, 'reconfigure'):
+        stream.reconfigure(encoding='utf-8')
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 DIST = ROOT / 'dist' / 'video-acquire-ts'
@@ -29,6 +34,11 @@ def find_bun():
     found = shutil.which('bun')
     if found:
         return found
+    local = os.environ.get('LOCALAPPDATA')
+    if local:
+        winget = pathlib.Path(local) / 'Microsoft' / 'WinGet' / 'Links' / 'bun.exe'
+        if winget.exists():
+            return str(winget)
     fallback = pathlib.Path(os.environ.get('TEMP', '')) / 'vdacc-ts' / 'bun' / 'bun-windows-x64' / 'bun.exe'
     if fallback.exists():
         return str(fallback)
@@ -36,6 +46,9 @@ def find_bun():
 
 
 def build():
+    # 清理范围只能是仓库内的构建目录，不能跟随被替换的目录链接。
+    if DIST.resolve() != ROOT.resolve() / 'dist' / 'video-acquire-ts':
+        raise SystemExit('构建目录不在预期位置，停止清理')
     if DIST.exists():
         shutil.rmtree(DIST)
     DIST.mkdir(parents=True)
@@ -60,7 +73,7 @@ def zip_up(path):
     with zipfile.ZipFile(target, 'w', zipfile.ZIP_DEFLATED) as zf:
         for file in path.rglob('*'):
             if file.is_file():
-                zf.write(file, path.name + '/' + str(file.relative_to(path)))
+                zf.write(file, path.name + '/' + file.relative_to(path).as_posix())
     print(f'压缩: {target} ({target.stat().st_size/1024/1024:.1f} MB)')
     return target
 

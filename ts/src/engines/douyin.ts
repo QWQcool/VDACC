@@ -1,3 +1,7 @@
+import { operationState, scopedOperation } from '../core/operation';
+import { saveCover } from '../core/sidecar';
+import type { DownloadOptions } from '../core/types';
+import { DownloadCancelled } from '../core/cancel';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, renameSync, statSync } from 'node:fs';
 import { open } from 'node:fs/promises';
@@ -23,11 +27,11 @@ const MODAL_RE = /[?&]modal_id=(\d{15,20})/;
 const BARE_RE = /^\s*(\d{15,20})\s*$/;
 const RES_RE = /(\d{3,4})/;
 
-const urlCache = new Map<string, string[]>();
+const urlCache = operationState(() => new Map<string, string[]>());
 
 /** 供下载前预览：取该档位的第一条 CDN 地址。 */
 export function previewDouyin(formatId: string): string {
-  return (urlCache.get(formatId) || [])[0] || '';
+  return (urlCache().get(formatId) || [])[0] || '';
 }
 
 interface Candidate {
@@ -154,13 +158,13 @@ function buildFormats(cands: Candidate[]): Format[] {
       bytes: c.bytes || null, bitrate: c.rate > 0 ? c.rate : null,
       watermark: c.watermark,
     }));
-    urlCache.set(id, group.urls);
+    urlCache().set(id, group.urls);
   }
   if (out.length) out[0].recommended = true;
   return out;
 }
 
-export async function probeDouyin(input: string): Promise<ProbeResult> {
+async function probeDouyinImpl(input: string): Promise<ProbeResult> {
   const jar = new CookieJar();
   let vid = extractVid(input);
   if (!vid) {
@@ -250,7 +254,7 @@ async function streamTo(url: string, part: string, referer: string): Promise<num
   return statSync(part).size;
 }
 
-export async function getDouyin(input: string, formatId: string | null, outDir: string) {
+async function getDouyinImpl(input: string, formatId: string | null, outDir: string, opts: DownloadOptions = {}) {
   const probe = await probeDouyin(input);
   const fmt = probe.formats.find((f) => f.id === formatId) ||
     probe.formats.find((f) => f.recommended) || probe.formats[0];
@@ -258,9 +262,13 @@ export async function getDouyin(input: string, formatId: string | null, outDir: 
   mkdirSync(outDir, { recursive: true });
   const stem = `${probe.media!.id}_${safeName(probe.media!.title)}_${label}`;
   const dest = join(outDir, `${stem}.mp4`);
-  if (existsSync(dest)) return { path: dest, bytes: statSync(dest).size, skipped: true };
+  const completed = async (skipped: boolean) => ({
+    path: dest, bytes: statSync(dest).size, skipped,
+    ...(opts.cover ? await saveCover(dest, probe.media!.thumbnail, probe.media!.source_url) : { warnings: [] }),
+  });
+  if (existsSync(dest)) return completed(true);
 
-  const urls = urlCache.get(fmt.id) || [];
+  const urls = urlCache().get(fmt.id) || [];
   if (!urls.length) throw new VdlError('no_stream', '该档位没有可用地址');
   const part = dest + '.part';
   let last: unknown = null;
@@ -268,10 +276,15 @@ export async function getDouyin(input: string, formatId: string | null, outDir: 
     try {
       await streamTo(url, part, probe.media!.source_url);
       renameSync(part, dest);
-      return { path: dest, bytes: statSync(dest).size, skipped: false };
+      return completed(false);
     } catch (e) {
+      if (e instanceof DownloadCancelled) throw e;
       last = e;
     }
   }
   throw last instanceof Error ? last : new VdlError('download_failed', '所有候选都失败');
 }
+
+export const probeDouyin = scopedOperation(probeDouyinImpl);
+
+export const getDouyin = scopedOperation(getDouyinImpl);

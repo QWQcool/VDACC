@@ -1,3 +1,32 @@
+export interface Config {
+  outDir?: string;
+  theme?: 'light' | 'dark';
+  concurrency?: number;
+  limitRate?: number;
+  allowGeneric?: boolean;
+}
+
+export interface DownloadOptions { cover?: boolean; subs?: boolean; danmaku?: boolean }
+export interface CoverResult { cover: string | null; warnings: string[] }
+
+export interface Job extends DownloadOptions {
+  id: string;
+  url: string;
+  formatId: string;
+  status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
+  percent: number;
+  bytes: number;
+  total: number;
+  path?: string;
+  error?: { code: string; message: string; next_action?: string };
+  createdAt: number;
+  finishedAt?: number;
+  cancelRequested?: boolean;
+  srtCount?: number;
+  danmakuCount?: number;
+  warnings?: string[];
+}
+
 export interface Part {
   index: number;
   title: string;

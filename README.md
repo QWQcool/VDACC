@@ -10,6 +10,7 @@
 > bun ts/src/cli.ts probe "<url>" --json
 > bun ts/src/cli.ts get "<url>" -o 下载
 > bun ts/src/cli.ts get "<url>" -o 下载 --limit 2M  # 可选限速（K/M 后缀）
+> bun ts/src/cli.ts get "<url>" --cover             # 抖音 / B站独立封面图片
 > bun ts/src/cli.ts get "<url>" --subs              # 顺带落同名 .srt（中文/AI 中文字幕优先）
 > bun ts/src/cli.ts get "<url>" --danmaku           # 落同名 .danmaku.xml（B站 弹幕）
 > bun ts/src/cli.ts get "<album-url>" --album --dry-run   # 专辑曲目预览（上限 20）
@@ -21,18 +22,35 @@
 >
 > 迁移状态：引擎 ✅（抖音 / 网易云 / QQ 音乐 / 酷我 / 酷狗 / B站 分P·番剧 / L2 直链·m3u8）、
 > 服务 ✅（probe / jobs / SSE / files / settings / cancel / retry / 持久化）、`auth` ✅（在线校验）、
-> **Skill ✅**、**TS 测试 53 个 ✅**、**yt-dlp 可选组件 ✅**、**设置面板 ✅**、**限速 ✅**（`--limit 2M`）、
+> **Skill ✅**、**TS 测试 75 个 ✅**、**yt-dlp 可选组件 ✅**、**设置面板 ✅**、**限速 ✅**（`--limit 2M`）、
 > **B站字幕 `--subs` / 弹幕 `--danmaku` ✅**（CLI 与 Web UI 都能开）、
 > **专辑 `--album` ✅**（CLI 上限 20 + `--dry-run`；Web UI 列出前 20 首逐首勾选）、
 > **QQ 音乐 ✅**（`auth qq` 扫码；档位由账号会员权限决定）。
 >
 > 首次运行 `auth` 前需要装依赖：`cd ts && bun install`（只装 `playwright-core`，复用系统 Edge）。
 >
-> TS 版 Skill：`python tools/build_skill_ts.py --zip` → `dist/video-acquire-ts.zip`（约 42.6MB，
-> 内含 91.9MB 的 `vdl.exe`，不需要 Python/Node）。
+> TS 版 Skill：`python tools/build_skill_ts.py --zip` → `dist/video-acquire-ts.zip`（Bun 1.4.4 实测约 52.2MB，
+> 内含约 110.0MB 的 `vdl.exe`，不需要 Python/Node）。
 >
 > 前端：`/` 是 **Vue 3** 界面，已按 **infOS 风格 V2** 重做（侧栏 + 双栏、浅槽画质、开关、Slide-over 设置）；
 > 解析/多选/分P批量/专辑/下载/SSE/主题/中英切换/下载前预览都在。旧版原生界面已删除，Vue 是唯一入口。
+
+## 当前修复与验收（3.3.1，2026-10-26）
+
+本轮修复同源与文件访问边界、设置/历史假保存、Skill 未支持平台误路由、
+解析与下载串状态、封面开关和断线恢复。源码版本为 3.3.1；标签与 Release 分发另行安排。
+后续开发见 [Plan.md §2.6](Plan.md) 与 [交互详情图](docs/design/development-roadmap-2026-10-25.html)。
+
+```bash
+bun test ts/tests                          # 75 项离线回归
+node tools/accept_regression_ui.cjs         # Edge + 临时用户目录 + 本地媒体
+python tools/build_skill_ts.py --zip        # Skill 编译与组装
+```
+
+界面回归依赖 `cd ts && bun install` 和系统 Edge；不读取真实用户配置或凭据。
+可用 `node tools/accept_regression_ui.cjs --python-acceptance` 同时验证 Python 验收入口
+（默认使用仓库 venv，可通过 `VDL_TEST_PYTHON` 指定已装 Playwright 的 Python）。
+本轮未重新验收第三方站点在线下载、会员档位或 Android 真机。
 
 ## Python legacy（仍可用，不再演进）
 
@@ -179,7 +197,7 @@ VDACC\
 │  ├─ src\            主线：cli / server / auth / skill_cli
 │  │  ├─ core\        契约层：types / platform / config / http / progress / cancel / rate
 │  │  └─ engines\     douyin / netease / qq / kuwo / kugou / bilibili(_api) / generic(yt-dlp)
-│  ├─ tests\          bun test（27 个）
+│  ├─ tests\          bun test（75 个）
 │  └─ skill\          TS Skill 源（SKILL.md + references）
 ├─ web\               Vue 3 界面（默认入口 /）
 ├─ legacy\python\     Python 归档：vdl / skill / tests / tools / dy_* / VDACC.bat（冻结）

@@ -10,6 +10,7 @@
  * 规格来源：docs/music-channels.md（只取域名/路径/参数/字段，独立实现）。
  * 未验证项见文件末尾「未做」。
  */
+import { operationState, scopedOperation } from '../core/operation';
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync,
   writeFileSync } from 'node:fs';
@@ -44,9 +45,9 @@ const MID_IN_PATH = /\/(?:songDetail|songdetail)\/([0-9A-Za-z]+)/;
 const ALBUM_IN_PATH = /\/(?:albumDetail|albumdetail)\/([0-9A-Za-z]+)/;
 
 /** probe 时按档位缓存播放地址（purl 带 vkey，会过期，所以每次下载都重新 probe）。 */
-const urlCache = new Map<string, { url: string; ext: string }>();
+const urlCache = operationState(() => new Map<string, { url: string; ext: string }>());
 /** 详情留给下载阶段打标签用（album 名不在 ProbeResult.media 里）。 */
-let lastDetail: SongDetail | null = null;
+const detailState = operationState(() => ({ lastDetail: null as SongDetail | null }));
 
 /** 纯函数：从分享链接 / 裸 mid 里取 songmid，取不到返回空串。
  *  QQ 音乐有三种常见形态：`y.qq.com/n/ryqq/songDetail/<mid>`、
@@ -213,13 +214,13 @@ async function headBytes(url: string): Promise<number> {
   }
 }
 
-export async function probeQQ(input: string): Promise<ProbeResult> {
+async function probeQQImpl(input: string): Promise<ProbeResult> {
   const mid = parseSongmid(input);
   if (!mid) throw new VdlError('bad_input', `识别不出 QQ 音乐 songmid: ${input}`);
-  urlCache.clear();
+  urlCache().clear();
 
   const detail = await fetchDetail(mid);
-  lastDetail = detail;
+  detailState().lastDetail = detail;
   const cred = loadCredential();
   const { sip, items } = await fetchVkeys(mid, cred);
 
@@ -233,7 +234,7 @@ export async function probeQQ(input: string): Promise<ProbeResult> {
     }
     const url = item.purl.startsWith('http') ? item.purl : sip + item.purl;
     const real = await headBytes(url);
-    urlCache.set(quality.prefix.toLowerCase(), { url, ext: quality.ext });
+    urlCache().set(quality.prefix.toLowerCase(), { url, ext: quality.ext });
     formats.push(format({
       id: quality.prefix.toLowerCase(),
       label: quality.label,
@@ -332,11 +333,11 @@ async function fetchLyric(mid: string): Promise<string> {
  * 下载单曲。流程与网易云一致：流式落盘（.part）→ 封面/标签同一次 ffmpeg 写入 →
  * 失败就把原始音频改名留着，不因为“标签写不进去”丢掉已经下好的内容。
  */
-export async function getQQ(input: string, formatId: string | null, outDir: string) {
+async function getQQImpl(input: string, formatId: string | null, outDir: string) {
   const probe = await probeQQ(input);
   const fmt = probe.formats.find((f) => f.id === formatId) ||
     probe.formats.find((f) => f.recommended) || probe.formats[0];
-  const cached = urlCache.get(fmt.id);
+  const cached = urlCache().get(fmt.id);
   if (!cached) throw new VdlError('no_stream', '该档位没有可用地址');
 
   mkdirSync(outDir, { recursive: true });
@@ -385,7 +386,7 @@ export async function getQQ(input: string, formatId: string | null, outDir: stri
   const tags: Record<string, string> = {
     title: probe.media!.title || '',
     artist: probe.media!.author || '',
-    album: lastDetail?.albumName || '',
+    album: detailState().lastDetail?.albumName || '',
     comment: 'downloaded by vdl',
   };
   for (const [key, value] of Object.entries(tags)) {
@@ -411,7 +412,7 @@ export async function getQQ(input: string, formatId: string | null, outDir: stri
 
 /** 供下载前预览：返回 probe 时缓存的 purl（qq 音乐 CDN 只给 http，服务端白名单已单独放行）。 */
 export function previewQQ(formatId: string): string {
-  return urlCache.get(formatId)?.url || '';
+  return urlCache().get(formatId)?.url || '';
 }
 
 /** 专辑链接：`/n/ryqq/albumDetail/<mid>`、`?albummid=`，或裸 mid。 */
@@ -468,3 +469,7 @@ export async function albumTracks(input: string): Promise<AlbumInfo> {
  * - 歌词（.lrc）：QQ 的 lyric 接口没验，先不写。
  * - 其它容器（APE / 192K AAC / DTS）：没验证，先不铺。
  */
+
+export const probeQQ = scopedOperation(probeQQImpl);
+
+export const getQQ = scopedOperation(getQQImpl);

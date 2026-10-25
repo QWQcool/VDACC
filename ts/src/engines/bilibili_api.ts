@@ -1,3 +1,6 @@
+import { operationState, scopedOperation } from '../core/operation';
+import { saveCover } from '../core/sidecar';
+import type { DownloadOptions } from '../core/types';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { open } from 'node:fs/promises';
@@ -16,13 +19,13 @@ const BUCKETS: Array<[number, string]> = [
   [3840, '4K'], [2560, '2K'], [1920, '1080P'], [1280, '720P'], [854, '480P'],
 ];
 
-const urlCache = new Map<string, { video: string; audio: string }>();
+const urlCache = operationState(() => new Map<string, { video: string; audio: string }>());
 /** 字幕接口要 bvid+cid（普通视频）或 ep_id（番剧）；探测时顺手记下，下载带 --subs 时才请求。 */
-let subCtx: { bvid?: string; cid?: number; epId?: string } | null = null;
+const subtitleState = operationState(() => ({ value: null as { bvid?: string; cid?: number; epId?: string } | null }));
 
 /** 供下载前预览：只取视频轨（浏览器预览不需要音轨）。 */
 export function previewBilibili(formatId: string): string {
-  return urlCache.get(formatId)?.video || '';
+  return urlCache().get(formatId)?.video || '';
 }
 
 /** 关键：不能把所有 cookie 拼进去（实测 64 条 / 8.9KB 会被 WAF 判 400），
@@ -123,7 +126,7 @@ function foldDash(dash: any, durationMs: number): Format[] {
       bytes: Math.round((totalBw * seconds) / 8) || null,
       bitrate: Math.round(totalBw) || null,
     }));
-    urlCache.set(id, {
+    urlCache().set(id, {
       video: best.baseUrl || best.base_url,
       audio: bestAudio ? (bestAudio.baseUrl || bestAudio.base_url) : '',
     });
@@ -158,9 +161,9 @@ function parseTarget(input: string): Target {
   return { kind: 'video', bvid: bv![1], page };
 }
 
-export async function probeBilibiliApi(input: string): Promise<ProbeResult> {
-  urlCache.clear();
-  subCtx = null;
+async function probeBilibiliApiImpl(input: string): Promise<ProbeResult> {
+  urlCache().clear();
+  subtitleState().value = null;
   const target = parseTarget(input);
   return target.kind === 'video' ? probeVideo(target) : probeBangumi(target);
 }
@@ -181,7 +184,7 @@ async function probeVideo(target: Target): Promise<ProbeResult> {
   const durationMs = Number(play.timelength || 0) || Number(view.duration || 0) * 1000;
   const formats = foldDash(play.dash, durationMs);
   if (!formats.length) throw new VdlError('no_stream', '没有视频轨');
-  subCtx = { bvid, cid: Number(current.cid) };
+  subtitleState().value = { bvid, cid: Number(current.cid) };
 
   const parts: Part[] = pages.length > 1 ? pages.map((p) => ({
     index: Number(p.page || 0),
@@ -230,7 +233,7 @@ async function probeBangumi(target: Target): Promise<ProbeResult> {
   const durationMs = Number(ep.duration || 0) || Number(play.timelength || 0);
   const formats = foldDash(dash, durationMs);
   if (!formats.length) throw new VdlError('no_stream', '没有视频轨');
-  subCtx = { epId: String(ep.id) };
+  subtitleState().value = { epId: String(ep.id) };
 
   const parts: Part[] = episodes.map((e, i) => ({
     index: i + 1,
@@ -338,6 +341,7 @@ export function countDanmaku(xml: string): number {
 async function saveDanmaku(videoPath: string): Promise<{
   xml: string | null; count: number; supported: boolean;
 }> {
+  const subCtx = subtitleState().value;
   if (!subCtx?.bvid || !subCtx.cid) return { xml: null, count: 0, supported: false };
   try {
     const res = await fetch(`https://api.bilibili.com/x/v1/dm/list.so?oid=${subCtx.cid}`,
@@ -361,6 +365,7 @@ interface SubEntry { lan: string; name: string; url: string }
  * 字幕是附属产物，不能因为它把已经下好的视频判成失败。
  */
 async function fetchSubtitleList(): Promise<SubEntry[]> {
+  const subCtx = subtitleState().value;
   if (!subCtx) return [];
   const query = subCtx.bvid ? `bvid=${subCtx.bvid}&cid=${subCtx.cid}` : `ep_id=${subCtx.epId}`;
   // player/v2 偶发返回空（风控/抖动），空一次就重试一次，别把「暂时没拿到」当成「没有字幕」
@@ -406,7 +411,7 @@ async function saveSubtitle(videoPath: string): Promise<{ srt: string | null; co
   const url = pick.url.startsWith('//') ? `https:${pick.url}` : pick.url;
   try {
     const res = await fetch(url, { headers: { 'User-Agent': UA, Referer: 'https://www.bilibili.com/' } });
-    if (!res.ok) return { srt: null, count: list.length };
+    if (!res.ok) return { srt: null, count: 0 };
     const json = await res.json() as any;
     const lines: Array<{ from: number; to: number; content: string }> = json?.body || [];
     const text = toSrt(lines);
@@ -416,18 +421,18 @@ async function saveSubtitle(videoPath: string): Promise<{ srt: string | null; co
     // count 是字幕行数（跟弹幕条数同量纲），不是字幕轨数
     return { srt: target, count: lines.length };
   } catch {
-    return { srt: null, count: list.length };
+    return { srt: null, count: 0 };
   }
 }
 
-export async function getBilibiliApi(
+async function getBilibiliApiImpl(
   input: string, formatId: string | null, outDir: string,
-  opts: { subs?: boolean; danmaku?: boolean } = {},
+  opts: DownloadOptions = {},
 ) {
   const probe = await probeBilibiliApi(input);
   const fmt = probe.formats.find((f) => f.id === formatId) ||
     probe.formats.find((f) => f.recommended) || probe.formats[0];
-  const urls = urlCache.get(fmt.id);
+  const urls = urlCache().get(fmt.id);
   if (!urls) throw new VdlError('no_stream', '该档位没有可用地址');
 
   mkdirSync(outDir, { recursive: true });
@@ -436,17 +441,24 @@ export async function getBilibiliApi(
     ? `_${probe.media!.id.startsWith('ep') ? 'EP' : 'P'}${selected.index}` : '';
   const stem = `${probe.media!.id}_${safeName(probe.media!.title)}${suffix}_${safeName(fmt.label, 16, fmt.id)}`;
   const dest = join(outDir, `${stem}.mp4`);
-  if (existsSync(dest)) {
+  const completed = async (skipped: boolean) => {
     // 视频已存在也要让 --subs / --danmaku 生效：附属产物不能因为跳过视频就一起跳过
     const sub = opts.subs ? await saveSubtitle(dest) : { srt: null, count: 0 };
     const dm = opts.danmaku ? await saveDanmaku(dest) : null;
+    const cover = opts.cover ? await saveCover(dest, probe.media!.thumbnail, probe.media!.source_url)
+      : { cover: null, warnings: [] };
+    const warnings = [...cover.warnings];
+    if (opts.subs && !sub.srt) warnings.push('没有可用字幕或字幕获取失败，主文件已保留');
+    if (opts.danmaku && !dm?.xml) warnings.push(dm?.supported
+      ? '没有可用弹幕或弹幕获取失败，主文件已保留' : '番剧弹幕暂不支持，主文件已保留');
     return {
-      path: dest, bytes: statSync(dest).size, skipped: true,
+      path: dest, bytes: statSync(dest).size, skipped, cover: cover.cover, warnings,
       srt: sub.srt, srtCount: sub.count,
       danmaku: dm?.xml || null, danmakuCount: dm?.count || 0,
       danmakuSupported: dm ? dm.supported : null,
     };
-  }
+  };
+  if (existsSync(dest)) return completed(true);
 
   const vPart = dest + '.video.m4s';
   const aPart = dest + '.audio.m4s';
@@ -476,19 +488,21 @@ export async function getBilibiliApi(
   }
 
   const ff = process.env.VDL_FFMPEG || 'ffmpeg';
+  const merged = dest.replace(/\.mp4$/i, '.mux.mp4');
   const args = urls.audio
-    ? ['-y', '-hide_banner', '-loglevel', 'error', '-i', vPart, '-i', aPart, '-c', 'copy', dest]
-    : ['-y', '-hide_banner', '-loglevel', 'error', '-i', vPart, '-c', 'copy', dest];
+    ? ['-y', '-hide_banner', '-loglevel', 'error', '-i', vPart, '-i', aPart, '-c', 'copy', merged]
+    : ['-y', '-hide_banner', '-loglevel', 'error', '-i', vPart, '-c', 'copy', merged];
   const run = spawnSync(ff, args, { encoding: 'utf8', windowsHide: true });
+  if (run.status !== 0) {
+    try { unlinkSync(merged); } catch { /* 只移除本次未完成的合并产物。 */ }
+    throw new VdlError(run.error ? 'ffmpeg_missing' : 'ffmpeg_failed',
+      '音视频合并失败，已保留分离流供重试', '检查 ffmpeg 是否可用和磁盘空间后重试');
+  }
+  renameSync(merged, dest);
   for (const p of [vPart, aPart]) { try { unlinkSync(p); } catch { /* ignore */ } }
-  if (run.status !== 0) throw new VdlError('ffmpeg_missing', String(run.stderr || '').slice(0, 300));
-
-  const sub = opts.subs ? await saveSubtitle(dest) : { srt: null, count: 0 };
-  const dm = opts.danmaku ? await saveDanmaku(dest) : null;
-  return {
-    path: dest, bytes: statSync(dest).size, skipped: false,
-    srt: sub.srt, srtCount: sub.count,
-    danmaku: dm?.xml || null, danmakuCount: dm?.count || 0,
-    danmakuSupported: dm ? dm.supported : null,
-  };
+  return completed(false);
 }
+
+export const probeBilibiliApi = scopedOperation(probeBilibiliApiImpl);
+
+export const getBilibiliApi = scopedOperation(getBilibiliApiImpl);

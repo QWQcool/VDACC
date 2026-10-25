@@ -5,18 +5,16 @@
     python tools/accept_ui.py http://127.0.0.1:8765 "https://..." \
         --deselect bili-3840 --select bili-854 --shot out.png
 
-做三件事：深链打开 → 勾选指定档位 → 等**最新任务**完成 → 截图。
-注意：必须看最新任务（列表是 prepend 的），否则会被上一条已完成的任务骗过。
+深链打开 → 选择档位 → 跟踪这次 API 返回的所有任务 ID → 截图。
+不依赖语言或列表顺序；任何一个本次任务失败都返回非零退出码。
 """
 
 import argparse
+import json
 import sys
 from urllib.parse import quote
 
 from playwright.sync_api import sync_playwright
-
-DONE = ("['完成','失败'].includes(document.querySelector('.job .state').textContent)")
-
 
 def main(argv=None):
     ap = argparse.ArgumentParser()
@@ -38,25 +36,50 @@ def main(argv=None):
         page = browser.new_page(viewport={'width': 1200, 'height': 1100},
                                 locale='zh-CN')
         page.goto(q, wait_until='domcontentloaded')
-        page.wait_for_selector('.material', timeout=45000)
+        page.wait_for_selector('#result [data-format-id]', timeout=45000)
 
         for fid in filter(None, args.deselect.split(',')):
-            page.click(f'.chip[data-id="{fid}"]')
+            chip = page.locator(f'[data-format-id={json.dumps(fid)}]')
+            if chip.get_attribute('aria-pressed') == 'true':
+                chip.click()
         for fid in filter(None, args.select.split(',')):
-            page.click(f'.chip[data-id="{fid}"]')
+            chip = page.locator(f'[data-format-id={json.dumps(fid)}]')
+            if chip.get_attribute('aria-pressed') != 'true':
+                chip.click()
 
-        print('button:', page.inner_text('#download'))
-        page.click('#download')
-        page.wait_for_function(DONE, timeout=args.timeout * 1000)
-        page.wait_for_timeout(500)
+        submitted, errors = [], []
 
-        print('state:', page.eval_on_selector('.job .state', 'n => n.textContent'))
-        print('info:', page.eval_on_selector('.job .info', 'n => n.textContent'))
+        def collect(response):
+            if response.request.method != 'POST' or response.url.split('?')[0] != args.base.rstrip('/') + '/api/jobs':
+                return
+            data = response.json()
+            if not data.get('ok'):
+                errors.append(data.get('error', {}).get('code', 'submit_failed'))
+                return
+            submitted.extend(job['id'] for job in data.get('jobs', [data.get('job')]) if job)
+
+        page.on('response', collect)
+        button = page.get_by_test_id('download')
+        button.click()
+        # Vue 提交时禁用按钮；批量提交全部返回后再确定需要跟踪的 ID 集合。
+        page.wait_for_function("!document.querySelector('[data-testid=download]').disabled",
+                               timeout=args.timeout * 1000)
+        if errors or not submitted:
+            print('submission failed:', errors or ['no_job'])
+            browser.close()
+            return 1
+        page.wait_for_function("""ids => ids.every(id => {
+            const row = document.querySelector(`[data-job-id="${id}"]`);
+            return row && ['done', 'failed', 'cancelled'].includes(row.dataset.status);
+        })""", arg=submitted, timeout=args.timeout * 1000)
+        states = [page.locator(f'[data-job-id="{job_id}"]').get_attribute('data-status')
+                  for job_id in submitted]
+        print('submitted jobs:', len(submitted), 'states:', ', '.join(states))
         if args.shot:
             page.screenshot(path=args.shot, full_page=True)
         browser.close()
 
-    return 0
+    return 0 if all(state == 'done' for state in states) else 1
 
 
 if __name__ == '__main__':

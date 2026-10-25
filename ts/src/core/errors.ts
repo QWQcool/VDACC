@@ -1,10 +1,12 @@
+import type { ErrorBody } from './types';
+
 export class VdlError extends Error {
   constructor(public code: string, message: string, public nextAction = '') {
     super(message);
     this.name = 'VdlError';
   }
 
-  toBody() {
+  toBody(): ErrorBody {
     return { code: this.code, message: this.message, next_action: this.nextAction };
   }
 }

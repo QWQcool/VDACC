@@ -70,7 +70,7 @@ ffmpeg 为什么是硬前提：B站/YouTube 全是 DASH 音视频分离，yt-dlp
 ├─ ts/src/           主线（Bun）：cli.ts / server.ts / auth.ts / skill_cli.ts
 │  ├─ core/          契约层：types / platform / config / http / progress / cancel / rate / naming / errors
 │  └─ engines/       douyin / netease / qq / kuwo / kugou / bilibili(_api) / sniff(L2) / generic(yt-dlp)
-├─ ts/tests/         bun test（当前 22 个）
+├─ ts/tests/         bun test（当前 75 个）
 ├─ web/              Vue 3 界面（默认入口 /）+ vendor / assets（无 PWA：sw/manifest 已删）
 ├─ ts/skill/         TS Skill 源（SKILL.md + references），由 tools/build_skill_ts.py 组装
 ├─ legacy/python/    Python 归档：vdl / skill / tests / tools / dy_* / VDACC.bat（冻结，仅参考）
@@ -103,7 +103,7 @@ venv\Scripts\python.exe -m pip install playwright yt-dlp   # 仅 legacy 需要
 ```bash
 bun --version                              # 1.4.x
 ffmpeg -version                            # 9.x；缺了 B站/音乐/m3u8 全废
-bun test ts/tests                          # 53 pass
+bun test ts/tests                          # 75 pass
 bun ts/src/cli.ts probe "<抖音或B站链接>" --json
 ```
 
@@ -119,6 +119,9 @@ bun ts/src/cli.ts probe "<抖音或B站链接>" --json
   TS `auth` 与 legacy 共用同一目录，所以两边也不能同时跑。
 - **纯 HTTP 引擎只用标准库（legacy）。** `legacy/python/dy_http.py` 故意不依赖 requests / playwright：
   换台机器 clone 下来就能跑。别为省事给它添新依赖。
+- **请求与任务状态隔离。** `core/operation.ts` 为每个 HTTP 请求和下载任务创建独立作用域；
+  引擎使用 `operationState`，不要重新引入全局 last* / URL 缓存或进度、取消回调。
+  当前队列仍只有一个 worker；增加并发前必须解决同名文件互斥、子进程取消与限速预算。
 - **契约优先。** 对外字段只加在 `ts/src/core/types.ts`（schema=2），错误码由 `core/errors.ts` 统一；
   legacy 对应 `legacy/python/vdl/core/models.py`、`errors.py`，两边字段名必须一致。
   不许在壳里自己拼字段名，也不许把已知失败写成"下载失败"了事。

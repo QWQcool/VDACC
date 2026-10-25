@@ -6,6 +6,7 @@
  * 实测（2026-10-23）：mobi 对公开曲目给 128kbps mp3，Range 可取真实总字节；
  * 无损（br=2000kflac）没有放行，档位以接口实际返回为准。
  */
+import { operationState, scopedOperation } from '../core/operation';
 import { existsSync, mkdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -26,8 +27,8 @@ interface Candidate {
   id: string; url: string; format: string; bitrate: number; duration: number; source: string;
 }
 
-const urlCache = new Map<string, { url: string; ext: string }>();
-let lastInfo: { title: string; artist: string; album: string; cover: string; lrc: string } | null = null;
+const urlCache = operationState(() => new Map<string, { url: string; ext: string }>());
+const infoState = operationState(() => ({ lastInfo: null as { title: string; artist: string; album: string; cover: string; lrc: string } | null }));
 
 /** `kuwo.cn/play_detail/<rid>`、`?musicId=` / `?rid=`、`MUSIC_<digits>`。 */
 export function parseRid(input: string): string {
@@ -202,10 +203,10 @@ function labelOf(cand: Candidate, size: number, duration: number): { label: stri
   return { label: fmt ? fmt.toUpperCase() : '码率未标注', clip: false };
 }
 
-export async function probeKuwo(input: string): Promise<ProbeResult> {
+async function probeKuwoImpl(input: string): Promise<ProbeResult> {
   const rid = parseRid(input);
   if (!rid) throw new VdlError('bad_input', `识别不出酷我音乐 id: ${input}`);
-  urlCache.clear();
+  urlCache().clear();
 
   const info = await songInfo(rid);
   if (!info.title && !info.artist) {
@@ -229,7 +230,7 @@ export async function probeKuwo(input: string): Promise<ProbeResult> {
     if (clip) warnings.push(`「${info.title}」拿到的是试听片段而不是整首，正片可能需要会员`);
     const ext = cand.format.toLowerCase() === 'flac' ? 'flac'
       : cand.format.toLowerCase() === 'aac' ? 'm4a' : 'mp3';
-    urlCache.set(cand.id, { url: cand.url, ext });
+    urlCache().set(cand.id, { url: cand.url, ext });
     formats.push(format({
       id: cand.id,
       label,
@@ -245,7 +246,7 @@ export async function probeKuwo(input: string): Promise<ProbeResult> {
       '酷我公开通道只给部分曲目 128kbps；无损/会员曲需要登录，本引擎不逆向签名');
   }
   formats[0].recommended = true;
-  lastInfo = { title: info.title, artist: info.artist, album: info.album, cover: info.pic, lrc: info.lrc };
+  infoState().lastInfo = { title: info.title, artist: info.artist, album: info.album, cover: info.pic, lrc: info.lrc };
 
   const media: Media = {
     id: rid,
@@ -260,13 +261,13 @@ export async function probeKuwo(input: string): Promise<ProbeResult> {
   return { schema: 2, ok: true, platform: 'kuwo', engine: 'kuwo-web', media, formats, warnings, error: null };
 }
 
-export async function getKuwo(input: string, formatId: string | null, outDir: string) {
+async function getKuwoImpl(input: string, formatId: string | null, outDir: string) {
   const probe = await probeKuwo(input);
   const fmt = probe.formats.find((f) => f.id === formatId) ||
     probe.formats.find((f) => f.recommended) || probe.formats[0];
-  const cached = urlCache.get(fmt.id);
+  const cached = urlCache().get(fmt.id);
   if (!cached) throw new VdlError('no_stream', '该档位没有可用地址');
-  const info = lastInfo!;
+  const info = infoState().lastInfo!;
 
   mkdirSync(outDir, { recursive: true });
   const stem = `${probe.media!.id}_${safeName(info.title || probe.media!.id)}_${safeName(fmt.label, 16, fmt.id)}`;
@@ -293,3 +294,7 @@ export async function getKuwo(input: string, formatId: string | null, outDir: st
   }));
   return { path: dest, bytes: statSync(dest).size, skipped: false, warnings };
 }
+
+export const probeKuwo = scopedOperation(probeKuwoImpl);
+
+export const getKuwo = scopedOperation(getKuwoImpl);

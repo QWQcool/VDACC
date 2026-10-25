@@ -6,6 +6,7 @@
  * `The Resource Needs to be Paid`——这时只报试听档，不伪造会员。
  * 代码按参考实现 MediaGrabber 的**规格**独立实现（域名/参数/字段），不逆向 `.kgm` 加密。
  */
+import { operationState, scopedOperation } from '../core/operation';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, renameSync, statSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
@@ -26,8 +27,8 @@ interface Candidate {
   id: string; url: string; ext: string; bitrate: number; size: number; source: string;
 }
 
-const urlCache = new Map<string, { url: string; ext: string }>();
-let lastInfo: { title: string; artist: string; album: string; cover: string } | null = null;
+const urlCache = operationState(() => new Map<string, { url: string; ext: string }>());
+const infoState = operationState(() => ({ lastInfo: null as { title: string; artist: string; album: string; cover: string } | null }));
 
 /** `?hash=` / `#hash=` / 裸 32 位 hex。 */
 export function parseHash(input: string): string {
@@ -117,10 +118,10 @@ async function searchQualities(title: string, artist: string, hash: string): Pro
   }
 }
 
-export async function probeKugou(input: string): Promise<ProbeResult> {
+async function probeKugouImpl(input: string): Promise<ProbeResult> {
   const hash = parseHash(input);
   if (!hash) throw new VdlError('bad_input', `识别不出酷狗 hash: ${input}`);
-  urlCache.clear();
+  urlCache().clear();
 
   let info: any = null;
   try {
@@ -170,7 +171,7 @@ export async function probeKugou(input: string): Promise<ProbeResult> {
       warnings.push(`候选地址（${cand.source}）不可用：${probe.reason}`);
       continue;
     }
-    urlCache.set(cand.id, { url: cand.url, ext: cand.ext });
+    urlCache().set(cand.id, { url: cand.url, ext: cand.ext });
     const kbps = Math.round(cand.bitrate / 1000);
     formats.push(format({
       id: cand.id,
@@ -187,7 +188,7 @@ export async function probeKugou(input: string): Promise<ProbeResult> {
       '酷狗公开通道对会员/付费曲只给封面与信息，本引擎不做 .kgm 解密、不伪造会员');
   }
   formats[0].recommended = true;
-  lastInfo = { title, artist, album, cover };
+  infoState().lastInfo = { title, artist, album, cover };
 
   const media: Media = {
     id: hash,
@@ -202,13 +203,13 @@ export async function probeKugou(input: string): Promise<ProbeResult> {
   return { schema: 2, ok: true, platform: 'kugou', engine: 'kugou-web', media, formats, warnings, error: null };
 }
 
-export async function getKugou(input: string, formatId: string | null, outDir: string) {
+async function getKugouImpl(input: string, formatId: string | null, outDir: string) {
   const probe = await probeKugou(input);
   const fmt = probe.formats.find((f) => f.id === formatId) ||
     probe.formats.find((f) => f.recommended) || probe.formats[0];
-  const cached = urlCache.get(fmt.id);
+  const cached = urlCache().get(fmt.id);
   if (!cached) throw new VdlError('no_stream', '该档位没有可用地址');
-  const info = lastInfo!;
+  const info = infoState().lastInfo!;
 
   mkdirSync(outDir, { recursive: true });
   const dest = join(outDir,
@@ -231,3 +232,7 @@ export async function getKugou(input: string, formatId: string | null, outDir: s
   });
   return { path: dest, bytes: statSync(dest).size, skipped: false, warnings };
 }
+
+export const probeKugou = scopedOperation(probeKugouImpl);
+
+export const getKugou = scopedOperation(getKugouImpl);

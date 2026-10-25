@@ -8,9 +8,10 @@ const I18N = {
     author: '作者', parts: '分P', quality: '画质',
     runtime: '运行状态', limit: '限速', version: '版本', engine: '引擎',
     notice: '待处理', none: '暂无需要注意的', component: '通用组件',
-    connected: '已连接', offline: '未连接',
-    outDirHelp: '留空使用默认 下载\\；路径只保存在本机。',
-    genericHelp: '只在你点「下载组件」时联网；官网直链 + SHA256 校验。',
+    connected: '已连接', offline: '未连接', reconnecting: '正在重连',
+    networkError: '无法连接服务，请检查电脑端服务和网络', invalidLimit: '限速必须是大于等于 0 的有效数字',
+    outDirHelp: '留空使用默认 下载\\；更改输出目录后需重启服务。',
+    genericHelp: '点击「下载组件」从 yt-dlp 官方发布地址下载。',
     unlimited: '不限速',
     limitRate: '下载限速（MB/s）',
     limitRateHelp: '留空或 0 = 不限速；按单条流计算，B站 音轨另起一份预算。',
@@ -43,9 +44,10 @@ const I18N = {
     author: 'Author', parts: 'Parts', quality: 'Quality',
     runtime: 'Runtime', limit: 'Limit', version: 'Version', engine: 'Engine',
     notice: 'Notice', none: 'Nothing to report', component: 'Add-on',
-    connected: 'Connected', offline: 'Offline',
-    outDirHelp: 'Leave empty for the default 下载\\ folder; stored on this machine only.',
-    genericHelp: 'Only downloads when you click Install; official URL + SHA256 check.',
+    connected: 'Connected', offline: 'Offline', reconnecting: 'Reconnecting',
+    networkError: 'Cannot reach the server. Check the service and network.', invalidLimit: 'Rate limit must be a valid number greater than or equal to 0.',
+    outDirHelp: 'Leave empty for the default 下载\\ folder; restart the service after changing it.',
+    genericHelp: 'Click Install to download from the official yt-dlp release URL.',
     unlimited: 'Unlimited',
     limitRate: 'Download limit (MB/s)',
     limitRateHelp: 'Empty or 0 = unlimited; per stream (Bilibili audio uses its own budget).',
@@ -83,12 +85,15 @@ createApp({
     const lang = ref(localStorage.getItem('vdl-lang') || 'zh');
     const t = (key) => (I18N[lang.value] && I18N[lang.value][key]) || key;
 
-    const url = ref('');
+    const url = ref(new URLSearchParams(location.search).get('url') || '');
     const partUrl = ref('');
     const result = ref(null);
     const selected = ref([]);
     const jobs = ref([]);
     const busy = ref(false);
+    const submitting = ref(false);
+    const reconnecting = ref(false);
+    const settingsError = ref('');
     const message = ref('');
     const version = ref('');
     const connected = ref(false);
@@ -184,13 +189,23 @@ createApp({
     }[status] || status);
 
     async function api(path, opts = {}) {
-      const res = await fetch(path, {
-        method: opts.method || 'GET',
-        headers: Object.assign({ 'X-VDL-Token': token }, opts.headers || {}),
-        body: opts.body ? JSON.stringify(opts.body) : undefined,
-      });
-      try { return await res.json(); } catch { return { ok: false, error: { message: `HTTP ${res.status}` } }; }
+      try {
+        const res = await fetch(path, {
+          method: opts.method || 'GET',
+          headers: Object.assign({ 'X-VDL-Token': token }, opts.headers || {}),
+          body: opts.body ? JSON.stringify(opts.body) : undefined,
+        });
+        if (res.status === 401) connected.value = false;
+        try { return await res.json(); }
+        catch { return { ok: false, error: { message: `HTTP ${res.status}` } }; }
+      } catch {
+        // 单次接口失败不等于 SSE 已断开；在线状态以持有的连接为准。
+        if (!events || events.readyState !== EventSource.OPEN) connected.value = false;
+        return { ok: false, error: { code: 'network_error', message: t('networkError') } };
+      }
     }
+
+    const errorText = (data) => [data?.error?.message, data?.error?.next_action].filter(Boolean).join(' · ') || t('failed');
 
     function toggleLang() {
       lang.value = lang.value === 'zh' ? 'en' : 'zh';
@@ -214,7 +229,7 @@ createApp({
 
     async function probeUrl(target) {
       const value = (target || url.value).trim();
-      if (!value) return;
+      if (!value || busy.value || submitting.value) return;
       busy.value = true;
       message.value = '';
 
@@ -227,7 +242,7 @@ createApp({
         });
         busy.value = false;
         if (!data.ok) {
-          message.value = (data.error && data.error.message) || 'failed';
+          message.value = errorText(data);
           return;
         }
         // dropped 在响应顶层，挂到 album 上给模板用（截断必须让用户看到）
@@ -250,15 +265,15 @@ createApp({
       });
       busy.value = false;
       if (!data.ok) {
-        message.value = (data.error && data.error.message) || 'failed';
+        message.value = errorText(data);
         return;
       }
       result.value = data;
       url.value = value;
       partUrl.value = data.media.source_url || value;
-      selected.value = data.formats.filter((f) => f.recommended).map((f) => f.id);
-      if (!selected.value.length && data.formats.length) {
-        selected.value = [data.formats[0].id];
+      selected.value = data.formats.filter((f) => f.available && f.recommended).map((f) => f.id);
+      if (!selected.value.length) {
+        selected.value = data.formats.filter((f) => f.available).slice(0, 1).map((f) => f.id);
       }
       checkedParts.value = data.media.parts.length > 1
         ? (data.media.parts.length <= 20 ? data.media.parts.map((p) => p.index) : [])
@@ -279,63 +294,42 @@ createApp({
     }
 
     async function download() {
-      // 专辑：每个勾选曲目一个 job（formatId 留空 = 各曲目用自己的推荐档）
+      if (submitting.value || busy.value) return;
+      const requests = [];
+      const platform = result.value?.platform;
+      const sidecars = {
+        cover: withCover.value && ['douyin', 'bilibili'].includes(platform),
+        subs: withSubs.value && platform === 'bilibili',
+        danmaku: withDanmaku.value && platform === 'bilibili',
+      };
       if (album.value) {
-        const picked = albumTracks.value.filter((x) => checkedTracks.value.includes(x.id));
-        if (!picked.length) return;
-        busy.value = true;
-        let ok = 0;
-        for (const track of picked) {
-          const data = await api('/api/jobs', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: { url: track.url, formatIds: [''], cover: withCover.value },
-          });
-          if (data.ok) { upsert(data.job); ok += 1; }
+        // 音乐封面由引擎内嵌；独立视频封面开关不冒充音乐 sidecar 能力。
+        for (const track of albumTracks.value.filter((x) => checkedTracks.value.includes(x.id))) {
+          requests.push({ url: track.url, formatIds: [''] });
         }
-        busy.value = false;
-        message.value = `${t('queued')} ${ok}/${picked.length}`;
-        return;
-      }
-
-      if (!result.value || !selected.value.length) return;
-
-      // 批量：每个勾选的分P 一个 job，清晰度整批统一
-      if (isBatch.value && checkedParts.value.length) {
-        const fmt = selected.value[0];
-        const parts = result.value.media.parts.filter((p) =>
-          checkedParts.value.includes(p.index));
-        let ok = 0;
-        for (const part of parts) {
-          const data = await api('/api/jobs', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: {
-              url: part.url, formatIds: [fmt], cover: withCover.value,
-              subs: withSubs.value, danmaku: withDanmaku.value,
-            },
-          });
-          if (data.ok) { upsert(data.job); ok += 1; }
+      } else if (result.value && selected.value.length) {
+        if (isBatch.value) {
+          const parts = result.value.media.parts.filter((p) => checkedParts.value.includes(p.index));
+          for (const part of parts) requests.push({ url: part.url, formatIds: [selected.value[0]], ...sidecars });
+        } else {
+          requests.push({ url: result.value.media.source_url || url.value, formatIds: [...selected.value], ...sidecars });
         }
-        message.value = `${t('queued')} ${ok}/${parts.length}`;
-        return;
       }
-
-      const data = await api('/api/jobs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: {
-          url: result.value.media.source_url || url.value,
-          formatIds: [...selected.value],
-          cover: withCover.value,
-          subs: withSubs.value, danmaku: withDanmaku.value,
-        },
-      });
-      if (data.ok) {
-        upsert(data.job);
-        message.value = t('queued');
-      } else {
-        message.value = (data.error && data.error.message) || 'failed';
+      if (!requests.length) return;
+      submitting.value = true;
+      let ok = 0;
+      const errors = [];
+      try {
+        for (const body of requests) {
+          const data = await api('/api/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+          if (data.ok) {
+            for (const job of data.jobs || [data.job]) upsert(job);
+            ok += 1;
+          } else errors.push(errorText(data));
+        }
+        message.value = `${t('queued')} ${ok}/${requests.length}` + (errors.length ? ` · ${[...new Set(errors)].join('；')}` : '');
+      } finally {
+        submitting.value = false;
       }
     }
 
@@ -347,16 +341,22 @@ createApp({
     function upsert(job) {
       if (!job) return;
       const at = jobs.value.findIndex((j) => j.id === job.id);
+      // 快速完成的 SSE 可能先于提交响应到达；迟到的 queued/running 快照不能覆盖终态。
+      if (at >= 0 && ['done', 'failed', 'cancelled'].includes(jobs.value[at].status)
+          && ['queued', 'running'].includes(job.status)) return;
       if (at >= 0) jobs.value[at] = job;
       else jobs.value.unshift(job);
     }
 
     async function cancel(id) {
-      await api(`/api/jobs/${id}/cancel`, { method: 'POST' });
+      const data = await api(`/api/jobs/${id}/cancel`, { method: 'POST' });
+      if (data.ok) upsert(data.job);
+      else message.value = errorText(data);
     }
     async function retry(id) {
       const data = await api(`/api/jobs/${id}/retry`, { method: 'POST' });
       if (data.ok) upsert(data.job);
+      else message.value = errorText(data);
     }
 
     async function refreshComponents() {
@@ -371,6 +371,7 @@ createApp({
     async function openSettings() {
       const data = await api('/api/settings');
       if (!data.ok) { message.value = t('notSupported'); return; }
+      settingsError.value = '';
       const s = data.settings || {};
       sOutDir.value = s.outDir || '';
       sTheme.value = s.theme || 'light';
@@ -381,16 +382,16 @@ createApp({
       sGeneric.value = !!s.allowGeneric;
       await refreshComponents();
       settingsOpen.value = true;
-      // 键盘/读屏用户打开面板后焦点应落在面板里，而不是留在背后的按钮上
-      nextTick(() => {
-        const el = document.querySelector('.slideover .icon-btn');
-        if (el) el.focus();
-      });
+
     }
 
     async function saveSettings() {
       // 空/0 = 不限速；后端存字节/秒
       const mb = Number(sLimitRateMB.value);
+      if (!Number.isFinite(mb) || mb < 0 || !Number.isSafeInteger(Math.round(mb * 1048576))) {
+        settingsError.value = t('invalidLimit'); return;
+      }
+      settingsError.value = '';
       // 别叫 limitRate：会遮蔽外面的 ref，赋值静默失效（这里踩过）
       const limitBytes = Number.isFinite(mb) && mb > 0 ? Math.round(mb * 1048576) : 0;
       const data = await api('/api/settings', {
@@ -402,7 +403,7 @@ createApp({
           limitRate: limitBytes,
         },
       });
-      if (!data.ok) { message.value = (data.error && data.error.message) || 'failed'; return; }
+      if (!data.ok) { settingsError.value = errorText(data); return; }
       document.documentElement.dataset.theme = sTheme.value;
       localStorage.setItem('vdl-theme', sTheme.value);
       limitRate.value = (data.settings && data.settings.limitRate) || limitBytes;
@@ -430,7 +431,7 @@ createApp({
         },
       });
       if (data.ok) previewUrl.value = data.url;
-      else message.value = (data.error && data.error.message) || 'failed';
+      else message.value = errorText(data);
     }
 
     function previewJob(job) {
@@ -439,16 +440,31 @@ createApp({
     }
     function closePreview() { previewUrl.value = ''; }
 
-    // Esc 关闭浮层；打开时锁背景滚动（否则面板后面还能滚，读屏也会读到底下内容）
+    // 同一套浮层焦点规则用于设置和预览；背景 inert 防止 Tab 和读屏越过面板。
+    let returnFocus = null;
+    const activeDialog = () => document.querySelector(previewUrl.value ? '.preview-box' : '.slideover');
     const closeOverlays = () => {
-      if (settingsOpen.value) { settingsOpen.value = false; return; }
-      if (previewUrl.value) previewUrl.value = '';
+      if (previewUrl.value) { previewUrl.value = ''; return; }
+      settingsOpen.value = false;
     };
     const onKeydown = (e) => {
-      if (e.key === 'Escape') closeOverlays();
+      if (!settingsOpen.value && !previewUrl.value) return;
+      if (e.key === 'Escape') { e.preventDefault(); closeOverlays(); }
+      if (e.key !== 'Tab') return;
+      const nodes = [...(activeDialog()?.querySelectorAll('button:not(:disabled), input:not(:disabled), select, a[href], video[controls]') || [])]
+        .filter((el) => el.getClientRects().length);
+      const first = nodes[0], last = nodes.at(-1);
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
     };
-    watch([settingsOpen, previewUrl], ([s, p]) => {
-      document.body.style.overflow = s || p ? 'hidden' : '';
+    watch([settingsOpen, previewUrl], async ([s, p], [wasSettings, wasPreview]) => {
+      const opened = s || p;
+      if (opened && !wasSettings && !wasPreview) returnFocus = document.activeElement;
+      document.body.style.overflow = opened ? 'hidden' : '';
+      document.querySelector('.app').inert = !!opened;
+      await nextTick();
+      if (s || p) activeDialog()?.querySelector('button')?.focus();
+      else if (returnFocus?.isConnected) returnFocus.focus();
     });
 
     let events = null;
@@ -475,14 +491,20 @@ createApp({
       // 右栏要显示组件状态，挂载时就查一次（不必等用户打开设置）
       refreshComponents();
       const list = await api('/api/jobs');
-      if (list.ok) jobs.value = (list.jobs || []).slice().reverse();
+      if (list.ok) {
+        jobs.value = (list.jobs || []).slice().reverse();
+        if (list.warnings?.length) message.value = list.warnings.join('；');
+      }
       events = new EventSource(`/api/events?token=${encodeURIComponent(token)}`);
+      events.onopen = () => { connected.value = true; reconnecting.value = false; };
+      events.onerror = () => { connected.value = false; reconnecting.value = true; };
       events.onmessage = (ev) => {
         try {
           const data = JSON.parse(ev.data);
           if (data.job) upsert(data.job);
         } catch { /* ignore */ }
       };
+      if (url.value.trim()) await probe();
     });
 
     onBeforeUnmount(() => {
@@ -492,7 +514,7 @@ createApp({
     });
 
     return {
-      t, lang, url, partUrl, result, selected, jobs, busy, message, version,
+      t, lang, url, partUrl, result, selected, jobs, busy, submitting, message, version, reconnecting, settingsError,
       withCover, withSubs, withDanmaku, size, statusLabel, dur,
       connected, outDir, limitRate, rateText, platformClass, jobName,
       settingsOpen, sOutDir, sTheme, sLimitRateMB, sConcurrency, sGeneric,

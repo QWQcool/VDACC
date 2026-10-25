@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: "1.4.4"
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -28,14 +28,6 @@ jobs:
       - name: TS Skill 构建校验
         run: python tools/build_skill_ts.py
 
-# ── 待办（2026-10-22 暂停自动触发时记录）─────────────────────────────
-# 恢复自动触发之前必须先修掉这两处，否则恢复当天就又是全红：
-#   1. tools/build_skill.py --zip 在 CI 环境下失败（本地是否通过需另行确认）
-#   2. tools/build_skill_ts.py 在 CI 环境下失败
-# 排查方向（按可能性排序，不要在本次改动里动手修）：
-#   - --zip 产物路径依赖工作目录 / 写到了不存在的目录
-#   - zip 内含中文文件名在 Windows runner 上的编码问题
-#   - 依赖了 .gitignore 的文件（本地有、CI 没有）
-#   - 依赖本机安装的工具（node/pnpm 版本与 runner 不一致）
-# 修好后再考虑把 runs-on 从 windows-latest 换成 ubuntu-latest（成本对折），
-# 但换镜像和修脚本要分两次提交，否则红了分不清是谁的问题。
+# 2026-10-25：旧运行 39744319053 的 TS 构建失败已定位为 Windows cp1252
+# 无法输出中文日志。build_skill_ts.py 统一 UTF-8；固定 Bun 以复现本地验收。
+# 继续手动触发以控制配额；自动 CI、Release 与 legacy 构建不在本次变更范围。

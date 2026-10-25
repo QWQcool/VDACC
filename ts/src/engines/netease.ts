@@ -1,3 +1,4 @@
+import { operationState, scopedOperation } from '../core/operation';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { open } from 'node:fs/promises';
@@ -18,8 +19,8 @@ const LEVELS: Array<[number, string, string]> = [
   [320000, 'exhigh', '极高 320K'],
 ];
 
-export const formatUrls = new Map<string, string>();
-let lastSong: any = null;
+const formatUrls = operationState(() => new Map<string, string>());
+const songState = operationState(() => ({ lastSong: null as any }));
 
 function cookieHeader(): string {
   const path = join(process.env.LOCALAPPDATA || '', 'vdl', 'auth', 'netease.json');
@@ -118,17 +119,17 @@ export async function albumTracks(input: string): Promise<AlbumInfo> {
   };
 }
 
-export async function probeNetease(url: string): Promise<ProbeResult> {
+async function probeNeteaseImpl(url: string): Promise<ProbeResult> {
   const sid = extractId(url);
   if (!sid) throw new VdlError('bad_input', `识别不出歌曲 ID: ${url}`);
   const cookie = cookieHeader();
-  formatUrls.clear();
-  lastSong = null;
+  formatUrls().clear();
+  songState().lastSong = null;
 
   const detail = await getJson(`/api/song/detail/?id=${sid}&ids=%5B${sid}%5D`, cookie);
   const song = (detail.songs || [])[0];
   if (!song) throw new VdlError('filtered', `查不到这首歌（id=${sid}）`);
-  lastSong = song;
+  songState().lastSong = song;
 
   const formats: Format[] = [];
   for (const [br, level, label] of LEVELS) {
@@ -144,7 +145,7 @@ export async function probeNetease(url: string): Promise<ProbeResult> {
       bytes: Number(item.size || 0) || null,
       bitrate: Number(item.br || 0) || null,
     }));
-    formatUrls.set(level, item.url);
+    formatUrls().set(level, item.url);
   }
   if (!formats.length) {
     throw new VdlError(cookie ? 'filtered' : 'need_login', '这首歌没有可播放地址');
@@ -204,13 +205,13 @@ function ffmpeg(args: string[]) {
   return spawnSync(ff, args, { encoding: 'utf8', windowsHide: true });
 }
 
-export async function getNetease(input: string, formatId: string | null, outDir: string) {
+async function getNeteaseImpl(input: string, formatId: string | null, outDir: string) {
   const probe = await probeNetease(input);
   const fmt = probe.formats.find((f) => f.id === formatId) ||
     probe.formats.find((f) => f.recommended) || probe.formats[0];
-  const url = formatUrls.get(fmt.id);
+  const url = formatUrls().get(fmt.id);
   if (!url) throw new VdlError('no_stream', '该档位没有可用地址');
-  const song = lastSong || {};
+  const song = songState().lastSong || {};
 
   mkdirSync(outDir, { recursive: true });
   const label = safeName(fmt.label, 14, fmt.id);
@@ -296,3 +297,11 @@ export async function getNetease(input: string, formatId: string | null, outDir:
 
   return { path: dest, bytes: statSync(dest).size, skipped: false, warnings };
 }
+
+export function previewNetease(formatId: string): string {
+  return formatUrls().get(formatId) || "";
+}
+
+export const probeNetease = scopedOperation(probeNeteaseImpl);
+
+export const getNetease = scopedOperation(getNeteaseImpl);

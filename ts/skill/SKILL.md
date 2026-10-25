@@ -56,7 +56,8 @@ vdl.exe get   "<url>" --format bili-854 -o "<目录>"
 | `filtered` | 内容被过滤/下架 | 换一条链接 |
 | `need_login` | 需要登录/会员 | 在桌面端运行 `vdl auth <site>` 扫码 |
 | `http_404` | 页面不存在 | 让用户确认链接 |
-| `engine_unavailable` | 缺少 ffmpeg | 安装 ffmpeg 并加入 PATH |
+| `ffmpeg_missing` | 找不到或无法启动 ffmpeg | 安装 ffmpeg 并加入 PATH，或设置 VDL_FFMPEG |
+| `ffmpeg_failed` | 音视频合并失败 | 检查磁盘空间后重试，分离流会保留 |
 | `unsupported_url` | 不支持的站点 | TS Skill 不含 yt-dlp 兜底，告知用户 |
 
 ## 时间预期

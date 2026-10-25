@@ -8,19 +8,29 @@ import type { ProbeResult } from './core/types';
 
 const argv = Bun.argv.slice(2);
 const cmd = argv[0] || '';
-const positional = argv.slice(1).filter((a) => !a.startsWith('-'));
+const positional: string[] = [];
+for (let i = 1; i < argv.length; i++) {
+  if (['-o', '--format'].includes(argv[i])) { i += 1; continue; }
+  if (!argv[i].startsWith('-')) positional.push(argv[i]);
+}
 const flag = (name: string, def: string | null = null) => {
   const i = argv.indexOf(name);
   return i >= 0 && argv[i + 1] && !argv[i + 1].startsWith('-') ? argv[i + 1] : def;
 };
 
-async function probe(url: string): Promise<ProbeResult> {
+/** Skill 有意只包含三个平台；新平台被识别不等于这个包已经支持。 */
+function skillPlatform(url: string): 'douyin' | 'netease' | 'bilibili' {
   const platform = platformOf(url);
-  if (platform === 'unsupported') {
+  if (!['douyin', 'netease', 'bilibili'].includes(platform)) {
     throw new VdlError('unsupported_url',
       '这个 Skill 只支持抖音 / B站 / 网易云，未内置 yt-dlp 兜底',
       '需要长尾站点请用桌面完整版（可选组件）');
   }
+  return platform as 'douyin' | 'netease' | 'bilibili';
+}
+
+async function probe(url: string): Promise<ProbeResult> {
+  const platform = skillPlatform(url);
   if (platform === 'douyin') return probeDouyin(url);
   if (platform === 'netease') return probeNetease(url);
   return probeBilibiliApi(url);
@@ -40,7 +50,7 @@ async function main() {
       process.exit(result.ok ? 0 : 1);
     }
 
-    const platform = platformOf(url);
+    const platform = skillPlatform(url);
     const outDir = flag('-o', '下载') || '下载';
     const out = platform === 'douyin'
       ? await getDouyin(url, flag('--format'), outDir)

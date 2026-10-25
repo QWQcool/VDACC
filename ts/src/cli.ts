@@ -191,7 +191,7 @@ async function main() {
         console.error(`--subs / --danmaku 目前只支持 B站，${platform} 会忽略这些参数`);
       }
       const out = platform === 'douyin'
-        ? await getDouyin(url, flag('--format'), flag('-o', '下载') || '下载')
+        ? await getDouyin(url, flag('--format'), flag('-o', '下载') || '下载', { cover: has('--cover') })
         : platform === 'netease'
           ? await getNetease(url, flag('--format'), flag('-o', '下载') || '下载')
           : platform === 'qq'
@@ -202,14 +202,17 @@ async function main() {
                 ? await getKugou(url, flag('--format'), flag('-o', '下载') || '下载')
                 : await getBilibiliApi(
               url, flag('--format'), flag('-o', '下载') || '下载',
-              { subs: has('--subs'), danmaku: has('--danmaku') });
+              { cover: has('--cover'), subs: has('--subs'), danmaku: has('--danmaku') });
       if (has('--json')) {
         console.log(JSON.stringify({
           schema: 2, ok: true, path: out.path, bytes: out.bytes, skipped: out.skipped,
+          warnings: 'warnings' in out ? out.warnings : [],
+          ...(has('--cover') ? { cover: (out as any).cover || null } : {}),
           ...(has('--subs') ? { srt: (out as any).srt || null, srt_count: (out as any).srtCount || 0 } : {}),
         }, null, 2));
       } else {
         console.log(`完成 ${out.path} (${(out.bytes / 1048576).toFixed(2)} MB)`);
+        if ('warnings' in out) for (const warning of out.warnings) console.error(`提示：${warning}`);
         if (has('--subs')) {
           const srt = (out as any).srt as string | null;
           console.log(srt ? `字幕 ${srt}` : '字幕：该视频没有可用字幕（含 AI 字幕）');

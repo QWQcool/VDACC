@@ -1,26 +1,28 @@
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { networkInterfaces } from 'node:os';
 import { dirname, join, normalize, resolve } from 'node:path';
 
 import { planAlbum } from './core/album';
-import { DownloadCancelled, setCancelCheck } from './core/cancel';
-import { loadConfig, saveConfig } from './core/config';
-import { VdlError } from './core/errors';
+import { DownloadCancelled } from './core/cancel';
+import { configPath, loadConfig, saveConfig } from './core/config';
+import { fail, VdlError } from './core/errors';
+import { fetchMediaStream, jailedPath, originAllowed } from './core/security';
+import { writeJsonAtomic } from './core/storage';
 import { UA } from './core/http';
 import { platformOf } from './core/platform';
-import { setProgressSink } from './core/progress';
+import { runOperation } from './core/operation';
 import { currentLimitBytesPerSec, setLimitBytesPerSec } from './core/rate';
 import { getDouyin, previewDouyin, probeDouyin } from './engines/douyin';
-import { albumTracks as neteaseAlbum, formatUrls, getNetease, probeNetease } from './engines/netease';
+import { albumTracks as neteaseAlbum, previewNetease, getNetease, probeNetease } from './engines/netease';
 import { albumTracks as qqAlbum, getQQ, previewQQ, probeQQ } from './engines/qq';
 import { getKuwo, probeKuwo } from './engines/kuwo';
 import { getKugou, probeKugou } from './engines/kugou';
 import { canHandle as canSniff, getSniff, probeSniff } from './engines/sniff';
 import { getBilibiliApi, previewBilibili, probeBilibiliApi } from './engines/bilibili_api';
 import { componentPath, genericInstalled, getGeneric, probeGeneric } from './engines/generic';
-import type { ProbeResult } from './core/types';
+import type { DownloadOptions, Job, ProbeResult } from './core/types';
 
 const argv = process.argv.slice(2);
 const flag = (name: string, def: string) => {
@@ -36,36 +38,16 @@ const CONFIG = loadConfig();
 const OUT = resolve(flag('-o', CONFIG.outDir || join(process.cwd(), '下载')));
 const WEB = join(import.meta.dir, '..', '..', 'web');
 const STORE = process.env.VDL_STORE ||
-  join(process.env.LOCALAPPDATA || '', 'vdl', 'ts-jobs.json');
+  join(dirname(configPath()), 'ts-jobs.json');
 mkdirSync(OUT, { recursive: true });
 // 限速是进程级全局状态（下载器单 worker 串行），启动时按配置装一次
 setLimitBytesPerSec(CONFIG.limitRate || 0);
-
-interface Job {
-  id: string;
-  url: string;
-  formatId: string;
-  status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
-  percent: number;
-  bytes: number;
-  total: number;
-  path?: string;
-  error?: { code: string; message: string };
-  createdAt: number;
-  finishedAt?: number;
-  cancelRequested?: boolean;
-  /** 附属产物开关（目前只有 B站 认这两个字段，其它平台忽略）。 */
-  subs?: boolean;
-  danmaku?: boolean;
-  /** 附属产物条数，仅用于界面显示实际拿到了多少。 */
-  srtCount?: number;
-  danmakuCount?: number;
-}
 
 const jobs = new Map<string, Job>();
 const order: string[] = [];
 const queue: string[] = [];
 let running = false;
+let persistenceWarning = '';
 
 const clients = new Set<ReadableStreamDefaultController>();
 const encoder = new TextEncoder();
@@ -74,7 +56,8 @@ function loadStore() {
   if (!existsSync(STORE)) return;
   try {
     const data = JSON.parse(readFileSync(STORE, 'utf8'));
-    for (const job of (data.jobs || []).slice(-100)) {
+    if (!Array.isArray(data.jobs)) throw new Error('invalid job store');
+    for (const job of data.jobs) {
       if (!job || !job.id) continue;
       if (job.status === 'queued' || job.status === 'running') {
         job.status = 'failed';
@@ -85,23 +68,26 @@ function loadStore() {
       order.push(job.id);
     }
   } catch {
-    // 坏存档当没有历史
+    // 损坏时停止启动，避免一次新下载覆盖用户仍可能恢复的历史。
+    throw new VdlError('history_invalid', '任务历史无法读取或格式无效', '备份并修复 ts-jobs.json 后重启；原文件未改动');
   }
 }
 
 function saveStore() {
-  try {
-    const payload = { jobs: order.slice(-100).map((id) => jobs.get(id)) };
-    writeFileSync(STORE, JSON.stringify(payload), 'utf8');
-  } catch {
-    // 存档失败不影响下载
-  }
+  // 活跃任务不能被“最近 100 条”挤出，否则重启会悄悄丢掉已接受的队列。
+  const finished = order.filter((id) => !['queued', 'running'].includes(jobs.get(id)!.status)).slice(-100);
+  const keep = new Set([...finished, ...order.filter((id) => ['queued', 'running'].includes(jobs.get(id)!.status))]);
+  writeJsonAtomic(STORE, { jobs: order.filter((id) => keep.has(id)).map((id) => jobs.get(id)) });
+  persistenceWarning = '';
 }
 
-let saveTimer: ReturnType<typeof setTimeout> | null = null;
+/** 状态迁移立即落盘；运行中的磁盘失败可见，但不把已下载文件误判成失败。 */
 function scheduleSave() {
-  if (saveTimer) return;
-  saveTimer = setTimeout(() => { saveTimer = null; saveStore(); }, 500);
+  try { saveStore(); }
+  catch {
+    persistenceWarning = '任务历史保存失败，请检查用户数据目录权限和磁盘空间';
+    console.error('[storage_write_failed] ' + persistenceWarning);
+  }
 }
 
 loadStore();
@@ -120,16 +106,7 @@ function json(data: unknown, status = 200) {
 }
 
 function failBody(platform: string, err: unknown) {
-  const e = err as VdlError;
-  return {
-    schema: 2, ok: false, platform, engine: 'ts-ts', media: null, formats: [],
-    warnings: [],
-    error: {
-      code: e?.code || 'internal',
-      message: e?.message || String(err),
-      next_action: e?.nextAction || '',
-    },
-  };
+  return fail(platform, 'ts-server', err);
 }
 
 async function probeUrl(url: string): Promise<ProbeResult> {
@@ -150,9 +127,9 @@ async function probeUrl(url: string): Promise<ProbeResult> {
 }
 
 async function downloadUrl(url: string, formatId: string,
-                             opts: { subs?: boolean; danmaku?: boolean } = {}) {
+                             opts: DownloadOptions = {}) {
   switch (platformOf(url)) {
-    case 'douyin': return getDouyin(url, formatId, OUT);
+    case 'douyin': return getDouyin(url, formatId, OUT, opts);
     case 'netease': return getNetease(url, formatId, OUT);
     case 'qq': return getQQ(url, formatId, OUT);
     case 'kuwo': return getKuwo(url, formatId, OUT);
@@ -169,17 +146,31 @@ async function downloadUrl(url: string, formatId: string,
   }
 }
 
-function createJob(url: string, formatId: string, opts: { subs?: boolean; danmaku?: boolean } = {}): Job {
+function createJob(url: string, formatId: string, opts: DownloadOptions = {}): Job {
   const job: Job = {
     id: randomBytes(4).toString('hex'), url, formatId: formatId || '',
     status: 'queued', percent: 0, bytes: 0, total: 0, createdAt: Date.now(),
     ...(opts.subs ? { subs: true } : {}),
     ...(opts.danmaku ? { danmaku: true } : {}),
+    ...(opts.cover ? { cover: true } : {}),
   };
   jobs.set(job.id, job);
   order.push(job.id);
-  scheduleSave();
   return job;
+}
+
+/** 先整体持久化再启动；写盘失败时回滚，避免客户端收不到成功却已经开始下载。 */
+function submitJobs(url: string, ids: string[], opts: DownloadOptions): Job[] {
+  const created = ids.map((id) => createJob(url, id, opts));
+  try { saveStore(); }
+  catch (err) {
+    for (const job of created) jobs.delete(job.id);
+    order.splice(order.length - created.length, created.length);
+    throw err;
+  }
+  for (const job of created) queue.push(job.id);
+  void pump();
+  return created;
 }
 
 async function pump() {
@@ -198,47 +189,43 @@ async function pump() {
     }
 
     job.status = 'running';
+    scheduleSave();
     emit(job);
-    setCancelCheck(() => !!job.cancelRequested);
-    setProgressSink((written, total) => {
-      job.bytes = written;
-      job.total = total;
-      job.percent = total ? Math.min(99.9, Math.round((written / total) * 1000) / 10) : 0;
-      emit(job);
-    });
     try {
-      const out = await downloadUrl(job.url, job.formatId,
-        { subs: job.subs, danmaku: job.danmaku });
+      const out = await runOperation(() => downloadUrl(job.url, job.formatId,
+        { cover: job.cover, subs: job.subs, danmaku: job.danmaku }), {
+        cancelled: () => !!job.cancelRequested,
+        progress(written, total) {
+          job.bytes = written;
+          job.total = total;
+          job.percent = total ? Math.min(99.9, Math.round((written / total) * 1000) / 10) : 0;
+          emit(job);
+        },
+      });
       const extra = out as any;
       Object.assign(job, {
         status: 'done', percent: 100, bytes: out.bytes, total: out.bytes,
         path: out.path, finishedAt: Date.now(),
         ...(extra.srtCount ? { srtCount: extra.srtCount } : {}),
         ...(extra.danmakuCount ? { danmakuCount: extra.danmakuCount } : {}),
+        warnings: extra.warnings || [],
       });
     } catch (err) {
       if (err instanceof DownloadCancelled) {
         job.status = 'cancelled';
         job.error = { code: 'cancelled', message: '用户取消' };
       } else {
-        const e = err as VdlError;
         job.status = 'failed';
-        job.error = { code: e?.code || 'internal', message: e?.message || String(err) };
+        job.error = failBody('ts', err).error;
       }
       job.finishedAt = Date.now();
     } finally {
-      setCancelCheck(null);
-      setProgressSink(null);
-      emit(job);
       scheduleSave();
+      if (persistenceWarning) job.warnings = [...(job.warnings || []), persistenceWarning];
+      emit(job);
     }
   }
   running = false;
-}
-
-function enqueue(id: string) {
-  queue.push(id);
-  void pump();
 }
 
 function authorized(req: Request, url: URL): boolean {
@@ -246,27 +233,13 @@ function authorized(req: Request, url: URL): boolean {
   return token === TOKEN;
 }
 
-function originOk(req: Request): boolean {
-  const origin = req.headers.get('origin');
-  if (!origin) return true;
-  if (origin.startsWith('http://127.0.0.1') || origin.startsWith('http://localhost')) return true;
-  if (origin === (process.env.VDL_ALLOW_ORIGIN || '')) return true;
-  // 局域网模式：手机从 http://<lan-ip>:<port> 打开，Origin 与 Host 同源。
-  // 只放行「与本次请求 Host 完全一致」的来源，别放成任意来源。
-  try {
-    const host = req.headers.get('host') || '';
-    if (host && new URL(origin).host === host) return true;
-  } catch {
-    // Origin 不是合法 URL，按拒绝处理
-  }
-  return false;
-}
-
 const LAN = argv.includes('--lan');
 const server = Bun.serve({
   hostname: LAN ? '0.0.0.0' : '127.0.0.1',
   port: PORT,
   async fetch(req) {
+    return runOperation(async () => {
+    try {
     const url = new URL(req.url);
     const path = url.pathname;
 
@@ -275,35 +248,44 @@ const server = Bun.serve({
       if (req.method !== 'GET') return new Response('method not allowed', { status: 405 });
       let rel = path === '/' ? '/vue/index.html' : path;
       if (rel.endsWith('/')) rel += 'index.html';
-      const file = normalize(join(WEB, rel));
-      if (!file.startsWith(WEB) || !existsSync(file) || !statSync(file).isFile()) {
+      const file = jailedPath(WEB, normalize(join(WEB, rel)));
+      if (!file) {
         return new Response('not found', { status: 404 });
       }
       return new Response(Bun.file(file));
     }
 
     if (!authorized(req, url)) return json({ ok: false, error: { code: 'unauthorized', message: 'token 无效' } }, 401);
-    if (!originOk(req)) return json({ ok: false, error: { code: 'forbidden', message: 'Origin 不被允许' } }, 403);
+    if (!originAllowed(req, process.env.VDL_ALLOW_ORIGIN)) return json({ ok: false, error: { code: 'forbidden', message: 'Origin 不被允许' } }, 403);
 
     if (path === '/api/health') {
       return json({
         // 与根 package.json / ts/package.json 保持一致（server 要能单独编译成 exe，不读文件）
-        ok: true, version: '3.3.0', schema: 2, outDir: OUT,
+        ok: true, version: '3.3.1', schema: 2, outDir: OUT,
         jobs: order.length, engine: 'ts',
         theme: (loadConfig().theme || 'light'),
         limitRate: currentLimitBytesPerSec(),
+        warnings: persistenceWarning ? [persistenceWarning] : [],
       });
     }
 
     if (path === '/api/events') {
       let controller: ReadableStreamDefaultController;
+      let timer: ReturnType<typeof setInterval>;
       const stream = new ReadableStream({
-        start(c) { controller = c; clients.add(c); },
-        cancel() { clients.delete(controller); },
+        start(c) {
+          controller = c;
+          clients.add(c);
+          // 每次重连立即发送快照，补回断线期间丢失的终态，不依赖后续任务事件。
+          for (const job of jobs.values()) c.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'job', job })}\n\n`));
+          c.enqueue(encoder.encode(': connected\n\n'));
+          timer = setInterval(() => {
+            try { c.enqueue(encoder.encode(': ping\n\n')); }
+            catch { clearInterval(timer); clients.delete(c); }
+          }, 15000);
+        },
+        cancel() { clearInterval(timer); clients.delete(controller); },
       });
-      const timer = setInterval(() => {
-        try { controller.enqueue(encoder.encode(': ping\n\n')); } catch { clearInterval(timer); }
-      }, 15000);
       return new Response(stream, {
         headers: {
           'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache',
@@ -313,7 +295,7 @@ const server = Bun.serve({
     }
 
     if (path === '/api/probe' && req.method === 'POST') {
-      const body = await req.json().catch(() => ({})) as any;
+      const body = (await req.json().catch(() => null)) || {};
       const target = String(body.url || '').trim();
       if (!target) return json({ ok: false, error: { code: 'bad_input', message: '缺少 url' } }, 400);
       try {
@@ -325,7 +307,7 @@ const server = Bun.serve({
 
     // 专辑曲目预览：只列前 20（planAlbum），下载仍由 /api/jobs 逐首建任务
     if (path === '/api/album' && req.method === 'POST') {
-      const body = await req.json().catch(() => ({})) as any;
+      const body = (await req.json().catch(() => null)) || {};
       const target = String(body.url || '').trim();
       if (!target) return json({ ok: false, error: { code: 'bad_input', message: '缺少 url' } }, 400);
       const platform = platformOf(target);
@@ -387,17 +369,17 @@ const server = Bun.serve({
     }
 
     if (path === '/api/preview' && req.method === 'POST') {
-      const body = await req.json().catch(() => ({})) as any;
+      const body = (await req.json().catch(() => null)) || {};
       const target = String(body.url || '').trim();
       if (!target) return json({ ok: false, error: { code: 'bad_input', message: '缺少 url' } }, 400);
-      try { await probeUrl(target); } catch { /* 缓存可能已有 */ }
+      await probeUrl(target);
       const formatId = String(body.formatId || '');
       let src = '';
       let ref = '';
       switch (platformOf(target)) {
         case 'douyin': src = previewDouyin(formatId); ref = 'https://www.douyin.com/'; break;
         case 'bilibili': src = previewBilibili(formatId); ref = 'https://www.bilibili.com/'; break;
-        case 'netease': src = formatUrls.get(formatId) || ''; ref = 'https://music.163.com/'; break;
+        case 'netease': src = previewNetease(formatId); ref = 'https://music.163.com/'; break;
         case 'qq': src = previewQQ(formatId); ref = 'https://y.qq.com/'; break;
         default: break;
       }
@@ -409,26 +391,14 @@ const server = Bun.serve({
     }
 
     if (path === '/api/stream') {
+      if (!['GET', 'HEAD'].includes(req.method)) return new Response('method not allowed', { status: 405 });
       const src = url.searchParams.get('src') || '';
       const ref = url.searchParams.get('ref') || '';
-      let host = '';
-      try { host = new URL(src).hostname.toLowerCase(); } catch { /* 非法 URL */ }
-      const allow = ['douyin.com', 'douyinvod.com', 'byteicdn.com',
-        'bilivideo.com', 'bilivideo.cn', '126.net', '127.net'];
-      // QQ 音乐 CDN 只给 http（aqqmusic.tc.qq.com / *.stream.qqmusic.qq.com），
-      // 所以只对这两个后缀放行 http；其它站点仍然强制 https，不顺手放大 http 面
-      const qqHosts = ['qqmusic.qq.com', 'tc.qq.com'];
-      const hostOk = allow.some((h) => host === h || host.endsWith(`.${h}`)) ||
-        qqHosts.some((h) => host === h || host.endsWith(`.${h}`));
-      const schemeOk = src.startsWith('https://') ||
-        (src.startsWith('http://') && qqHosts.some((h) => host === h || host.endsWith(`.${h}`)));
-      if (!hostOk || !schemeOk) {
-        return json({ ok: false, error: { code: 'forbidden', message: '不允许的流地址' } }, 403);
-      }
       const headers: Record<string, string> = { 'User-Agent': UA, Referer: ref || src };
       const range = req.headers.get('range');
       if (range) headers.Range = range;
-      const remote = await fetch(src, { headers });
+      const remote = await fetchMediaStream(src, { headers, method: req.method,
+        signal: AbortSignal.any([req.signal, AbortSignal.timeout(30000)]) });
       const out = new Headers();
       for (const key of ['content-type', 'content-length', 'content-range', 'accept-ranges']) {
         const value = remote.headers.get(key);
@@ -438,8 +408,8 @@ const server = Bun.serve({
     }
 
     if (path === '/api/preview' && req.method === 'GET') {
-      const target = resolve(url.searchParams.get('path') || '');
-      if (!target.startsWith(OUT) || !existsSync(target) || !statSync(target).isFile()) {
+      const target = jailedPath(OUT, url.searchParams.get('path') || '');
+      if (!target) {
         return json({ ok: false, error: { code: 'bad_input', message: '路径不在输出目录内' } }, 403);
       }
       return new Response(Bun.file(target));
@@ -448,12 +418,8 @@ const server = Bun.serve({
     if (path === '/api/settings') {
       if (req.method === 'GET') return json({ ok: true, settings: loadConfig() });
       if (req.method === 'PATCH' || req.method === 'POST') {
-        const body = await req.json().catch(() => ({})) as any;
-        const allowed: any = {};
-        for (const key of ['outDir', 'theme', 'concurrency', 'limitRate', 'allowGeneric']) {
-          if (body[key] !== undefined) allowed[key] = body[key];
-        }
-        const next = saveConfig(allowed);
+        const body = await req.json().catch(() => null);
+        const next = saveConfig(body);
         // 改完立即生效：否则用户要重启服务才能看到限速变化，会以为设置没保存
         setLimitBytesPerSec(next.limitRate || 0);
         return json({ ok: true, settings: next });
@@ -462,20 +428,22 @@ const server = Bun.serve({
     }
 
     if (path === '/api/jobs' && req.method === 'GET') {
-      return json({ ok: true, jobs: order.map((id) => jobs.get(id)) });
+      return json({ ok: true, jobs: order.map((id) => jobs.get(id)), warnings: persistenceWarning ? [persistenceWarning] : [] });
     }
 
     if (path === '/api/jobs' && req.method === 'POST') {
-      const body = await req.json().catch(() => ({})) as any;
+      const body = (await req.json().catch(() => null)) || {};
       const target = String(body.url || '').trim();
       if (!target) return json({ ok: false, error: { code: 'bad_input', message: '缺少 url' } }, 400);
       const ids: string[] = Array.isArray(body.formatIds) && body.formatIds.length
         ? body.formatIds.filter((x: any) => typeof x === 'string')
         : [String(body.formatId || '')];
+      if (!ids.length || ids.length > 20 || (Array.isArray(body.formatIds) && body.formatIds.length !== ids.length)) {
+        throw new VdlError('bad_input', '每次提交 1–20 个有效档位');
+      }
       // 附属产物开关：只认显式 true，避免字符串 "false" 之类被当成开启
-      const opts = { subs: body.subs === true, danmaku: body.danmaku === true };
-      const created = ids.map((formatId) => createJob(target, formatId, opts));
-      for (const job of created) enqueue(job.id);
+      const opts = { cover: body.cover === true, subs: body.subs === true, danmaku: body.danmaku === true };
+      const created = submitJobs(target, [...new Set(ids)], opts);
       return json({ ok: true, jobs: created, job: created[0] }, 202);
     }
 
@@ -505,8 +473,10 @@ const server = Bun.serve({
         return json({ ok: true, job });
       }
 
-      const next = createJob(job.url, job.formatId, { subs: job.subs, danmaku: job.danmaku });
-      enqueue(next.id);
+      if (!['done', 'failed', 'cancelled'].includes(job.status)) {
+        throw new VdlError('bad_input', '任务尚未结束，不能重复重试');
+      }
+      const [next] = submitJobs(job.url, [job.formatId], { cover: job.cover, subs: job.subs, danmaku: job.danmaku });
       return json({ ok: true, job: next }, 202);
     }
 
@@ -516,8 +486,8 @@ const server = Bun.serve({
       if (!job || job.status !== 'done' || !job.path) {
         return json({ ok: false, error: { code: 'not_found', message: '任务不存在或未完成' } }, 404);
       }
-      const target = resolve(job.path);
-      if (!target.startsWith(OUT) || !existsSync(target)) {
+      const target = jailedPath(OUT, job.path);
+      if (!target) {
         return json({ ok: false, error: { code: 'bad_input', message: '路径不在输出目录内' } }, 403);
       }
       return new Response(Bun.file(target), {
@@ -531,9 +501,9 @@ const server = Bun.serve({
     }
 
     if (path === '/api/reveal' && req.method === 'POST') {
-      const body = await req.json().catch(() => ({})) as any;
-      const target = resolve(String(body.path || ''));
-      if (!target.startsWith(OUT) || !existsSync(target)) {
+      const body = (await req.json().catch(() => null)) || {};
+      const target = jailedPath(OUT, String(body.path || ''), false);
+      if (!target) {
         return json({ ok: false, error: { code: 'bad_input', message: '路径不在输出目录内' } }, 400);
       }
       spawn('explorer.exe', ['/select,', target], { detached: true, stdio: 'ignore' }).unref();
@@ -541,6 +511,12 @@ const server = Bun.serve({
     }
 
     return json({ ok: false, error: { code: 'not_found', message: `没有这个接口: ${path}` } }, 404);
+    } catch (err) {
+      const status = err instanceof VdlError && err.code === 'forbidden' ? 403
+        : err instanceof VdlError && err.code === 'bad_input' ? 400 : 500;
+      return json(failBody('ts', err), status);
+    }
+    });
   },
 });
 

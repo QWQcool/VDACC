@@ -5,6 +5,7 @@
  * - 不跑页面 JS、不抓 blob/MSE，也不去猜网页里的播放器地址——那类页面交给 yt-dlp 兜底；
  * - 只认「URL 本身就是媒体」或「返回体就是 m3u8」的情况，所以 `canHandle` 看扩展名，不会误判网页。
  */
+import { operationState, scopedOperation } from '../core/operation';
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, renameSync, statSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
@@ -20,7 +21,7 @@ import { format, type Format, type ProbeResult } from '../core/types';
 const DIRECT_EXT = new Set(['mp4', 'webm', 'mov', 'mkv', 'm4v', 'flv', 'm3u8']);
 const MEDIA_TYPE = /^(?:video\/|audio\/(?:mpeg|mp4|aac)|application\/vnd\.apple\.mpegurl|application\/octet-stream)/i;
 
-const urlCache = new Map<string, { url: string; hls: boolean }>();
+const urlCache = operationState(() => new Map<string, { url: string; hls: boolean }>());
 
 export function sniffExt(url: string): string {
   try {
@@ -116,12 +117,12 @@ function titleOf(url: string): { id: string; title: string; author: string } {
   }
 }
 
-export async function probeSniff(input: string): Promise<ProbeResult> {
+async function probeSniffImpl(input: string): Promise<ProbeResult> {
   const url = (input || '').trim();
   if (!/^https?:\/\//i.test(url)) {
     throw new VdlError('bad_input', 'L2 嗅探需要完整的 http(s) 媒体地址');
   }
-  urlCache.clear();
+  urlCache().clear();
   const ext = sniffExt(url);
   const info = titleOf(url);
   const formats: Format[] = [];
@@ -138,7 +139,7 @@ export async function probeSniff(input: string): Promise<ProbeResult> {
       durationMs = await playlist(variants[0].url).then(parseMediaDuration).catch(() => 0) * 1000;
       for (const v of variants) {
         const id = v.height ? `hls-${v.height}` : `hls-${Math.round(v.bandwidth / 1000)}k`;
-        urlCache.set(id, { url: v.url, hls: true });
+        urlCache().set(id, { url: v.url, hls: true });
         formats.push(format({
           id,
           label: v.height ? `${v.height}P` : v.name || `${Math.round(v.bandwidth / 1000)}kbps`,
@@ -150,7 +151,7 @@ export async function probeSniff(input: string): Promise<ProbeResult> {
       }
     } else {
       durationMs = parseMediaDuration(text) * 1000;
-      urlCache.set('hls', { url, hls: true });
+      urlCache().set('hls', { url, hls: true });
       formats.push(format({
         id: 'hls',
         label: durationMs ? `HLS ${Math.round(durationMs / 1000)}s` : 'HLS',
@@ -179,7 +180,7 @@ export async function probeSniff(input: string): Promise<ProbeResult> {
         `这个地址不是可嗅探的媒体（content-type: ${type || '未知'}）`,
         'L2 只接管 m3u8 与直链 mp4/webm/mov/mkv/m4v/flv；网页里的播放器请用通用解析（yt-dlp）');
     }
-    urlCache.set('file', { url, hls: false });
+    urlCache().set('file', { url, hls: false });
     formats.push(format({
       id: 'file',
       label: ext ? ext.toUpperCase() : '直链',
@@ -250,11 +251,11 @@ async function hlsDownload(url: string, dest: string, durationMs: number): Promi
   });
 }
 
-export async function getSniff(input: string, formatId: string | null, outDir: string) {
+async function getSniffImpl(input: string, formatId: string | null, outDir: string) {
   const probe = await probeSniff(input);
   const fmt = probe.formats.find((f) => f.id === formatId) ||
     probe.formats.find((f) => f.recommended) || probe.formats[0];
-  const cached = urlCache.get(fmt.id);
+  const cached = urlCache().get(fmt.id);
   if (!cached) throw new VdlError('no_stream', '该档位没有可用地址');
 
   mkdirSync(outDir, { recursive: true });
@@ -287,3 +288,7 @@ export async function getSniff(input: string, formatId: string | null, outDir: s
   renameSync(part, dest);
   return { path: dest, bytes: statSync(dest).size, skipped: false, warnings: [] };
 }
+
+export const probeSniff = scopedOperation(probeSniffImpl);
+
+export const getSniff = scopedOperation(getSniffImpl);
