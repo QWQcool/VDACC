@@ -33,6 +33,7 @@ const I18N = {
     notSupported: '当前后端不支持设置',
     lang: '切换语言', theme: '切换主题',
     queued: '已提交', needToken: '缺少 token：请用启动时打印的 ?token=... 打开',
+    badToken: 'token 无效或已过期：请用启动时打印的地址重新打开（服务重启会换 token）',
     empty: '没有可下载档位', failed: '失败',
     queued_s: '排队', running: '下载中', done: '完成', cancelled: '已取消',
   },
@@ -69,6 +70,7 @@ const I18N = {
     notSupported: 'This backend does not support settings',
     lang: 'Language', theme: 'Theme',
     queued: 'Queued', needToken: 'Missing token: open the URL printed with ?token=...',
+    badToken: 'Token invalid or expired: reopen the URL printed at startup (restarting the server rotates it)',
     empty: 'No downloadable format', failed: 'Failed',
     queued_s: 'Queued', running: 'Running', done: 'Done', cancelled: 'Cancelled',
   },
@@ -485,7 +487,8 @@ createApp({
         document.documentElement.dataset.theme =
           localStorage.getItem('vdl-theme') || health.theme || 'light';
       } else {
-        message.value = t('needToken');
+        // 带了 token 却被拒，不能说成「缺少 token」——通常是服务重启换了新 token
+        message.value = t(token ? 'badToken' : 'needToken');
         return;
       }
       // 右栏要显示组件状态，挂载时就查一次（不必等用户打开设置）
