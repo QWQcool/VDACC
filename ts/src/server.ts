@@ -237,6 +237,10 @@ const LAN = argv.includes('--lan');
 const server = Bun.serve({
   hostname: LAN ? '0.0.0.0' : '127.0.0.1',
   port: PORT,
+  // SSE 每 15s 才发一次 ping，而 Bun 默认 idleTimeout 是 10s：
+  // 到点就把连接掐掉（浏览器报 ERR_INCOMPLETE_CHUNKED_ENCODING），前端只能不停重连。
+  // 这里放宽到 120s，给心跳留出余量。
+  idleTimeout: 120,
   async fetch(req) {
     return runOperation(async () => {
     try {
