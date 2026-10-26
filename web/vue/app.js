@@ -3,7 +3,7 @@ const I18N = {
   zh: {
     placeholder: '粘贴抖音 / B站 / 网易云 / 音乐链接',
     probe: '解析', probing: '解析中…',
-    hint: 'B站 分P / 番剧会自动列出集数；专辑链接直接列出曲目（前 20 首）。',
+    hint: '可直接粘贴整段分享文案（自动抽取链接）。B站 分P / 番剧自动列集数；专辑链接列出前 20 首。',
     sources: '粘贴链接', platformCount: '支持 6 个平台 + 直链',
     author: '作者', parts: '分P', quality: '画质',
     runtime: '运行状态', limit: '限速', version: '版本', engine: '引擎',
@@ -39,7 +39,7 @@ const I18N = {
   en: {
     placeholder: 'Paste a Douyin / Bilibili / NetEase / music link',
     probe: 'Probe', probing: 'Probing…',
-    hint: 'Multi-part videos and seasons are listed automatically. Album links list up to 20 tracks.',
+    hint: 'Paste the whole share text if you like — the link is extracted automatically. Multi-part videos and albums are listed too.',
     sources: 'Source', platformCount: '6 platforms + direct URLs',
     author: 'Author', parts: 'Parts', quality: 'Quality',
     runtime: 'Runtime', limit: 'Limit', version: 'Version', engine: 'Engine',

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { platformOf } from '../src/core/platform';
+import { firstUrl, platformOf } from '../src/core/platform';
 import { safeName } from '../src/core/naming';
 import { parseLimit, setLimitBytesPerSec, throttle } from '../src/core/rate';
 import { format, emptyMedia } from '../src/core/types';
@@ -30,6 +30,21 @@ describe('platformOf', () => {
     expect(platformOf('https://i.y.qq.com/v8/playsong.html?songmid=003OUlho2HcRHC')).toBe('qq');
     // 14 位 base62 裸串太容易和普通文本撞车，裸 mid 请用分享链接
     expect(platformOf('003OUlho2HcRHC')).toBe('unsupported');
+  });
+
+  test('整段分享文案也能识别平台', () => {
+    // 抖音「复制链接」给的是整段文案，链接夹在句子中间
+    const share = 'AI运镜/镜头 第八期 https://v.douyin.com/TI17LkPCjX0/ 复制此链接，打开Dou音搜索';
+    expect(platformOf(share)).toBe('douyin');
+    expect(platformOf('看这个 https://www.bilibili.com/video/BV1j5nj68E48?p=2 好看')).toBe('bilibili');
+    expect(platformOf('链接 https://music.163.com/song?id=28606052 在这')).toBe('netease');
+    expect(platformOf('没有链接的一段话')).toBe('unsupported');
+  });
+
+  test('firstUrl 只取第一个链接，遇到中文标点截断', () => {
+    expect(firstUrl('前 https://v.douyin.com/abc/，后面还有字')).toBe('https://v.douyin.com/abc/');
+    expect(firstUrl('https://x.com/a?b=1')).toBe('https://x.com/a?b=1');
+    expect(firstUrl('没有链接')).toBe('');
   });
 
   test('未知与空值', () => {

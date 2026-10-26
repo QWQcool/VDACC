@@ -11,6 +11,7 @@ import { throwIfCancelled } from '../core/cancel';
 import { VdlError } from '../core/errors';
 import { CookieJar, request, UA } from '../core/http';
 import { safeName } from '../core/naming';
+import { firstUrl } from '../core/platform';
 import { report } from '../core/progress';
 import { throttle } from '../core/rate';
 import { format, type Format, type ProbeResult } from '../core/types';
@@ -168,8 +169,19 @@ async function probeDouyinImpl(input: string): Promise<ProbeResult> {
   const jar = new CookieJar();
   let vid = extractVid(input);
   if (!vid) {
-    const res = await request(input, { jar, headers: { Accept: 'text/html,application/xhtml+xml,*/*;q=0.8' } });
+    // 分享文案里链接可能夹在句子中间；短链要靠重定向后的最终地址拿 id
+    const target = firstUrl(input) || input;
+    if (!/^https?:\/\//i.test(target)) {
+      throw new VdlError('bad_input', '没能从这段文字里找到抖音链接');
+    }
+    const res = await request(target, {
+      jar, headers: { Accept: 'text/html,application/xhtml+xml,*/*;q=0.8' },
+    });
     vid = extractVid(res.url);
+    if (!vid) {
+      // 少数分享页把 id 放在 HTML 里（重定向到校验页时就靠这一步兜底）
+      vid = extractVid(await res.text().catch(() => ''));
+    }
   }
   if (!vid) throw new VdlError('bad_input', '没能从这个输入里识别出视频 ID');
 
