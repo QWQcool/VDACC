@@ -2,7 +2,7 @@
 
 | 平台 | 引擎 | 关键事实 | 常见失败 |
 |---|---|---|---|
-| 抖音 | `douyin-http` | 签名 `md5(uifid_ts_SALT_query)`，无需 cookie | `blocked`：签名/风控；重试或换网络 |
+| 抖音 | `douyin-http` | 签名 `md5(uifid_ts_SALT_query)`，需 ttwid + uifid（**不需要登录 cookie**）；Argus 会概率性 403 或回 200+空 body，已自动重试 3 次 | `blocked`：重试 3 次后仍被风控；换网络或关代理，必要时用浏览器兜底 |
 | B站 | `bilibili-api` | `x/player/playurl` DASH；番剧走 `pgc/.../v2/playurl`；cookie 必须按域名/过期过滤（全量 8.9KB 会 400） | `no_stream`：未登录/会员/地区 |
 | B站 番剧 | `bilibili-pgc` | 197 集实测；`media.parts[]` 给出每集 | 同上 |
 | 网易云 | `netease-api` | 免签名；`br=999000` 返回 FLAC；落盘写标签 + 800px 封面 + `.lrc` | `need_login`：无 `MUSIC_U` 时只有 320K |

@@ -14,6 +14,21 @@
   （响应带 `reused`），不再创建第二个写同一目标文件的任务；界面提示「相同任务已在队列，未重复创建」。
   实测双击同一抖音 1080P：第二次 `created=0 / reused=1`、任务总数仍为 1。
 
+## 未发布
+
+**抖音详情请求抗风控（重试 + 独立错误码）**
+
+- 抖音 Argus 会**概率性**拦截 `aweme/detail`，有两种表现：HTTP 403
+  （`Blocked by ArgusSecurityPlugin Uifid Not Found`）或 **HTTP 200 + 空 body**。
+  后者原先直接落到 `bad_json`，看起来像接口改版，实际是风控
+- 新增 `fetchDetail()`：最多 3 次退避重试（300ms / 900ms）。每次重试都
+  **清空 cookie 重新注册 ttwid、重新取 uifid、重新签名**——复用同一套 cookie 和签名重试无效，
+  因为签名里含 timestamp
+- 新增错误码 `blocked`：连续 3 次仍被挡才报；`next_action` 给出换网络/关代理/浏览器兜底三条路
+- `CookieJar.clear()` 与纯函数 `isBlockedResponse()`；新增 5 组测试，测试 **90 → 95**
+- 实测：整段分享文案 probe 成功（`7699759219418991887` / 1080×1440 / 23.6s），
+  行为与此前一致，正常路径无回归
+
 ## v3.4.0 — 2026-10-26
 
 **分批、账号状态、doctor 与真机体验**

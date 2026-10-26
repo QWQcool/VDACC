@@ -75,6 +75,57 @@ async function getUifid(jar: CookieJar): Promise<string> {
   return value;
 }
 
+const DETAIL_ATTEMPTS = 3;
+/** 被风控挡是概率性的，短间隔换一套身份重试往往就过；退避避免连续撞同一策略。 */
+const DETAIL_BACKOFF_MS = [300, 900];
+
+/**
+ * 抖音 Argus 风控会概率性拦截详情请求，有两种表现（2026-10-26 实测）：
+ *   1. HTTP 403 + `Blocked by ArgusSecurityPlugin Uifid Not Found`
+ *   2. HTTP 200 + **空 body** —— 最坑的一种，之前直接落到 bad_json，看起来像接口改版
+ * 两者都该重试，不能当终态。
+ */
+export function isBlockedResponse(status: number, text: string): boolean {
+  if (status === 403) return true;
+  const body = (text || '').trim();
+  if (!body) return true;
+  return /ArgusSecurityPlugin|Uifid Not Found/i.test(body);
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * 请求详情，拦截时换身份重试。
+ * 每次重试都重新注册 ttwid / 取 uifid / 重新签名（timestamp 变了签名也必须变），
+ * 复用同一套 cookie 和签名重试基本无效。
+ */
+async function fetchDetail(jar: CookieJar, vid: string): Promise<{ status: number; text: string }> {
+  let lastStatus = 0;
+  let lastBytes = 0;
+  for (let attempt = 1; attempt <= DETAIL_ATTEMPTS; attempt++) {
+    if (attempt > 1) {
+      jar.clear();
+      await sleep(DETAIL_BACKOFF_MS[attempt - 2] ?? 900);
+    }
+    await ensureCookies(jar);
+    const uifid = await getUifid(jar);
+    const query = sign({ aweme_id: vid, aid: String(AID) }, uifid);
+    const url = DETAIL + '?' + new URLSearchParams(query).toString();
+    const res = await request(url, {
+      jar, headers: { Accept: 'application/json, text/plain, */*', Referer: `${HOST}/video/${vid}` },
+    });
+    const text = await res.text();
+    lastStatus = res.status;
+    lastBytes = text.length;
+    if (!isBlockedResponse(res.status, text)) return { status: res.status, text };
+  }
+  throw new VdlError(
+    'blocked',
+    `抖音详情接口连续 ${DETAIL_ATTEMPTS} 次被风控拦截（最后一次 HTTP ${lastStatus}，body ${lastBytes} 字节）`,
+    '稍后重试；若持续失败，换网络或关掉代理再试，也可用浏览器兜底（legacy/python/dy_dl.py --engine browser）',
+  );
+}
+
 function sign(query: Record<string, string>, uifid: string) {
   const timestamp = String(Math.floor(Date.now() / 1000));
   const signed: Record<string, string> = { ...query, uifid, timestamp };
@@ -185,16 +236,10 @@ async function probeDouyinImpl(input: string): Promise<ProbeResult> {
   }
   if (!vid) throw new VdlError('bad_input', '没能从这个输入里识别出视频 ID');
 
-  await ensureCookies(jar);
-  const uifid = await getUifid(jar);
-  const query = sign({ aweme_id: vid, aid: String(AID) }, uifid);
-  const url = DETAIL + '?' + new URLSearchParams(query).toString();
-  const res = await request(url, {
-    jar, headers: { Accept: 'application/json, text/plain, */*', Referer: `${HOST}/video/${vid}` },
-  });
-  const text = await res.text();
-  if (!res.ok) {
-    throw new VdlError(res.status === 403 ? 'blocked' : `http_${res.status}`, text.slice(0, 400));
+  const { status, text } = await fetchDetail(jar, vid);
+  if (status !== 200) {
+    // 403 已在 fetchDetail 内重试并转成 blocked，这里只剩其它状态码
+    throw new VdlError(`http_${status}`, text.slice(0, 400));
   }
 
   let data: any;

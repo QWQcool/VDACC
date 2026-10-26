@@ -18,8 +18,18 @@
    - 门是 `x-secsdk-web-signature`，算法 `md5(f"{uifid}_{timestamp}_{SALT}_{query}")`，
      `SALT = A96D855A08C0A9707F8BEF0D9A527E4E`，硬编码；
    - `ttwid` 可自己 POST `https://www.douyin.com/ttwid/register` 注册，
-     `passport_csrf_token` 随便填，所以**无 cookie 也能下**；
+     `passport_csrf_token` 随便填；
+   - **还需要 uifid**（2026-10-26 补正）：签名里必须带，取法见 `getUifid()` ——
+     先查 6 种 uifid cookie，再 GET 首页从 `x-tt-trace-host` 响应头取。
+     所以「完全无 cookie 也能下」这个说法不准确，准确表述是
+     **「不需要登录 cookie，但 ttwid + uifid 缺一不可」**；
    - query 必须带 `aid=6383`，否则清晰度被截到 720p；
+   - **Argus 会概率性拦截**：表现为 HTTP 403（`Blocked by ArgusSecurityPlugin Uifid Not Found`）
+     或 **HTTP 200 + 空 body**。后者最坑——空 body 会被 JSON 解析器拒掉，看起来像接口改版。
+     `fetchDetail()` 已做 3 次退避重试，每次清空 cookie 重新注册、重新签名（timestamp 变了签名必须变），
+     连续失败才报 `blocked`。
+   - **教训（2026-10-26 踩过）**：一次 `bad_json` 就断定「HTTP 引擎失效」，实际换个时刻就通了。
+     排查风控类问题先重试几次再定性，单次失败不足以证明机制坏了。
    - 对照实验：官方 yt-dlp 2026.08.19 未打补丁 → `HTTP 403` + `Fresh cookies needed`；
      打上 PR #17826 的 +56/-1 补丁 → 无 cookie 拿到 `h264_1080p`（1080×1920）。
 
@@ -50,7 +60,7 @@
 | yt-dlp 版本 | 2026.08.19（本机加载 1744 个提取器） |
 | yt-dlp 的 B站支持 | 完整（BiliBili / Bangumi / Playlist / Live / Intl） |
 | yt-dlp 的抖音支持 | 官方版仍 403 + 误导性 `Fresh cookies needed`；PR #17826（+56/-1）实测可修 |
-| 抖音签名 | `x-secsdk-web-signature` = `md5(uifid_timestamp_SALT_query)`，纯 HTTP，无需 cookie |
+| 抖音签名 | `x-secsdk-web-signature` = `md5(uifid_timestamp_SALT_query)`，纯 HTTP 可算；需 ttwid + uifid（**不需要登录 cookie**）。Argus 会概率性 403 或回 200+空 body，已加重试 |
 | 网易云播放地址 | `GET /api/song/enhance/player/url?ids=[id]&br=999000` + `MUSIC_U` 直接返回 `level=lossless` 的 FLAC；**不需要 eapi/weapi 加密** |
 | B站清晰度归档 | 必须按**宽度**（3840/2560/1920/1280/854）；宽银幕（1920×816、4096×1740）按高度会整体下移一档 |
 | B站格式结构 | 全部是 video-only + audio-only，必须成对合并；带 cookie 才看得到 4K/1080P |

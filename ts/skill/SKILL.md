@@ -54,6 +54,8 @@ vdl.exe get   "<url>" --format bili-854 -o "<目录>"
 | `bad_input` | 识别不出 ID | 让用户给完整页面链接 |
 | `no_stream` | 没有可用流 | 可能需要登录，或该集受限 |
 | `filtered` | 内容被过滤/下架 | 换一条链接 |
+| `blocked` | 抖音风控拦截（已自动重试 3 次仍被挡） | 稍后重试；换网络或关掉代理；必要时改用浏览器兜底 |
+| `no_uifid` | 拿不到 uifid（cookie 与 `x-tt-trace-host` 都为空） | 通常是被风控或网络异常，重试一次；持续失败按 `blocked` 处理 |
 | `need_login` | 需要登录/会员 | 在桌面端运行 `vdl auth <site>` 扫码 |
 | `http_404` | 页面不存在 | 让用户确认链接 |
 | `ffmpeg_missing` | 找不到或无法启动 ffmpeg | 安装 ffmpeg 并加入 PATH，或设置 VDL_FFMPEG |

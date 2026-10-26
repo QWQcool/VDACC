@@ -18,6 +18,11 @@ export class CookieJar {
     return [...this.jar.entries()].map(([k, v]) => `${k}=${v}`).join('; ');
   }
 
+  /** 重试时换一套身份：清空后重新注册 ttwid / 重新取 uifid。 */
+  clear() {
+    this.jar.clear();
+  }
+
   absorb(res: Response) {
     const anyHeaders = res.headers as unknown as { getSetCookie?: () => string[] };
     const list = anyHeaders.getSetCookie?.() ||
