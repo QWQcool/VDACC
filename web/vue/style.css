@@ -225,6 +225,9 @@
 .title-row h3 {
   margin: 0; font-size: 20px; line-height: 28px; font-weight: 650;
   letter-spacing: .2px; word-break: break-word;
+  /* 抖音的「标题」其实是整段文案（含话题和换行），不限行会把整条卡片撑成一屏 */
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .badge {
