@@ -24,6 +24,7 @@ const I18N = {
     sidecar: '字幕/弹幕', sidecars: '附属产物',
     album: '专辑', tracks: '曲目', albumDropped: '之后还剩',
     loadMore: '加载下一批（20 首）', loadingMore: '加载中…', loadedCount: '已列',
+    deduped: '相同任务已在队列，未重复创建',
     accounts: '账号', accountsHelp: '登录在电脑上完成（独立 Edge），手机只显示状态；不读取你日常浏览器的 cookie。',
     login: '登录', relogin: '重新登录', refresh: '刷新状态', authChecking: '检查中…',
     authOk: '在线有效', authBad: '已失效', authNone: '本地无凭据', authUnchecked: '未校验',
@@ -66,6 +67,7 @@ const I18N = {
     sidecar: 'Subs/Danmaku', sidecars: 'Sidecars',
     album: 'Album', tracks: 'tracks', albumDropped: 'left after this batch',
     loadMore: 'Load next 20', loadingMore: 'Loading…', loadedCount: 'listed',
+    deduped: 'Already queued, not duplicated',
     accounts: 'Accounts', accountsHelp: 'Login happens on the PC in a dedicated Edge profile; the phone only shows status and never reads your daily browser cookies.',
     login: 'Log in', relogin: 'Log in again', refresh: 'Refresh', authChecking: 'Checking…',
     authOk: 'Valid', authBad: 'Expired', authNone: 'No credential', authUnchecked: 'Unchecked',
@@ -364,16 +366,21 @@ createApp({
       if (!requests.length) return;
       submitting.value = true;
       let ok = 0;
+      let deduped = 0;
       const errors = [];
       try {
         for (const body of requests) {
           const data = await api('/api/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
           if (data.ok) {
-            for (const job of data.jobs || [data.job]) upsert(job);
+            for (const job of data.jobs || []) upsert(job);
+            // 后端遇到「同链接 + 同档位已在队列」会复用原任务，这里只提示，不重复计数
+            deduped += (data.reused || []).length;
             ok += 1;
           } else errors.push(errorText(data));
         }
-        message.value = `${t('queued')} ${ok}/${requests.length}` + (errors.length ? ` · ${[...new Set(errors)].join('；')}` : '');
+        message.value = `${t('queued')} ${ok}/${requests.length}`
+          + (deduped ? ` · ${t('deduped')} ${deduped}` : '')
+          + (errors.length ? ` · ${[...new Set(errors)].join('；')}` : '');
       } finally {
         submitting.value = false;
       }

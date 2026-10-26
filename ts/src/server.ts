@@ -13,6 +13,7 @@ import { writeJsonAtomic } from './core/storage';
 import { UA } from './core/http';
 import { platformOf } from './core/platform';
 import { pickSha256For } from './core/doctor';
+import { isSameActiveJob } from './core/jobmatch';
 import { runOperation } from './core/operation';
 import { currentLimitBytesPerSec, setLimitBytesPerSec } from './core/rate';
 import { getDouyin, previewDouyin, probeDouyin } from './engines/douyin';
@@ -166,8 +167,17 @@ function createJob(url: string, formatId: string, opts: DownloadOptions = {}): J
 }
 
 /** 先整体持久化再启动；写盘失败时回滚，避免客户端收不到成功却已经开始下载。 */
-function submitJobs(url: string, ids: string[], opts: DownloadOptions): Job[] {
-  const created = ids.map((id) => createJob(url, id, opts));
+function submitJobs(url: string, ids: string[], opts: DownloadOptions): { created: Job[]; reused: Job[] } {
+  // 同一 URL + 档位已在队列里就直接复用，避免双击创建两个写同一目标文件的任务
+  const created: Job[] = [];
+  const reused: Job[] = [];
+  for (const id of ids) {
+    const dup = order
+      .map((jobId) => jobs.get(jobId))
+      .find((job): job is Job => !!job && isSameActiveJob(job, url, id));
+    if (dup) { reused.push(dup); continue; }
+    created.push(createJob(url, id, opts));
+  }
   try { saveStore(); }
   catch (err) {
     for (const job of created) jobs.delete(job.id);
@@ -176,7 +186,7 @@ function submitJobs(url: string, ids: string[], opts: DownloadOptions): Job[] {
   }
   for (const job of created) queue.push(job.id);
   void pump();
-  return created;
+  return { created, reused };
 }
 
 async function pump() {
@@ -558,7 +568,10 @@ const server = Bun.serve({
       // 附属产物开关：只认显式 true，避免字符串 "false" 之类被当成开启
       const opts = { cover: body.cover === true, subs: body.subs === true, danmaku: body.danmaku === true };
       const created = submitJobs(target, [...new Set(ids)], opts);
-      return json({ ok: true, jobs: created, job: created[0] }, 202);
+      return json({
+        ok: true, jobs: created.created, reused: created.reused.map((j) => j.id),
+        job: created.created[0] || created.reused[0],
+      }, 202);
     }
 
     const jobMatch = /^\/api\/jobs\/([0-9a-f]+)$/.exec(path);
