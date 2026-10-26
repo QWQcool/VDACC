@@ -425,13 +425,30 @@ async function saveSubtitle(videoPath: string): Promise<{ srt: string | null; co
   }
 }
 
+/**
+ * 选档：指定了 id 就必须命中，缺档位直接报错而不是悄悄换成别的清晰度。
+ * 分P/番剧各集档位不一定一致，静默换档会让用户以为下到了 1080P。
+ */
+export function chooseFormat<T extends { id: string; recommended?: boolean }>(
+  formats: T[], formatId: string | null,
+): T {
+  if (formatId) {
+    const hit = formats.find((f) => f.id === formatId);
+    if (hit) return hit;
+    throw new VdlError('no_stream', `该视频没有 ${formatId} 档位`,
+      `可用档位：${formats.map((f) => f.id).join(' / ') || '无'}`);
+  }
+  const best = formats.find((f) => f.recommended) || formats[0];
+  if (!best) throw new VdlError('no_stream', '没有可用档位');
+  return best;
+}
+
 async function getBilibiliApiImpl(
   input: string, formatId: string | null, outDir: string,
   opts: DownloadOptions = {},
 ) {
   const probe = await probeBilibiliApi(input);
-  const fmt = probe.formats.find((f) => f.id === formatId) ||
-    probe.formats.find((f) => f.recommended) || probe.formats[0];
+  const fmt = chooseFormat(probe.formats, formatId);
   const urls = urlCache().get(fmt.id);
   if (!urls) throw new VdlError('no_stream', '该档位没有可用地址');
 

@@ -321,9 +321,11 @@ const server = Bun.serve({
           error: { code: 'unsupported', message: '专辑只支持 网易云 / QQ 音乐' },
         }, 400);
       }
+      // offset 用于「加载下一批」：单批仍最多 20 首，不按整张专辑硬下
+      const offset = Number(body.offset) || 0;
       try {
         const info = platform === 'netease' ? await neteaseAlbum(target) : await qqAlbum(target);
-        const plan = planAlbum(info.tracks);
+        const plan = planAlbum(info.tracks, offset);
         return json({
           ok: true,
           album: {
@@ -331,6 +333,9 @@ const server = Bun.serve({
           },
           tracks: plan.take,
           dropped: plan.dropped,
+          offset: plan.offset,
+          hasMore: plan.hasMore,
+          nextOffset: plan.nextOffset,
         });
       } catch (err) {
         return json(failBody('ts', err));

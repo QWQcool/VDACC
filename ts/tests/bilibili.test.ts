@@ -1,8 +1,32 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
-  aggregateProgress, countDanmaku, parseContentRangeTotal, srtTime, toSrt,
+  aggregateProgress, chooseFormat, countDanmaku, parseContentRangeTotal, srtTime, toSrt,
 } from '../src/engines/bilibili_api';
+
+describe('选档：缺档位不静默换档', () => {
+  const formats = [{ id: 'bili-1920', recommended: true }, { id: 'bili-854' }];
+
+  test('指定档位命中就用它', () => {
+    expect(chooseFormat(formats, 'bili-854').id).toBe('bili-854');
+  });
+
+  test('指定了不存在的档位要报错，并列出可用档位', () => {
+    let err: any = null;
+    try { chooseFormat(formats, 'bili-4k'); } catch (e) { err = e; }
+    expect(err?.code).toBe('no_stream');
+    expect(String(err?.message)).toContain('bili-4k');
+    expect(String(err?.nextAction)).toContain('bili-1920');
+  });
+
+  test('不指定时取推荐档，空列表报错', () => {
+    expect(chooseFormat(formats, null).id).toBe('bili-1920');
+    expect(chooseFormat(formats, '').id).toBe('bili-1920');
+    let err: any = null;
+    try { chooseFormat([], null); } catch (e) { err = e; }
+    expect(err?.code).toBe('no_stream');
+  });
+});
 
 // 只测纯函数：真实流的字节数依赖 CDN 与登录态，放进手工验收（见 commit 记录）。
 describe('B站 进度折算', () => {

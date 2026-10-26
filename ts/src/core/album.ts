@@ -17,13 +17,22 @@ export interface AlbumInfo {
 }
 
 /**
- * 取前 N 首，并如实报告被略过的数量。
- * 不按“整张专辑”硬下——默认 20 是防误点，用户想全下可以自己分批。
+ * 取一批（默认 20 首），并如实报告这一批之后还剩多少。
+ * 不按“整张专辑”硬下——20 是单批上限，用户要全下就按 nextOffset 继续取下一批。
  */
-export function planAlbum(tracks: AlbumTrack[], max = MAX_ALBUM_TRACKS): {
+export function planAlbum(tracks: AlbumTrack[], offset = 0, max = MAX_ALBUM_TRACKS): {
   take: AlbumTrack[]; dropped: number;
+  offset: number; hasMore: boolean; nextOffset: number;
 } {
   const list = Array.isArray(tracks) ? tracks.filter((t) => t && t.id) : [];
-  if (list.length <= max) return { take: list, dropped: 0 };
-  return { take: list.slice(0, max), dropped: list.length - max };
+  const start = Math.min(Math.max(0, Math.floor(offset) || 0), list.length);
+  const take = list.slice(start, start + max);
+  const end = start + take.length;
+  return {
+    take,
+    dropped: list.length - end,
+    offset: start,
+    hasMore: end < list.length,
+    nextOffset: end,
+  };
 }

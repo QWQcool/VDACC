@@ -23,9 +23,39 @@ describe('专辑批量上限', () => {
   });
 
   test('空列表与没有 id 的条目', () => {
-    expect(planAlbum([])).toEqual({ take: [], dropped: 0 });
+    const empty = planAlbum([]);
+    expect(empty.take.length).toBe(0);
+    expect(empty.dropped).toBe(0);
+    expect(empty.hasMore).toBe(false);
     const dirty: any = [...make(2), { id: '', title: '坏条目', author: '', url: '' }];
     expect(planAlbum(dirty).take.length).toBe(2);
+  });
+
+  test('第二批：从 offset 继续，且 nextOffset 能推到尾部', () => {
+    const tracks = make(45);
+    const first = planAlbum(tracks);
+    expect(first.take.length).toBe(20);
+    expect(first.dropped).toBe(25);
+    expect(first.hasMore).toBe(true);
+    expect(first.nextOffset).toBe(20);
+
+    const second = planAlbum(tracks, first.nextOffset);
+    expect(second.take[0].id).toBe('id20');
+    expect(second.take.length).toBe(20);
+    expect(second.hasMore).toBe(true);
+    expect(second.nextOffset).toBe(40);
+
+    const third = planAlbum(tracks, second.nextOffset);
+    expect(third.take.length).toBe(5);
+    expect(third.hasMore).toBe(false);
+    expect(third.dropped).toBe(0);
+    expect(third.nextOffset).toBe(45);
+  });
+
+  test('offset 越界与负数都夹回合法范围', () => {
+    expect(planAlbum(make(10), 999).take.length).toBe(0);
+    expect(planAlbum(make(10), 999).hasMore).toBe(false);
+    expect(planAlbum(make(10), -3).take[0].id).toBe('id0');
   });
 });
 

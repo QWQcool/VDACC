@@ -22,7 +22,8 @@ const I18N = {
     emptyBody: '支持抖音、B站（分P/番剧）、网易云、QQ 音乐、酷我/酷狗、m3u8 与直链；专辑会先列出曲目。',
     download: '下载选中', cover: '封面', subs: '字幕', danmaku: '弹幕',
     sidecar: '字幕/弹幕', sidecars: '附属产物',
-    album: '专辑', tracks: '曲目', albumDropped: '超过 20 首，本次只列前 20，略过',
+    album: '专辑', tracks: '曲目', albumDropped: '之后还剩',
+    loadMore: '加载下一批（20 首）', loadingMore: '加载中…', loadedCount: '已列',
     sidecarHint: '同目录会额外写入 .srt / .danmaku.xml（仅 B站，字幕优先中文 / AI 中文字幕）',
     jobs: '任务', cancel: '取消', retry: '重试',
     selectAll: '全选', estimated: '预计', limitHint: '超过 20 个分集，请分批选择（硬上限 20）',
@@ -59,7 +60,8 @@ const I18N = {
     emptyBody: 'Douyin, Bilibili (multi-part/seasons), NetEase, QQ Music, Kuwo/Kugou, m3u8 and direct URLs. Albums list tracks first.',
     download: 'Download', cover: 'Cover', subs: 'Subtitles', danmaku: 'Danmaku',
     sidecar: 'Subs/Danmaku', sidecars: 'Sidecars',
-    album: 'Album', tracks: 'tracks', albumDropped: 'More than 20 tracks; only the first 20 are listed, skipped',
+    album: 'Album', tracks: 'tracks', albumDropped: 'left after this batch',
+    loadMore: 'Load next 20', loadingMore: 'Loading…', loadedCount: 'listed',
     sidecarHint: 'Writes .srt / .danmaku.xml next to the video (Bilibili only, Chinese subtitles preferred)',
     jobs: 'Jobs', cancel: 'Cancel', retry: 'Retry',
     selectAll: 'Select all', estimated: 'Est.', limitHint: 'More than 20 parts: select in batches (hard limit 20)',
@@ -110,6 +112,7 @@ createApp({
     const album = ref(null);
     const albumTracks = ref([]);
     const checkedTracks = ref([]);
+    const loadingMore = ref(false);
     const allTracks = computed(() =>
       albumTracks.value.length > 0 && checkedTracks.value.length === albumTracks.value.length);
     const settingsOpen = ref(false);
@@ -247,8 +250,13 @@ createApp({
           message.value = errorText(data);
           return;
         }
-        // dropped 在响应顶层，挂到 album 上给模板用（截断必须让用户看到）
-        album.value = { ...data.album, dropped: data.dropped || 0 };
+        // dropped / hasMore 在响应顶层，挂到 album 上给模板用（分批必须让用户看到）
+        album.value = {
+          ...data.album,
+          dropped: data.dropped || 0,
+          hasMore: !!data.hasMore,
+          nextOffset: data.nextOffset || 0,
+        };
         albumTracks.value = data.tracks || [];
         checkedTracks.value = [];
         result.value = null;
@@ -293,6 +301,31 @@ createApp({
 
     function toggleAllTracks() {
       checkedTracks.value = allTracks.value ? [] : albumTracks.value.map((x) => x.id);
+    }
+
+    /** 专辑超过 20 首时按批追加；已勾选的曲目保留，不清空用户的选择。 */
+    async function loadMoreTracks() {
+      if (!album.value || !album.value.hasMore || loadingMore.value) return;
+      loadingMore.value = true;
+      const data = await api('/api/album', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: { url: url.value, offset: album.value.nextOffset },
+      });
+      loadingMore.value = false;
+      if (!data.ok) {
+        message.value = (data.error && data.error.message) || 'failed';
+        return;
+      }
+      const known = new Set(albumTracks.value.map((t) => t.id));
+      const added = (data.tracks || []).filter((t) => !known.has(t.id));
+      albumTracks.value = [...albumTracks.value, ...added];
+      album.value = {
+        ...album.value,
+        dropped: data.dropped || 0,
+        hasMore: !!data.hasMore,
+        nextOffset: data.nextOffset || albumTracks.value.length,
+      };
     }
 
     async function download() {
@@ -525,6 +558,7 @@ createApp({
       checkedParts, isBatch, allChecked, someChecked, estimated, toggleAll, togglePart,
       activeJobs, finishedJobs, orderedJobs,
       album, albumTracks, checkedTracks, allTracks, toggleTrack, toggleAllTracks,
+      loadingMore, loadMoreTracks,
       toggleLang, toggleTheme, toggleFormat, persistSidecars, probe, probePart, download, cancel, retry,
       openSettings, saveSettings, installComponent, previewSelected, previewJob, closePreview,
     };

@@ -1,5 +1,5 @@
 import { getDouyin, probeDouyin } from './engines/douyin';
-import { planAlbum } from './core/album';
+import { MAX_ALBUM_TRACKS, planAlbum } from './core/album';
 import { albumTracks as neteaseAlbum, getNetease, probeNetease } from './engines/netease';
 import { probeBilibili } from './engines/bilibili';
 import { getBilibiliApi, probeBilibiliApi } from './engines/bilibili_api';
@@ -114,7 +114,8 @@ async function main() {
 
   const url = positional[0];
   if (!url || !['probe', 'get'].includes(cmd)) {
-    console.error('用法: bun src/cli.ts probe|get <url> [--format id] [-o dir] [--limit 2M] [--json]');
+    console.error('用法: bun src/cli.ts probe|get <url> [--format id] [-o dir] [--limit 2M] [--json]'
+    + ' [--album [--offset N]] [--subs] [--danmaku]');
     process.exit(2);
   }
 
@@ -152,11 +153,15 @@ async function main() {
         process.exit(2);
       }
       const album = platform === 'netease' ? await neteaseAlbum(url) : await qqAlbum(url);
-      const { take, dropped } = planAlbum(album.tracks);
-      console.log(`专辑：${album.title}（${album.tracks.length} 首` +
-        `${dropped ? `，本次取前 ${take.length}，略过 ${dropped}` : ''}）`);
+      const offset = Number(flag('--offset', '0')) || 0;
+      const plan = planAlbum(album.tracks, offset);
+      const { take, dropped, hasMore, nextOffset } = plan;
+      console.log(`专辑：${album.title}（共 ${album.tracks.length} 首，`
+        + `本次第 ${Math.floor(plan.offset / MAX_ALBUM_TRACKS) + 1} 批：${take.length} 首`
+        + `${dropped ? `，之后还剩 ${dropped}` : ''}）`);
+      if (hasMore) console.log(`  下一批：--offset ${nextOffset}`);
       if (has('--dry-run')) {
-        take.forEach((t, i) => console.log(`  ${i + 1}. ${t.title}${t.author ? ` — ${t.author}` : ''}`));
+        take.forEach((t, i) => console.log(`  ${plan.offset + i + 1}. ${t.title}${t.author ? ` — ${t.author}` : ''}`));
         process.exit(0);
       }
       const outDir = flag('-o', '下载') || '下载';
