@@ -3,7 +3,9 @@
 > 只记「用户可感知的变化」与「验证结论」。设计与取舍见 `Plan.md`。
 > 每个版本的 GitHub Release 从这里摘取。
 
-## 未发布
+## v3.4.0 — 2026-10-26
+
+**分批、账号状态、doctor 与真机体验**
 
 - **`doctor` 只读诊断**：`bun ts/src/cli.ts doctor [--json]` 检查 Bun/平台、ffmpeg（缺失时给安装与
   `VDL_FFMPEG` 指引）、yt-dlp 组件与校验值、配置可读性、输出目录可写、三站本地凭据；
@@ -11,6 +13,10 @@
 - **组件下载真校验**：安装 yt-dlp 前先取官方 `SHA2-256SUMS`，比对 SHA256 后才落盘，
   并把校验值记进配置；`/api/components` 只在「有记录且一致」时报 `verified`。
   实测重装 17,880,111 字节，SHA256 `33121d19…`。顺带修了 `validate()` 丢掉 `ytdlpSha256` 的问题
+- **Skill 构建修复**：Windows 上 `find_bun()` 会先命中 npm 的无扩展名 shell 脚本，
+  `CreateProcess` 报 `WinError 193`；改为优先找真正的 `bun.exe`。实测产物
+  `vdl.exe` **91.9 MB**、`video-acquire-ts.zip` **42.6 MB**，直接运行返回结构化
+  `unsupported_url` 且退出码 1
 
 - **账号状态进 UI**：设置面板新增「账号」区，列出 B站 / 网易云 / QQ音乐 的本地凭据与在线校验结果
   （有效 / 已失效 / 无凭据），可在手机或网页上发起「登录/重新登录」——登录仍在电脑的独立 Edge 里完成，

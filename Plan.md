@@ -1,6 +1,6 @@
 # Plan.md —— 计划、架构与决策（唯一计划来源）
 
-> 状态：**3.3.1 可靠性修复已实现**（2026-10-26，源码版本；尚未创建新标签或 GitHub Release）。后端主线为 TypeScript（Bun），
+> 状态：**3.4.0 已发布**（tag `v3.4.0`，2026-10-26）。后端主线为 TypeScript（Bun），
 > Python 冻结并归档在 `legacy/python/`。硬性约束见 `AGENTS.md`，使用说明见 `README.md`，
 > 逐版本历史见 `docs/CHANGELOG.md`，完成盘点见 §2.2，后续执行计划见 §2.6。
 
@@ -143,6 +143,7 @@ parity 稳定后再决定 Python 是否退化为 yt-dlp helper。
 | 3.1.0 | 限速 + QQ 音乐探测骨架（未接路由）+ 双击启动 + 版本/文档对齐（tag `v3.1.0`） |
 | 3.2.0 | B站字幕/弹幕 + 进度真实分母、QQ 全链路（下载/歌词/预览）、专辑批量、酷我/酷狗、L2 嗅探、auth 在线校验（tag `v3.2.0`） |
 | 3.3.0 | Web UI V2（infOS 风格）、限速进设置、并发诚实化、浮层 Esc/滚动锁/焦点、任务分组（tag `v3.3.0`） |
+| 3.4.0 | 专辑分批、缺档位不静默换档、账号状态与重新登录、附属单独重取、`doctor` 与组件 SHA256 校验、Android 壳自动收起地址栏/离线页（tag `v3.4.0`） |
 | 已知边界 | 番剧 4K 选流与 yt-dlp 有差异；B站 合并后的 mp4 比两条流之和大一点（容器索引，实测 61KB/21MB） |
 
 契约不变：仍是 `schema=2`，`ts/src/core/types.ts` 与 `legacy/python/vdl/core/models.py` 字段一致。

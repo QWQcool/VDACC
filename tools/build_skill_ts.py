@@ -28,21 +28,41 @@ ENTRY = ROOT / 'ts' / 'src' / 'skill_cli.ts'
 
 
 def find_bun():
+    """必须是真正的可执行文件。
+
+    npm 的 `bun` 命令在 Windows 上是个无扩展名的 shell 脚本（还有一个 bun.cmd 包装），
+    `shutil.which('bun')` 会先命中它，CreateProcess 直接报 WinError 193
+    「不是有效的 Win32 应用程序」。所以按 .exe 优先级找，并显式跳过脚本。
+    """
     env = os.environ.get('BUN')
-    if env and pathlib.Path(env).exists():
-        return env
-    found = shutil.which('bun')
-    if found:
-        return found
-    local = os.environ.get('LOCALAPPDATA')
-    if local:
-        winget = pathlib.Path(local) / 'Microsoft' / 'WinGet' / 'Links' / 'bun.exe'
-        if winget.exists():
-            return str(winget)
-    fallback = pathlib.Path(os.environ.get('TEMP', '')) / 'vdacc-ts' / 'bun' / 'bun-windows-x64' / 'bun.exe'
-    if fallback.exists():
-        return str(fallback)
-    raise SystemExit('找不到 Bun：设置 BUN 环境变量或把 bun 加进 PATH')
+    if env and pathlib.Path(env).exists() and pathlib.Path(env).suffix.lower() in ('.exe', ''):
+        if pathlib.Path(env).suffix.lower() == '.exe':
+            return env
+
+    candidates = []
+    if os.name == 'nt':
+        found = shutil.which('bun.exe')
+        if found:
+            candidates.append(found)
+        local = os.environ.get('LOCALAPPDATA')
+        if local:
+            candidates.append(str(pathlib.Path(local) / 'Microsoft' / 'WinGet' / 'Links' / 'bun.exe'))
+        appdata = os.environ.get('APPDATA')
+        if appdata:
+            candidates.append(str(pathlib.Path(appdata) / 'npm' / 'node_modules' / '@oven' /
+                                   'bun-windows-x64' / 'bin' / 'bun.exe'))
+        candidates.append(str(pathlib.Path(os.environ.get('TEMP', '')) / 'vdacc-ts' / 'bun' /
+                              'bun-windows-x64' / 'bun.exe'))
+    else:
+        found = shutil.which('bun')
+        if found:
+            return found
+
+    for candidate in candidates:
+        path = pathlib.Path(candidate)
+        if path.is_file() and path.suffix.lower() == '.exe':
+            return str(path)
+    raise SystemExit('找不到可执行的 bun.exe：设置 BUN 环境变量，或安装 Bun 后重开终端')
 
 
 def build():
