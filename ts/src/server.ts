@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { networkInterfaces } from 'node:os';
 import { dirname, join, normalize, resolve } from 'node:path';
 
@@ -12,6 +12,7 @@ import { fetchMediaStream, jailedPath, originAllowed } from './core/security';
 import { writeJsonAtomic } from './core/storage';
 import { UA } from './core/http';
 import { platformOf } from './core/platform';
+import { pickSha256For } from './core/doctor';
 import { runOperation } from './core/operation';
 import { currentLimitBytesPerSec, setLimitBytesPerSec } from './core/rate';
 import { getDouyin, previewDouyin, probeDouyin } from './engines/douyin';
@@ -421,6 +422,16 @@ const server = Bun.serve({
 
     if (path === '/api/components') {
       const installed = genericInstalled();
+      const expected = loadConfig().ytdlpSha256 || '';
+      // 只报「记录过校验值且一致」为已校验；旧安装没有记录就如实说未校验
+      let verified: boolean | null = null;
+      if (installed && expected) {
+        try {
+          verified = createHash('sha256').update(readFileSync(componentPath())).digest('hex') === expected;
+        } catch {
+          verified = false;
+        }
+      }
       return json({
         ok: true,
         components: {
@@ -428,24 +439,41 @@ const server = Bun.serve({
             installed,
             path: componentPath(),
             bytes: installed ? statSync(componentPath()).size : 0,
+            verified,
           },
         },
       });
     }
 
     if (path === '/api/components/ytdlp/install' && req.method === 'POST') {
-      const url = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe';
+      const base = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/';
       try {
-        const res = await fetch(url);
+        // 先拿官方校验和，再下二进制：不校验就写盘等于把「装好了」当「可信」
+        const sumsRes = await fetch(base + 'SHA2-256SUMS');
+        if (!sumsRes.ok) throw new Error(`校验和下载失败 HTTP ${sumsRes.status}`);
+        const sums = await sumsRes.text();
+        const expected = pickSha256For(sums, 'yt-dlp.exe');
+        if (!expected) throw new Error('官方校验和里没有 yt-dlp.exe');
+
+        const res = await fetch(base + 'yt-dlp.exe');
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const buf = Buffer.from(await res.arrayBuffer());
+        const actual = createHash('sha256').update(buf).digest('hex');
+        if (actual !== expected) {
+          throw new Error(`SHA256 校验不通过（期望 ${expected.slice(0, 12)}…，实际 ${actual.slice(0, 12)}…）`);
+        }
+
         const target = componentPath();
         mkdirSync(dirname(target), { recursive: true });
         const tmp = target + '.part';
-        await Bun.write(tmp, await res.arrayBuffer());
+        await Bun.write(tmp, buf);
         const { renameSync } = await import('node:fs');
         renameSync(tmp, target);
-        saveConfig({ allowGeneric: true });
-        return json({ ok: true, installed: true, bytes: statSync(target).size });
+        saveConfig({ allowGeneric: true, ytdlpSha256: actual });
+        return json({
+          ok: true, installed: true, verified: true,
+          bytes: statSync(target).size, sha256: actual,
+        });
       } catch (err) {
         return json({
           ok: false,

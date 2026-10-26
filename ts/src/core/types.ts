@@ -4,6 +4,8 @@ export interface Config {
   concurrency?: number;
   limitRate?: number;
   allowGeneric?: boolean;
+  /** 安装通用组件时记下的 SHA256，供 doctor / components 核对「已校验」而不是只看文件存在。 */
+  ytdlpSha256?: string;
 }
 
 export interface DownloadOptions { cover?: boolean; subs?: boolean; danmaku?: boolean }

@@ -8,6 +8,7 @@ import { getKuwo, probeKuwo } from './engines/kuwo';
 import { getKugou, probeKugou } from './engines/kugou';
 import { canHandle as canSniff, getSniff, probeSniff } from './engines/sniff';
 import { loadConfig } from './core/config';
+import { exitCodeFor, runDoctor } from './core/doctor';
 import { VdlError, fail } from './core/errors';
 import { platformOf } from './core/platform';
 import { parseLimit, setLimitBytesPerSec } from './core/rate';
@@ -64,7 +65,22 @@ function human(res: ProbeResult) {
 }
 
 async function main() {
-  if (cmd === 'auth') {
+  if (cmd === 'doctor') {
+  const report = await runDoctor();
+  if (has('--json')) {
+    console.log(JSON.stringify(report, null, 2));
+  } else {
+    for (const c of report.checks) {
+      const mark = c.level === 'ok' ? '✓' : c.level === 'warn' ? '!' : '✗';
+      console.log(`${mark} ${c.label}  ${c.detail}`);
+      if (c.action) console.log(`    → ${c.action}`);
+    }
+    console.log(report.ok ? '\n结论：可以运行' : '\n结论：有阻塞项，先按上面的 → 处理');
+  }
+  process.exit(exitCodeFor(report.checks));
+}
+
+if (cmd === 'auth') {
     const auth = await import('./auth');
     if (has('--status')) {
       const rows = auth.status();
