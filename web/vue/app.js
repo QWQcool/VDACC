@@ -24,6 +24,10 @@ const I18N = {
     sidecar: '字幕/弹幕', sidecars: '附属产物',
     album: '专辑', tracks: '曲目', albumDropped: '之后还剩',
     loadMore: '加载下一批（20 首）', loadingMore: '加载中…', loadedCount: '已列',
+    accounts: '账号', accountsHelp: '登录在电脑上完成（独立 Edge），手机只显示状态；不读取你日常浏览器的 cookie。',
+    login: '登录', relogin: '重新登录', refresh: '刷新状态', authChecking: '检查中…',
+    authOk: '在线有效', authBad: '已失效', authNone: '本地无凭据', authUnchecked: '未校验',
+    refetchSidecars: '重取字幕/弹幕', sidecarDone: '附属已更新',
     sidecarHint: '同目录会额外写入 .srt / .danmaku.xml（仅 B站，字幕优先中文 / AI 中文字幕）',
     jobs: '任务', cancel: '取消', retry: '重试',
     selectAll: '全选', estimated: '预计', limitHint: '超过 20 个分集，请分批选择（硬上限 20）',
@@ -62,6 +66,10 @@ const I18N = {
     sidecar: 'Subs/Danmaku', sidecars: 'Sidecars',
     album: 'Album', tracks: 'tracks', albumDropped: 'left after this batch',
     loadMore: 'Load next 20', loadingMore: 'Loading…', loadedCount: 'listed',
+    accounts: 'Accounts', accountsHelp: 'Login happens on the PC in a dedicated Edge profile; the phone only shows status and never reads your daily browser cookies.',
+    login: 'Log in', relogin: 'Log in again', refresh: 'Refresh', authChecking: 'Checking…',
+    authOk: 'Valid', authBad: 'Expired', authNone: 'No credential', authUnchecked: 'Unchecked',
+    refetchSidecars: 'Refetch subtitles/danmaku', sidecarDone: 'Sidecars updated',
     sidecarHint: 'Writes .srt / .danmaku.xml next to the video (Bilibili only, Chinese subtitles preferred)',
     jobs: 'Jobs', cancel: 'Cancel', retry: 'Retry',
     selectAll: 'Select all', estimated: 'Est.', limitHint: 'More than 20 parts: select in batches (hard limit 20)',
@@ -125,6 +133,9 @@ createApp({
     const compStatus = ref('');
     const compBusy = ref(false);
     const previewUrl = ref('');
+    // 账号状态（/api/auth）：本地凭据 + 在线校验结果
+    const authRows = ref([]);
+    const authBusy = ref(false);
     const checkedParts = ref([]);
     const isBatch = computed(() =>
       !!(result.value && result.value.media.parts.length > 1));
@@ -416,6 +427,8 @@ createApp({
       sConcurrency.value = s.concurrency || 1;
       sGeneric.value = !!s.allowGeneric;
       await refreshComponents();
+      // 在线校验要打三个站点，别阻塞面板打开
+      loadAuth();
       settingsOpen.value = true;
 
     }
@@ -467,6 +480,46 @@ createApp({
       });
       if (data.ok) previewUrl.value = data.url;
       else message.value = errorText(data);
+    }
+
+    async function loadAuth() {
+      authBusy.value = true;
+      const data = await api('/api/auth');
+      authBusy.value = false;
+      if (data.ok) authRows.value = data.sites || [];
+      else message.value = (data.error && data.error.message) || 'failed';
+    }
+
+    async function loginSite(site) {
+      const data = await api(`/api/auth/${site}/login`, { method: 'POST' });
+      message.value = data.message || (data.ok ? t('login') : 'failed');
+      if (data.ok && data.started) {
+        // 扫码在电脑上完成，这里过几秒自动刷新一次，用户也可以手动点刷新
+        setTimeout(() => { loadAuth(); }, 6000);
+      }
+    }
+
+    const authBadge = (a) => (a.online && a.online.ok ? 'ok'
+      : a.online && a.online.ok === false ? 'fail' : 'neutral');
+    const authText = (a) => {
+      if (a.online && a.online.ok) {
+        return `${t('authOk')}${a.online.message ? ` · ${a.online.message}` : ''}`;
+      }
+      if (a.online && a.online.ok === false) return t('authBad');
+      return a.loggedIn ? t('authUnchecked') : t('authNone');
+    };
+
+    /** 只有 B站 的成品任务才有附属可重取。 */
+    const isBiliJob = (j) => /bilibili\.com|b23\.tv|^BV[0-9A-Za-z]{10}$/.test(String(j.url || ''));
+
+    async function refetchJobSidecars(job) {
+      const data = await api(`/api/jobs/${job.id}/sidecar`, { method: 'POST' });
+      if (data.ok) {
+        upsert(data.job);
+        message.value = `${t('sidecarDone')}：${data.srtCount || 0} / ${data.danmakuCount || 0}`;
+      } else {
+        message.value = (data.error && data.error.message) || 'failed';
+      }
     }
 
     function previewJob(job) {
@@ -555,6 +608,8 @@ createApp({
       connected, outDir, limitRate, rateText, platformClass, jobName,
       settingsOpen, sOutDir, sTheme, sLimitRateMB, sConcurrency, sGeneric,
       compStatus, compBusy, previewUrl,
+      authRows, authBusy, loadAuth, loginSite, authBadge, authText,
+      isBiliJob, refetchJobSidecars,
       checkedParts, isBatch, allChecked, someChecked, estimated, toggleAll, togglePart,
       activeJobs, finishedJobs, orderedJobs,
       album, albumTracks, checkedTracks, allTracks, toggleTrack, toggleAllTracks,

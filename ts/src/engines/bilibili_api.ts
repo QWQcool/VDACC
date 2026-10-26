@@ -426,6 +426,23 @@ async function saveSubtitle(videoPath: string): Promise<{ srt: string | null; co
 }
 
 /**
+ * 只重取附属文件：复用 probe 拿到 bvid+cid（或 ep_id），不重新下载视频。
+ * 字幕永远重取；弹幕只在任务当初开了 danmaku 时重取。
+ */
+export async function refetchSidecars(
+  input: string, videoPath: string, opts: { subs?: boolean; danmaku?: boolean } = {},
+) {
+  await probeBilibiliApi(input);
+  const sub = opts.subs === false ? { srt: null, count: 0 } : await saveSubtitle(videoPath);
+  const dm = opts.danmaku ? await saveDanmaku(videoPath) : null;
+  return {
+    srt: sub.srt, srtCount: sub.count,
+    danmaku: dm?.xml || null, danmakuCount: dm?.count || 0,
+    danmakuSupported: dm ? dm.supported : null,
+  };
+}
+
+/**
  * 选档：指定了 id 就必须命中，缺档位直接报错而不是悄悄换成别的清晰度。
  * 分P/番剧各集档位不一定一致，静默换档会让用户以为下到了 1080P。
  */

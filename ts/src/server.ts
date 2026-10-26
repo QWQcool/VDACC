@@ -20,7 +20,8 @@ import { albumTracks as qqAlbum, getQQ, previewQQ, probeQQ } from './engines/qq'
 import { getKuwo, probeKuwo } from './engines/kuwo';
 import { getKugou, probeKugou } from './engines/kugou';
 import { canHandle as canSniff, getSniff, probeSniff } from './engines/sniff';
-import { getBilibiliApi, previewBilibili, probeBilibiliApi } from './engines/bilibili_api';
+import { getBilibiliApi, previewBilibili, probeBilibiliApi, refetchSidecars } from './engines/bilibili_api';
+import { SITES as AUTH_SITES, login as authLogin, status as authStatus, verify as authVerify } from './auth';
 import { componentPath, genericInstalled, getGeneric, probeGeneric } from './engines/generic';
 import type { DownloadOptions, Job, ProbeResult } from './core/types';
 
@@ -80,6 +81,10 @@ function saveStore() {
   writeJsonAtomic(STORE, { jobs: order.filter((id) => keep.has(id)).map((id) => jobs.get(id)) });
   persistenceWarning = '';
 }
+
+// 账号在线校验要打三个站点的网络，缓存 20 秒，避免界面每次打开都等十几秒
+let authCache: { at: number; rows: Awaited<ReturnType<typeof authVerify>> } | null = null;
+const authLogins = new Set<string>();
 
 /** 状态迁移立即落盘；运行中的磁盘失败可见，但不把已下载文件误判成失败。 */
 function scheduleSave() {
@@ -336,6 +341,78 @@ const server = Bun.serve({
           offset: plan.offset,
           hasMore: plan.hasMore,
           nextOffset: plan.nextOffset,
+        });
+      } catch (err) {
+        return json(failBody('ts', err));
+      }
+    }
+
+    // 账号状态：本地是否有凭据 + 在线是否仍有效（缓存 20s）
+    if (path === '/api/auth' && req.method === 'GET') {
+      const local = authStatus();
+      if (!authCache || Date.now() - authCache.at > 20000) {
+        try {
+          authCache = { at: Date.now(), rows: await authVerify() };
+        } catch {
+          authCache = { at: Date.now(), rows: [] };
+        }
+      }
+      const bySite = new Map((authCache?.rows || []).map((r) => [r.site, r]));
+      return json({
+        ok: true,
+        sites: local.map((r) => ({ ...r, online: bySite.get(r.site) || null })),
+        loggingIn: [...authLogins],
+      });
+    }
+
+    // 重新登录：在电脑上弹出独立 Edge，扫码结果写回凭据（手机端只负责发起与看状态）
+    if (path.startsWith('/api/auth/') && path.endsWith('/login') && req.method === 'POST') {
+      const site = path.slice('/api/auth/'.length, -'/login'.length);
+      if (!AUTH_SITES[site]) {
+        return json({ ok: false, error: { code: 'bad_input', message: '未知站点' } }, 400);
+      }
+      if (authLogins.has(site)) {
+        return json({ ok: true, started: false, message: '已经在等待上一次登录完成' });
+      }
+      authLogins.add(site);
+      authCache = null;
+      authLogin(site, 300000)
+        .then(() => { authCache = null; })
+        .catch((err) => { console.error('[auth_login_failed] ' + (err as Error).message); })
+        .finally(() => { authLogins.delete(site); });
+      return json({
+        ok: true, started: true,
+        message: '已在电脑上打开 Edge，请完成扫码/登录；完成后点「刷新状态」',
+      });
+    }
+
+    // 附属重取：只重新拉字幕/弹幕，不重新下载视频
+    const sidecarMatch = /^\/api\/jobs\/([^/]+)\/sidecar$/.exec(path);
+    if (sidecarMatch && req.method === 'POST') {
+      const job = jobs.get(sidecarMatch[1]);
+      if (!job) return json({ ok: false, error: { code: 'not_found', message: '任务不存在' } }, 404);
+      if (job.status !== 'done' || !job.path || !existsSync(job.path)) {
+        return json({
+          ok: false,
+          error: { code: 'not_ready', message: '只有已完成、且文件还在的任务才能重取附属' },
+        }, 409);
+      }
+      if (platformOf(job.url) !== 'bilibili') {
+        return json({ ok: false, error: { code: 'unsupported', message: '附属重取只支持 B站' } }, 400);
+      }
+      try {
+        const out = await refetchSidecars(job.url, job.path, {
+          subs: true, danmaku: job.danmaku === true,
+        });
+        Object.assign(job, {
+          ...(out.srtCount ? { srtCount: out.srtCount } : {}),
+          ...(out.danmakuCount ? { danmakuCount: out.danmakuCount } : {}),
+        });
+        scheduleSave();
+        return json({
+          ok: true, job, srt: out.srt, srtCount: out.srtCount,
+          danmaku: out.danmaku, danmakuCount: out.danmakuCount,
+          danmakuSupported: out.danmakuSupported,
         });
       } catch (err) {
         return json(failBody('ts', err));
