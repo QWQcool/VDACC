@@ -3,12 +3,12 @@
  * 为什么单独抽出来：`.part` + Range 续传 + 限速 + ffmpeg 写标签这套逻辑
  * 在酷我/酷狗里一模一样，抄两遍以后改一处漏一处。
  */
-import { spawnSync } from 'node:child_process';
 import { existsSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { open } from 'node:fs/promises';
 
 import { throwIfCancelled } from './cancel';
 import { VdlError } from './errors';
+import { runFfmpeg } from './ffmpeg';
 import { UA } from './http';
 import { report } from './progress';
 import { throttle } from './rate';
@@ -42,11 +42,6 @@ export async function streamToFile(url: string, part: string, referer: string): 
   }
   report(written, total || written);
   return statSync(part).size;
-}
-
-function ffmpeg(args: string[]) {
-  const ff = process.env.VDL_FFMPEG || 'ffmpeg';
-  return spawnSync(ff, args, { encoding: 'utf8', windowsHide: true });
 }
 
 export interface TagOptions {
@@ -92,10 +87,10 @@ export async function tagAudio(opts: TagOptions): Promise<string[]> {
   if (opts.dest.toLowerCase().endsWith('.mp3')) args.push('-id3v2_version', '3');
   args.push(out);
 
-  const run = ffmpeg(args);
+  const run = await runFfmpeg(args);
   try { unlinkSync(coverPath); } catch { /* 没下到封面 */ }
 
-  if (run.status === 0 && existsSync(out)) {
+  if (run.code === 0 && existsSync(out)) {
     try {
       unlinkSync(opts.dest);
       renameSync(out, opts.dest);

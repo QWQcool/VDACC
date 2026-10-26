@@ -16,10 +16,10 @@ import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync,
   writeFileSync } from 'node:fs';
 import { open } from 'node:fs/promises';
 import { join } from 'node:path';
-import { spawnSync } from 'node:child_process';
 
 import type { AlbumInfo, AlbumTrack } from '../core/album';
 import { throwIfCancelled } from '../core/cancel';
+import { runFfmpeg } from '../core/ffmpeg';
 import { VdlError } from '../core/errors';
 import { UA, request } from '../core/http';
 import { safeName } from '../core/naming';
@@ -310,10 +310,7 @@ async function streamTo(url: string, part: string): Promise<number> {
   return statSync(part).size;
 }
 
-function ffmpeg(args: string[]) {
-  const ff = process.env.VDL_FFMPEG || 'ffmpeg';
-  return spawnSync(ff, args, { encoding: 'utf8', windowsHide: true });
-}
+
 
 /** 歌词单独落 .lrc（与网易云一致）；拿不到就返回空串，不影响音频。 */
 async function fetchLyric(mid: string): Promise<string> {
@@ -395,10 +392,10 @@ async function getQQImpl(input: string, formatId: string | null, outDir: string)
   if (dest.toLowerCase().endsWith('.mp3')) args.push('-id3v2_version', '3');
   args.push(out);
 
-  const run = ffmpeg(args);
+  const run = await runFfmpeg(args);
   try { unlinkSync(rawCover); } catch { /* 没有封面 */ }
 
-  if (run.status === 0 && existsSync(out)) {
+  if (run.code === 0 && existsSync(out)) {
     renameSync(out, dest);
     try { unlinkSync(part); } catch { /* ignore */ }
   } else {

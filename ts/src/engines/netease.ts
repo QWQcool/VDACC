@@ -1,5 +1,4 @@
 import { operationState, scopedOperation } from '../core/operation';
-import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { open } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -7,6 +6,7 @@ import { join } from 'node:path';
 import type { AlbumInfo, AlbumTrack } from '../core/album';
 import { throwIfCancelled } from '../core/cancel';
 import { VdlError } from '../core/errors';
+import { runFfmpeg } from '../core/ffmpeg';
 import { UA } from '../core/http';
 import { safeName } from '../core/naming';
 import { report } from '../core/progress';
@@ -200,10 +200,7 @@ async function streamTo(url: string, part: string): Promise<number> {
   return statSync(part).size;
 }
 
-function ffmpeg(args: string[]) {
-  const ff = process.env.VDL_FFMPEG || 'ffmpeg';
-  return spawnSync(ff, args, { encoding: 'utf8', windowsHide: true });
-}
+
 
 async function getNeteaseImpl(input: string, formatId: string | null, outDir: string) {
   const probe = await probeNetease(input);
@@ -249,9 +246,9 @@ async function getNeteaseImpl(input: string, formatId: string | null, outDir: st
       const res = await fetch(pic, { headers: { 'User-Agent': UA } });
       writeFileSync(rawCover, Buffer.from(await res.arrayBuffer()));
       // 原图常是 1920×1920 PNG（5MB+），缩到 800px JPEG 再内嵌
-      const scaled = ffmpeg(['-y', '-hide_banner', '-loglevel', 'error',
+      const scaled = await runFfmpeg(['-y', '-hide_banner', '-loglevel', 'error',
         '-i', rawCover, '-vf', "scale='min(800,iw)':-2", '-q:v', '3', smallCover]);
-      coverPath = scaled.status === 0 ? smallCover : rawCover;
+      coverPath = scaled.code === 0 ? smallCover : rawCover;
     } catch {
       coverPath = existsSync(rawCover) ? rawCover : '';
     }
@@ -281,12 +278,12 @@ async function getNeteaseImpl(input: string, formatId: string | null, outDir: st
   if (dest.toLowerCase().endsWith('.mp3')) args.push('-id3v2_version', '3');
   args.push(out);
 
-  const run = ffmpeg(args);
+  const run = await runFfmpeg(args);
   for (const temp of [rawCover, smallCover]) {
     try { unlinkSync(temp); } catch { /* ignore */ }
   }
 
-  if (run.status === 0 && existsSync(out)) {
+  if (run.code === 0 && existsSync(out)) {
     renameSync(out, dest);
     try { unlinkSync(part); } catch { /* ignore */ }
   } else {

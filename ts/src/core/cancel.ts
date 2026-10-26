@@ -7,7 +7,11 @@ export class DownloadCancelled extends Error {
   }
 }
 
-export function throwIfCancelled() {
+export function isCancelled(): boolean {
   const check = currentOperation()?.cancelled;
-  if (check && check()) throw new DownloadCancelled();
+  return !!check && check();
+}
+
+export function throwIfCancelled() {
+  if (isCancelled()) throw new DownloadCancelled();
 }

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { operationState, runOperation } from '../src/core/operation';
 import { report } from '../src/core/progress';
-import { DownloadCancelled, throwIfCancelled } from '../src/core/cancel';
+import { DownloadCancelled, isCancelled, throwIfCancelled } from '../src/core/cancel';
 import { getBilibiliApi, probeBilibiliApi } from '../src/engines/bilibili_api';
 import { saveCover } from '../src/core/sidecar';
 
@@ -20,6 +20,16 @@ afterEach(() => {
   else process.env.VDL_FFMPEG = originalFfmpeg;
 });
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+test('isCancelled 只看当前任务作用域，不误伤别的任务', () => {
+  expect(isCancelled()).toBe(false);
+  runOperation(() => {
+    expect(isCancelled()).toBe(true);
+  }, { cancelled: () => true });
+  runOperation(() => {
+    expect(isCancelled()).toBe(false);
+  }, { cancelled: () => false });
+});
 
 test('交错执行的进度、取消和媒体状态只属于各自任务', async () => {
   const state = operationState(() => ({ title: '' }));

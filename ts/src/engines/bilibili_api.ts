@@ -1,7 +1,7 @@
 import { operationState, scopedOperation } from '../core/operation';
 import { saveCover } from '../core/sidecar';
 import type { DownloadOptions } from '../core/types';
-import { spawnSync } from 'node:child_process';
+import { runFfmpeg } from '../core/ffmpeg';
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { open } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -521,15 +521,14 @@ async function getBilibiliApiImpl(
       'expected', expected, 'vPart', statSync(vPart).size, 'aPart', statSync(aPart).size);
   }
 
-  const ff = process.env.VDL_FFMPEG || 'ffmpeg';
   const merged = dest.replace(/\.mp4$/i, '.mux.mp4');
   const args = urls.audio
     ? ['-y', '-hide_banner', '-loglevel', 'error', '-i', vPart, '-i', aPart, '-c', 'copy', merged]
     : ['-y', '-hide_banner', '-loglevel', 'error', '-i', vPart, '-c', 'copy', merged];
-  const run = spawnSync(ff, args, { encoding: 'utf8', windowsHide: true });
-  if (run.status !== 0) {
+  const run = await runFfmpeg(args);
+  if (run.code !== 0) {
     try { unlinkSync(merged); } catch { /* 只移除本次未完成的合并产物。 */ }
-    throw new VdlError(run.error ? 'ffmpeg_missing' : 'ffmpeg_failed',
+    throw new VdlError(run.code === -2 ? 'ffmpeg_missing' : 'ffmpeg_failed',
       '音视频合并失败，已保留分离流供重试', '检查 ffmpeg 是否可用和磁盘空间后重试');
   }
   renameSync(merged, dest);

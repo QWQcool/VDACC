@@ -3,6 +3,14 @@
 > 只记「用户可感知的变化」与「验证结论」。设计与取舍见 `Plan.md`。
 > 每个版本的 GitHub Release 从这里摘取。
 
+## 未发布
+
+- **ffmpeg 改异步（N01 第一步）**：合并音视频、写标签、封面缩放从 `spawnSync` 改为
+  `Bun.spawn`（`core/ffmpeg.ts`），长任务期间服务和 SSE 不再被卡住；取消会在 200ms 内
+  kill 子进程（`DownloadCancelled`），找不到 ffmpeg 用 `code=-2` 与「跑失败」区分。
+  实测 B站 合并 9.48 MB（h264+aac）与 QQ 标签写入均正常，测试 86。
+  worker 数仍固定 1——文件互斥没做完前不放开并发。
+
 ## v3.4.0 — 2026-10-26
 
 **分批、账号状态、doctor 与真机体验**
