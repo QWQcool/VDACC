@@ -3,6 +3,12 @@
 > 只记「用户可感知的变化」与「验证结论」。设计与取舍见 `Plan.md`。
 > 每个版本的 GitHub Release 从这里摘取。
 
+## 未发布
+
+- **前端拆分第一步（N03）**：中英词条从 `web/vue/app.js` 抽到 `web/vue/i18n.js`
+  （`window.VDACC_I18N`，只放文案），`app.js` 减 88 行；页面按 i18n → app 顺序加载。
+  实测中英切换正常（`Probe` / `Paste a link to start`），其余逻辑未动。
+
 ## v3.4.1 — 2026-10-27
 
 **并发、去重与上游变化适配**
