@@ -110,6 +110,26 @@ function stubAudio(total: number, downloadBytes: number) {
   });
 }
 
+/** 下载返回指定字节（用来造带 ID3 的假 mp3）；总字节数按 body 长度给。 */
+function stubAudioBytes(body: Uint8Array) {
+  routes.push({
+    name: 'audio-bytes',
+    match: (url) => url.startsWith(AUDIO),
+    handle: (_url, init) => {
+      if (headerOf(init, 'Range')) {
+        return new Response(null, {
+          status: 206,
+          headers: { 'content-type': 'audio/mpeg', 'content-range': `bytes 0-15/${body.length}` },
+        });
+      }
+      return new Response(body, {
+        status: 200,
+        headers: { 'content-type': 'audio/mpeg', 'content-length': String(body.length) },
+      });
+    },
+  });
+}
+
 async function codeOf(run: () => Promise<unknown>): Promise<string> {
   try {
     await run();
@@ -170,4 +190,56 @@ describe('酷我 get', () => {
     expect(out.bytes).toBe(TOTAL);
     expect(out.warnings.join(' ')).toContain('标签');
   });
+
+  test('K5 接口没给元数据时，标题取自文件内嵌 ID3', async () => {
+    // 真实环境：songinfoandlrc 回 status=301「音乐查询失败」，标题退化成 kuwo-<rid>
+    routes.push({
+      name: 'songinfo-degraded',
+      match: (url) => url.includes('/singles/songinfoandlrc'),
+      handle: () => json({ data: null, msg: '音乐查询失败', status: 301 }),
+    });
+    stubMobi({ data: { url: `${AUDIO}a.mp3`, format: 'mp3', bitrate: 128, duration: 210 } });
+    stubAnti('not-a-url');
+
+    // 造一个带 ID3v2.3 的「mp3」：TIT2=花海 / TPE1=周杰伦（UTF-16 带 BOM，与真实文件一致）
+    const tag = buildId3([
+      ['TIT2', '花海'],
+      ['TPE1', '周杰伦'],
+    ]);
+    const body = new Uint8Array(200_000);
+    body.set(tag, 0);
+    stubAudioBytes(body);
+
+    const out: any = await getKuwo(RID, 'kuwo-mobi', outDir);
+    expect(out.path).toContain('花海');
+    expect(out.path).not.toContain('kuwo-');
+    expect(out.warnings.join(' ')).toContain('内嵌标签');
+  });
 });
+
+/* ── ID3 构造（只为造一个真实形状的文件头） ── */
+
+function syncsafe4(n: number): number[] {
+  return [(n >> 21) & 0x7f, (n >> 14) & 0x7f, (n >> 7) & 0x7f, n & 0x7f];
+}
+
+function buildId3(frames: Array<[string, string]>): Uint8Array {
+  const parts: number[] = [];
+  for (const [id, text] of frames) {
+    const textBytes: number[] = [0xff, 0xfe]; // UTF-16LE BOM
+    for (const ch of text) {
+      const code = ch.codePointAt(0)!;
+      textBytes.push(code & 0xff, (code >> 8) & 0xff);
+    }
+    const body = [1, ...textBytes]; // encoding=1 (UTF-16 with BOM)
+    parts.push(...[...id].map((c) => c.charCodeAt(0)));
+    parts.push((body.length >> 24) & 0xff, (body.length >> 16) & 0xff, (body.length >> 8) & 0xff, body.length & 0xff);
+    parts.push(0, 0); // flags
+    parts.push(...body);
+  }
+  const size = parts.length;
+  return new Uint8Array([
+    0x49, 0x44, 0x33, 3, 0, 0, ...syncsafe4(size),
+    ...parts,
+  ]);
+}

@@ -66,3 +66,48 @@ bun test ts/tests → 139 pass / 0 fail（上一批后 128 + 11）
 
 **下一批**：B站（`bilibili_api`）已单独完成（2026-10-27），
 见 [`bilibili-capability-baseline.md`](bilibili-capability-baseline.md)。
+
+## 6. 增补：元数据降级时用文件内嵌 ID3 补全标题（2026-10-27，真实环境驱动）
+
+### 现象（真实）
+
+酷我 `songinfoandlrc` 会**偶发**返回 `status=301 音乐查询失败`（连续请求时更容易触发；
+实测同一 rid 半小时前失败、半小时后正常）。失败时标题退化成 `kuwo-<rid>`，
+下载出来的文件名是 `474678847_kuwo-474678847_128kbps.mp3`。
+
+但 CDN 给的 mp3 **自己带着 ID3**：
+
+```
+$ ffprobe raw-kw.mp3 → tags: { title: "花海", artist: "周杰伦" }
+文件头: 49 44 33 03 00 ... ("ID3" v2.3)
+帧: TIT2 / TPE1
+```
+
+### 改法
+
+- 新增 `ts/src/core/tags.ts`：纯 JS 解析 ID3v2.2/2.3/2.4 的文本帧（TIT2/TPE1/TALB），
+  支持 latin1 / UTF-16(BOM) / UTF-8。**不依赖 ffprobe**（端上没有 ffmpeg，桌面端也少个子进程）。
+- `kuwo.get`：`info.degraded` 为真时，下载完成后只读文件头 256KB 解析标签，
+  用标签里的标题/歌手重命名产物；读不到就保持 rid 命名，**不猜**。
+- 只读头部而不是整个文件：15MB 的曲目没必要为解析标签整读进内存。
+
+### 真实结果
+
+```
+--format kuwo-mobi → 474678847_花海 (DJ 阿若版)_128kbps.mp3
+                     3,368,054 字节 / 210.4s / 128kbps
+                     ffprobe tags: title=花海 (DJ 阿若版), artist=周杰伦
+```
+
+> 说明：这次真实下载**恰好**赶上接口正常返回（标题来自 API 而非标签），
+> 所以「降级→读标签→改名」这条路径的确定性证据是测试 `K5`
+> （真实 ID3 字节 + 真实下载/解析代码，仅 HTTP 打桩）。线上仍可能遇到 301，
+> 那时这条兜底才会生效。
+
+### 测试
+
+```
+bun test ts/tests/tags.test.ts      → 6 pass（三种编码 + 边界）
+bun test ts/tests/kuwo-probe.test.ts → 6 pass（新增 K5 降级补全标题）
+bun test ts/tests                    → 154 pass / 0 fail
+```
