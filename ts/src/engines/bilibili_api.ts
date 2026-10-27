@@ -1,6 +1,7 @@
 import { operationState, scopedOperation } from '../core/operation';
 import { saveCover } from '../core/sidecar';
 import type { DownloadOptions } from '../core/types';
+import { releaseDest, reserveDest } from '../core/dest';
 import { runFfmpeg } from '../core/ffmpeg';
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { open } from 'node:fs/promises';
@@ -474,7 +475,8 @@ async function getBilibiliApiImpl(
   const suffix = probe.media!.parts.length > 1 && selected
     ? `_${probe.media!.id.startsWith('ep') ? 'EP' : 'P'}${selected.index}` : '';
   const stem = `${probe.media!.id}_${safeName(probe.media!.title)}${suffix}_${safeName(fmt.label, 16, fmt.id)}`;
-  const dest = join(outDir, `${stem}.mp4`);
+  const dest = reserveDest(outDir, `${stem}.mp4`);
+  try {
   const completed = async (skipped: boolean) => {
     // 视频已存在也要让 --subs / --danmaku 生效：附属产物不能因为跳过视频就一起跳过
     const sub = opts.subs ? await saveSubtitle(dest) : { srt: null, count: 0 };
@@ -534,6 +536,9 @@ async function getBilibiliApiImpl(
   renameSync(merged, dest);
   for (const p of [vPart, aPart]) { try { unlinkSync(p); } catch { /* ignore */ } }
   return completed(false);
+  } finally {
+    releaseDest(dest);
+  }
 }
 
 export const probeBilibiliApi = scopedOperation(probeBilibiliApiImpl);

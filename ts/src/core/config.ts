@@ -20,13 +20,13 @@ function validate(value: unknown, fromDisk = false): Config {
   // 组件校验值：64 位十六进制；写坏还不如不记，宁可让 doctor 报「未校验」
   if (v.ytdlpSha256 !== undefined &&
       (typeof v.ytdlpSha256 !== 'string' || !/^[0-9a-f]{64}$/i.test(v.ytdlpSha256))) return bad();
-  if (v.concurrency !== undefined && (!Number.isInteger(v.concurrency) || v.concurrency < 1 || v.concurrency > (fromDisk ? 4 : 1))) return bad();
+  if (v.concurrency !== undefined && (!Number.isInteger(v.concurrency) || v.concurrency < 1 || v.concurrency > 4)) return bad();
   const clean: Config = {};
   for (const key of ['outDir', 'theme', 'limitRate', 'allowGeneric', 'ytdlpSha256'] as const) {
     if (v[key] !== undefined) (clean as any)[key] = v[key];
   }
-  // 旧配置曾允许选 1–4，但服务从未实现并发；读取时明确回到真实能力。
-  if (v.concurrency !== undefined) clean.concurrency = 1;
+  // 1–4 个 worker；具体取值由服务端 workerLimit() 再夹一次
+  if (v.concurrency !== undefined) clean.concurrency = v.concurrency;
   return clean;
 }
 

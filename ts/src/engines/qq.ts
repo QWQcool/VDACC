@@ -19,6 +19,7 @@ import { join } from 'node:path';
 
 import type { AlbumInfo, AlbumTrack } from '../core/album';
 import { throwIfCancelled } from '../core/cancel';
+import { releaseDest, reserveDest } from '../core/dest';
 import { runFfmpeg } from '../core/ffmpeg';
 import { VdlError } from '../core/errors';
 import { UA, request } from '../core/http';
@@ -338,8 +339,9 @@ async function getQQImpl(input: string, formatId: string | null, outDir: string)
   if (!cached) throw new VdlError('no_stream', '该档位没有可用地址');
 
   mkdirSync(outDir, { recursive: true });
-  const dest = join(outDir,
+  const dest = reserveDest(outDir,
     `${probe.media!.id}_${safeName(probe.media!.title)}_${safeName(fmt.label, 16, fmt.id)}.${cached.ext}`);
+  try {
   if (existsSync(dest)) {
     return { path: dest, bytes: statSync(dest).size, skipped: true, warnings: [] };
   }
@@ -356,7 +358,8 @@ async function getQQImpl(input: string, formatId: string | null, outDir: string)
   if (lyric) writeFileSync(dest.replace(/\.\w+$/, '.lrc'), lyric + '\n', 'utf8');
 
   const warnings: string[] = [];
-  const rawCover = join(outDir, '__vdl_cover.img');
+  // 临时封面跟着目标文件走，避免并发下载互相覆盖
+  const rawCover = dest + '.cover.img';
   const coverUrl = probe.media!.thumbnail || '';
   let coverPath = '';
   if (coverUrl) {
@@ -405,6 +408,9 @@ async function getQQImpl(input: string, formatId: string | null, outDir: string)
   }
 
   return { path: dest, bytes: statSync(dest).size, skipped: false, warnings };
+  } finally {
+    releaseDest(dest);
+  }
 }
 
 /** 供下载前预览：返回 probe 时缓存的 purl（qq 音乐 CDN 只给 http，服务端白名单已单独放行）。 */

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 
 import type { AlbumInfo, AlbumTrack } from '../core/album';
 import { throwIfCancelled } from '../core/cancel';
+import { releaseDest, reserveDest } from '../core/dest';
 import { VdlError } from '../core/errors';
 import { runFfmpeg } from '../core/ffmpeg';
 import { UA } from '../core/http';
@@ -212,8 +213,9 @@ async function getNeteaseImpl(input: string, formatId: string | null, outDir: st
 
   mkdirSync(outDir, { recursive: true });
   const label = safeName(fmt.label, 14, fmt.id);
-  const dest = join(outDir,
+  const dest = reserveDest(outDir,
     `${probe.media!.id}_${safeName(probe.media!.title)}_${label}.${fmt.ext}`);
+  try {
   if (existsSync(dest)) {
     return { path: dest, bytes: statSync(dest).size, skipped: true, warnings: [] };
   }
@@ -236,8 +238,9 @@ async function getNeteaseImpl(input: string, formatId: string | null, outDir: st
   }
 
   const warnings: string[] = [];
-  const rawCover = join(outDir, '__vdl_cover.img');
-  const smallCover = join(outDir, '__vdl_cover.jpg');
+  // 临时封面必须跟着目标文件走：固定名在并发下载时会互相覆盖
+  const rawCover = dest + '.cover.img';
+  const smallCover = dest + '.cover.jpg';
   let coverPath = '';
 
   const pic = (song.album || {}).picUrl || '';
@@ -293,6 +296,9 @@ async function getNeteaseImpl(input: string, formatId: string | null, outDir: st
   }
 
   return { path: dest, bytes: statSync(dest).size, skipped: false, warnings };
+  } finally {
+    releaseDest(dest);
+  }
 }
 
 export function previewNetease(formatId: string): string {

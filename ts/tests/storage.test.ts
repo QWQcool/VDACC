@@ -17,14 +17,15 @@ test('全新用户目录首次保存即创建父目录，增量保存不丢字�
   expect(readdirSync(join(dir, 'fresh', 'vdl'))).toEqual(['config.json']);
 });
 
-test('拒绝无效设置，旧并发设置规范化为真实的单 worker', () => {
+test('拒绝无效设置；并发允许 1–4，越界仍拒绝', () => {
   const file = join(dir, 'validate.json');
-  for (const patch of [null, [], { limitRate: -1 }, { limitRate: '2M' }, { concurrency: 2 },
+  for (const patch of [null, [], { limitRate: -1 }, { limitRate: '2M' }, { concurrency: 0 },
+    { concurrency: 5 }, { concurrency: 1.5 },
     { allowGeneric: 'false' }, { theme: 'unknown' }, { outDir: 2 }]) {
     expect(() => saveConfig(patch as any, file)).toThrow();
   }
   writeFileSync(file, JSON.stringify({ concurrency: 4, theme: 'dark' }));
-  expect(loadConfig(file)).toEqual({ concurrency: 1, theme: 'dark' });
+  expect(loadConfig(file)).toEqual({ concurrency: 4, theme: 'dark' });
 });
 
 test('配置损坏不覆盖原文件，目录不可写不能假报成功', () => {

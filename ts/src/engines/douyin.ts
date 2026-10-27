@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import { throwIfCancelled } from '../core/cancel';
 import { VdlError } from '../core/errors';
 import { CookieJar, request, UA } from '../core/http';
+import { releaseDest, reserveDest } from '../core/dest';
 import { safeName } from '../core/naming';
 import { firstUrl } from '../core/platform';
 import { report } from '../core/progress';
@@ -318,7 +319,9 @@ async function getDouyinImpl(input: string, formatId: string | null, outDir: str
   const label = safeName(fmt.label, 16, fmt.id);
   mkdirSync(outDir, { recursive: true });
   const stem = `${probe.media!.id}_${safeName(probe.media!.title)}_${label}`;
-  const dest = join(outDir, `${stem}.mp4`);
+  // 并发时同标题会撞名：预留一个只在「同时写」时加后缀的路径
+  const dest = reserveDest(outDir, `${stem}.mp4`);
+  try {
   const completed = async (skipped: boolean) => ({
     path: dest, bytes: statSync(dest).size, skipped,
     ...(opts.cover ? await saveCover(dest, probe.media!.thumbnail, probe.media!.source_url) : { warnings: [] }),
@@ -340,6 +343,9 @@ async function getDouyinImpl(input: string, formatId: string | null, outDir: str
     }
   }
   throw last instanceof Error ? last : new VdlError('download_failed', '所有候选都失败');
+  } finally {
+    releaseDest(dest);
+  }
 }
 
 export const probeDouyin = scopedOperation(probeDouyinImpl);

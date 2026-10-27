@@ -49,7 +49,7 @@ setLimitBytesPerSec(CONFIG.limitRate || 0);
 const jobs = new Map<string, Job>();
 const order: string[] = [];
 const queue: string[] = [];
-let running = false;
+let activeWorkers = 0;
 let persistenceWarning = '';
 
 const clients = new Set<ReadableStreamDefaultController>();
@@ -189,19 +189,45 @@ function submitJobs(url: string, ids: string[], opts: DownloadOptions): { create
   return { created, reused };
 }
 
-async function pump() {
-  if (running) return;
-  running = true;
-  while (queue.length) {
-    const job = jobs.get(queue.shift()!);
-    if (!job) continue;
+/** 并发数来自设置，但硬上限 4；改设置后下一次 pump 生效，不需要重启。 */
+function workerLimit(): number {
+  let n = 1;
+  try {
+    n = Number(loadConfig().concurrency || 1);
+  } catch {
+    // 配置损坏时按 1 个 worker 跑：不能让队列因为读配置失败整体停摆
+  }
+  return Math.min(Math.max(Math.trunc(n) || 1, 1), 4);
+}
+
+function pump(): void {
+  const limit = workerLimit();
+  while (activeWorkers < limit && queue.length) void runOne();
+}
+
+async function runOne(): Promise<void> {
+  const id = queue.shift();
+  if (!id) return;
+  const job = jobs.get(id);
+  if (!job) { pump(); return; }
+  activeWorkers += 1;
+  try {
+    await runJob(job);
+  } finally {
+    activeWorkers -= 1;
+    pump();
+  }
+}
+
+async function runJob(job: Job): Promise<void> {
+  if (job) {
     if (job.cancelRequested) {
       job.status = 'cancelled';
       job.error = { code: 'cancelled', message: '用户取消' };
       job.finishedAt = Date.now();
       emit(job);
       scheduleSave();
-      continue;
+      return;
     }
 
     job.status = 'running';
@@ -241,7 +267,6 @@ async function pump() {
       emit(job);
     }
   }
-  running = false;
 }
 
 function authorized(req: Request, url: URL): boolean {

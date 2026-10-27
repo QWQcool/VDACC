@@ -12,6 +12,7 @@ import { existsSync, mkdirSync, renameSync, statSync, unlinkSync } from 'node:fs
 import { join } from 'node:path';
 
 import { streamToFile, tagAudio } from '../core/audio';
+import { releaseDest, reserveDest } from '../core/dest';
 import { VdlError } from '../core/errors';
 import { UA, request } from '../core/http';
 import { safeName } from '../core/naming';
@@ -212,8 +213,9 @@ async function getKugouImpl(input: string, formatId: string | null, outDir: stri
   const info = infoState().lastInfo!;
 
   mkdirSync(outDir, { recursive: true });
-  const dest = join(outDir,
+  const dest = reserveDest(outDir,
     `${probe.media!.id.slice(0, 8)}_${safeName(info.title || probe.media!.id)}_${safeName(fmt.label, 16, fmt.id)}.${cached.ext}`);
+  try {
   if (existsSync(dest)) {
     return { path: dest, bytes: statSync(dest).size, skipped: true, warnings: [] };
   }
@@ -231,6 +233,9 @@ async function getKugouImpl(input: string, formatId: string | null, outDir: stri
     coverUrl: info.cover, referer: REFERER,
   });
   return { path: dest, bytes: statSync(dest).size, skipped: false, warnings };
+  } finally {
+    releaseDest(dest);
+  }
 }
 
 export const probeKugou = scopedOperation(probeKugouImpl);

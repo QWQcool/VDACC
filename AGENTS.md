@@ -131,7 +131,8 @@ bun ts/src/cli.ts probe "<抖音或B站链接>" --json
   换台机器 clone 下来就能跑。别为省事给它添新依赖。
 - **请求与任务状态隔离。** `core/operation.ts` 为每个 HTTP 请求和下载任务创建独立作用域；
   引擎使用 `operationState`，不要重新引入全局 last* / URL 缓存或进度、取消回调。
-  当前队列仍只有一个 worker；增加并发前必须解决同名文件互斥、子进程取消与限速预算。
+  队列按设置起 1–4 个 worker；同名目标由 `core/dest.ts` 预留（同时写才加后缀），
+ffmpeg 已改异步可取消。**限速仍是「每条流」**，总带宽 ≈ 并发 × 限速；yt-dlp 子进程不受我们的限速。
 - **契约优先。** 对外字段只加在 `ts/src/core/types.ts`（schema=2），错误码由 `core/errors.ts` 统一；
   legacy 对应 `legacy/python/vdl/core/models.py`、`errors.py`，两边字段名必须一致。
   不许在壳里自己拼字段名，也不许把已知失败写成"下载失败"了事。

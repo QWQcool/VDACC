@@ -14,6 +14,7 @@ import { streamToFile } from '../core/audio';
 import { DownloadCancelled, throwIfCancelled } from '../core/cancel';
 import { VdlError } from '../core/errors';
 import { UA, request } from '../core/http';
+import { releaseDest, reserveDest } from '../core/dest';
 import { safeName } from '../core/naming';
 import { report } from '../core/progress';
 import { format, type Format, type ProbeResult } from '../core/types';
@@ -260,8 +261,9 @@ async function getSniffImpl(input: string, formatId: string | null, outDir: stri
 
   mkdirSync(outDir, { recursive: true });
   const ext = cached.hls ? 'mp4' : (fmt.ext || 'mp4');
-  const dest = join(outDir,
+  const dest = reserveDest(outDir,
     `${safeName(probe.media!.id, 40)}_${safeName(fmt.label, 16, fmt.id)}.${ext}`);
+  try {
   if (existsSync(dest)) {
     return { path: dest, bytes: statSync(dest).size, skipped: true, warnings: [] };
   }
@@ -287,6 +289,9 @@ async function getSniffImpl(input: string, formatId: string | null, outDir: stri
   }
   renameSync(part, dest);
   return { path: dest, bytes: statSync(dest).size, skipped: false, warnings: [] };
+  } finally {
+    releaseDest(dest);
+  }
 }
 
 export const probeSniff = scopedOperation(probeSniffImpl);

@@ -11,6 +11,7 @@ import { existsSync, mkdirSync, renameSync, statSync, unlinkSync, writeFileSync 
 import { join } from 'node:path';
 
 import { streamToFile, tagAudio } from '../core/audio';
+import { releaseDest, reserveDest } from '../core/dest';
 import { VdlError } from '../core/errors';
 import { UA, request } from '../core/http';
 import { safeName } from '../core/naming';
@@ -72,6 +73,8 @@ async function textOf(url: string, referer = REFERER): Promise<string> {
 interface SongInfo {
   title: string; artist: string; album: string; pic: string;
   duration: number; lrc: string;
+  /** 元数据降级时的说明（接口返回空），要一路带到 probe warnings 里 */
+  warn?: string;
 }
 
 /** 酷我搜索返回的是单引号伪 JSON，只能按字段抠。 */
@@ -118,22 +121,43 @@ export function toLrc(list: Array<{ time?: string | number; lineLyric?: string }
 
 async function songInfo(rid: string): Promise<SongInfo> {
   let data: any = null;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  // 这个接口会间歇性返回空的 songinfo/lrclist（同一 rid 前后两次结果不同），
+  // 多试几次并保留「信息更多」的那次，而不是拿到空响应就认定查不到。
+  for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
       const json_ = await json(SONG_INFO + rid);
-      data = json_?.data;
-      if (data?.songinfo?.songName) break;
-      if (data?.simpl?.musiclist?.[0]) break;
+      const next = json_?.data;
+      const score = (d: any) => (d?.songinfo?.songName ? 2 : 0) + (d?.lrclist?.length ? 1 : 0);
+      if (!data || score(next) > score(data)) data = next;
+      if (score(data) >= 3) break;
     } catch {
-      // 重试一次
+      // 继续重试
     }
   }
   const info = data?.songinfo || data?.simpl?.musiclist?.[0] || {};
   const rawLrc: Array<{ time?: string; lineLyric?: string }> = data?.lrclist || [];
-  const title = String(info.songName || info.name || '').trim();
+  let title = String(info.songName || info.name || '').trim();
   let artist = String(info.artist || '').trim();
+  // 2026-10 起 songinfo 对匿名请求返回空标题/歌手，只剩歌词。
+  // 首行歌词通常是「标题 - 歌手」，拿它兜底；没有歌词再退回 rid，至少能下载。
+  if (!title) {
+    const first = String(rawLrc[0]?.lineLyric || '').trim();
+    const m = /^(.+?)\s+-\s+(.+)$/.exec(first);
+    if (m) {
+      title = m[1].trim();
+      artist = artist || m[2].trim();
+    } else if (first) {
+      title = first;
+    }
+  }
   let album = String(info.album || '').trim();
   let pic = String(info.pic || '').trim();
+  // 仍然没有任何元数据时不要直接判死：用 rid 当标题，让用户至少能下到音频
+  let degraded = '';
+  if (!title) {
+    title = `kuwo-${rid}`;
+    degraded = '未能获取歌曲信息（接口间歇性返回空），标题先用 rid 代替';
+  }
   if (title && (!artist || !album || !pic)) {
     const extra = await searchMeta(title, rid);
     if (extra) {
@@ -150,6 +174,7 @@ async function songInfo(rid: string): Promise<SongInfo> {
     title, artist, album, pic: cover,
     duration: Number(info.duration || 0) || 0,
     lrc: rawLrc.length ? toLrc(rawLrc) : '',
+    ...(degraded ? { warn: degraded } : {}),
   };
 }
 
@@ -214,6 +239,7 @@ async function probeKuwoImpl(input: string): Promise<ProbeResult> {
   }
 
   const warnings: string[] = [];
+  if (info.warn) warnings.push(info.warn);
   const formats: Format[] = [];
   const candidates = [await mobi(rid), await anti(rid)].filter(Boolean) as Candidate[];
   for (const cand of candidates) {
@@ -271,7 +297,8 @@ async function getKuwoImpl(input: string, formatId: string | null, outDir: strin
 
   mkdirSync(outDir, { recursive: true });
   const stem = `${probe.media!.id}_${safeName(info.title || probe.media!.id)}_${safeName(fmt.label, 16, fmt.id)}`;
-  const dest = join(outDir, `${stem}.${cached.ext}`);
+  const dest = reserveDest(outDir, `${stem}.${cached.ext}`);
+  try {
   if (existsSync(dest)) {
     return { path: dest, bytes: statSync(dest).size, skipped: true, warnings: [] };
   }
@@ -293,6 +320,9 @@ async function getKuwoImpl(input: string, formatId: string | null, outDir: strin
     coverUrl: info.cover, referer: REFERER,
   }));
   return { path: dest, bytes: statSync(dest).size, skipped: false, warnings };
+  } finally {
+    releaseDest(dest);
+  }
 }
 
 export const probeKuwo = scopedOperation(probeKuwoImpl);

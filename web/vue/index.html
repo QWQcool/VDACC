@@ -399,10 +399,10 @@
 
           <div class="field">
             <label>{{ t('concurrency') }}</label>
-            <div class="comp-row">
-              <span class="name">{{ t('concurrencyFixed') }}</span>
-              <span class="badge neutral">1</span>
-            </div>
+            <select class="input" v-model.number="sConcurrency">
+              <option v-for="n in [1, 2, 3, 4]" :key="n" :value="n">{{ n }}</option>
+            </select>
+            <span class="help">{{ t('concurrencyHelp') }}</span>
           </div>
 
           <div class="field">
