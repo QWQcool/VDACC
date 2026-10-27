@@ -3,16 +3,20 @@
 > 只记「用户可感知的变化」与「验证结论」。设计与取舍见 `Plan.md`。
 > 每个版本的 GitHub Release 从这里摘取。
 
-## 未发布
+## v3.4.2 — 2026-10-27
 
+**前端模块化与分发清单**
+
+- **前端拆分（N03 完成）**：`app.js` 628 → 481 行，拆出 `i18n.js`（词条）、`api.js`（fetch/JSON）、
+  `format.js`（size/dur/platformClass/jobName）、`jobs.js`（终态保护 upsert + 分组）、
+  `overlays.js`（Esc/焦点循环/背景 inert/滚动锁）；页面按 vue → i18n → api → format → jobs → overlays → app 加载
+- **布局回归脚本**：`node tools/ui_shots.cjs <base> <token>` 覆盖浅/深 × 中/英 × 390/768/1440，
+  检查横向溢出、关键元素与控制台报错，截图落 `docs/design/ui/shots/`（不入库）。实测 12/12 PASS
 - **Skill 包清单与校验**：`build_skill_ts.py` 现在生成 `manifest.json`（版本、构建时间、每文件
   字节与 SHA256、合计体积）和 `SHA256SUMS`，两者一起打进 zip；新增
   `python tools/verify_skill_ts.py dist/video-acquire-ts` 逐个核对（篡改一个字节即退出码 1）。
   实测包内 5 个条目、vdl.exe 91.9 MB、zip 42.6 MB。干净机器验收仍未做。
 
-- **前端拆分第一步（N03）**：中英词条从 `web/vue/app.js` 抽到 `web/vue/i18n.js`
-  （`window.VDACC_I18N`，只放文案），`app.js` 减 88 行；页面按 i18n → app 顺序加载。
-  实测中英切换正常（`Probe` / `Paste a link to start`），其余逻辑未动。
 
 ## v3.4.1 — 2026-10-27
 
