@@ -38,6 +38,16 @@ const TOKEN = flag('--token', randomBytes(8).toString('hex'));
 // 双击启动器时用：服务起来后把带 token 的地址交给默认浏览器，省掉手动复制
 const OPEN = argv.includes('--open');
 const CONFIG = loadConfig();
+// --concurrency N：启动时一次性覆盖设置里的并发（仍夹在 1–4），落盘后设置面板也能看到
+const CONCURRENCY_FLAG = Number(flag('--concurrency', ''));
+if (Number.isInteger(CONCURRENCY_FLAG) && CONCURRENCY_FLAG >= 1 && CONCURRENCY_FLAG <= 4) {
+  try {
+    saveConfig({ concurrency: CONCURRENCY_FLAG });
+    console.log(`  并发: ${CONCURRENCY_FLAG}（已写入设置，可在界面修改）`);
+  } catch {
+    console.warn(`  --concurrency ${CONCURRENCY_FLAG} 未写入配置（用户目录不可写），本次按配置原值运行`);
+  }
+}
 const OUT = resolve(flag('-o', CONFIG.outDir || join(process.cwd(), '下载')));
 const WEB = join(import.meta.dir, '..', '..', 'web');
 const STORE = process.env.VDL_STORE ||

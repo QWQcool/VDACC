@@ -30,8 +30,8 @@
 >
 > 首次运行 `auth` 前需要装依赖：`cd ts && bun install`（只装 `playwright-core`，复用系统 Edge）。
 >
-> TS 版 Skill：`python tools/build_skill_ts.py --zip` → `dist/video-acquire-ts.zip`（Bun 1.4.4 实测约 52.2MB，
-> 内含约 110.0MB 的 `vdl.exe`，不需要 Python/Node）。
+> TS 版 Skill：`python tools/build_skill_ts.py --zip` → `dist/video-acquire-ts.zip`
+> （实测 zip 42.6MB，内含 91.9MB 的 `vdl.exe`，不需要 Python/Node；包内有 `manifest.json` 与 `SHA256SUMS`）。
 >
 > 前端：`/` 是 **Vue 3** 界面，已按 **infOS 风格 V2** 重做（侧栏 + 双栏、浅槽画质、开关、Slide-over 设置）；
 > 解析/多选/分P批量/专辑/下载/SSE/主题/中英切换/下载前预览都在。旧版原生界面已删除，Vue 是唯一入口。
@@ -257,8 +257,9 @@ vdl doctor --fix                            # 自动补装 pip 依赖（ffmpeg �
 - **任务历史会保存**：服务端保留最近 100 条，重启后仍在；上次没跑完的标为「上次会话中断」。
 - **断点续传**：失败或被取消时保留 `.part`，重跑自动从断点继续；网络/5xx 类错误自动重试 3 次。
 - **任务可取消/重试**：任务卡上有「取消」「重试」；取消不会删半截文件。
-- **`doctor --live`**：对抖音/网易云/B站各真解析一次；`--bundle` 生成脱敏诊断包（不含 cookie）。
-- **并发**：`vdl serve --concurrency 2`（默认 1，对平台更友好）。
+- **`doctor` 诊断**：`bun ts/src/cli.ts doctor [--json]` 检查 ffmpeg / 组件校验 / 输出目录 / 本地凭据；
+  只读、不联网、不读 cookie。
+- **并发**：设置面板 1–4，或启动时 `--concurrency 2`（默认 1；限速按每条流计算，总带宽 ≈ 并发 × 限速）。
 - **Windows 一键启动**：双击 `VDACC.bat`（需要 Bun 在 PATH；界面会自动打开）。
 
 音乐用同一个入口（`vdl probe` / `vdl get` 支持 `music.163.com/song?id=...`）：
