@@ -72,12 +72,15 @@
 - 不改 `schema=2` 字段，只复用 `Format.available/reason`；
 - 不做任何账号权益的绕过（与 QQ 那批同一条边界）。
 
-## 6. 顺带发现（本批不修，记录待办）
+## 6. 顺带发现：预览「疑似取不到地址」——**核实后不成立**（2026-10-27）
 
-`previewNetease()` / `previewQQ()` 依赖 `operationState` 里的地址表，而 `server.ts` 的
-`/api/preview` 是 `await probeUrl(target)` **之后**再取，那时作用域已经结束——
-按现有代码结构，QQ/网易云的预览很可能拿不到地址（返回 `no_stream`）。
-需要单独确认一次（真机/本地起服务），不要在无关批次里顺手改。
+初版文档怀疑 `previewNetease()` / `previewQQ()` 会在作用域外取地址。读代码核实：
+`server.ts:305` 把**整个请求**包在 `runOperation(async () => …)` 里，`probeUrl()` 与随后的
+`previewXxx()` 共用同一个作用域，`operationState` 的地址表在预览时仍然有效 —— **不是缺陷**。
+
+证据：`ts/tests/netease-probe.test.ts` 新增两条
+「同一作用域内 probe 之后仍能取到预览地址」/「作用域外会抛错（说明必须共用同一个 runOperation）」。
+它们把「预览依赖请求级作用域」这个前提钉住了，任何人把 preview 挪出作用域都会立刻红。
 
 ## 7. 工作包交付记录（2026-10-27）
 

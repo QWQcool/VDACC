@@ -5,6 +5,12 @@
 
 ## 未发布
 
+- **网络错误不再说成「内部错误」**：各引擎直接用 `fetch`，断网/DNS 失败/超时抛的是
+  `TypeError`(`fetch failed`)/`AbortError`，原来统一被 `fail()` 记成 `internal`——用户看到
+  「内部错误」会往程序 bug 方向查。现在归成 `network` 并给出「检查网络或稍后重试」的下一步，
+  普通程序错误仍是 `internal`；网易云引擎早就是这个码，本次把其余引擎对齐（`ts/src/core/errors.ts`）。
+  另补 `/api/preview` 的作用域回归测试：核实后**预览不是缺陷**（整个请求包在 `runOperation` 里，
+  probe 与 preview 共用一个作用域），两条用例把该前提钉住。测试 120 → **128 pass**。
 - **网易云：档位与完整性如实报告**（ReversePlan 工作包 2，**仅离线验证**）：
   `probe` 两个档位（无损/320K）全部返回，未放行的 `available:false` + `reason` 带平台 `code`
   （如 `code=404`），`warnings` 不再恒为空；详情查不到歌改报 `not_found`（原来是 `filtered`）；

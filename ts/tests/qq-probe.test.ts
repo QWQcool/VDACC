@@ -15,6 +15,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { fail } from '../src/core/errors';
 import { getQQ, probeQQ } from '../src/engines/qq';
 
 const MID = '003OUlho2HcRHC';
@@ -253,15 +254,24 @@ describe('QQ 音乐 probe：档位呈现', () => {
     expect(await codeOf(() => probeQQ(MID))).toBe('vkey_failed');
   });
 
-  test('T7 网络失败：不能误报成 not_found / need_login', async () => {
+  test('T7 网络失败：不误报成 not_found/need_login，出口归成 network', async () => {
     routes.push({
       name: 'detail-net-error',
       match: (url) => url.includes('fcg_play_single_song'),
       handle: () => { throw new TypeError('fetch failed: ECONNRESET'); },
     });
 
-    const code = await codeOf(() => probeQQ(MID));
-    expect(['not_found', 'need_login', 'ok']).not.toContain(code);
+    let caught: any = null;
+    try {
+      await probeQQ(MID);
+    } catch (error) {
+      caught = error;
+    }
+    // 引擎层不把网络异常伪装成业务错误码
+    expect(caught).toBeTruthy();
+    expect(caught?.code).toBeUndefined();
+    // 服务端/CLI 的出口（fail）会把它归成 network，而不是「内部错误」
+    expect(fail('qq', 'qq-api', caught).error?.code).toBe('network');
   });
 });
 

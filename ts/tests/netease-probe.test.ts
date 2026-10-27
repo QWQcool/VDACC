@@ -10,7 +10,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { getNetease, probeNetease } from '../src/engines/netease';
+import { runOperation } from '../src/core/operation';
+import { getNetease, previewNetease, probeNetease } from '../src/engines/netease';
 
 const SID = '1901371647';
 const CDN = 'https://m701.music.126.net/';
@@ -251,5 +252,28 @@ describe('网易云 get：不静默降级、不把片段当完整', () => {
     const out: any = await getNetease(SID, 'exhigh', outDir);
     expect(out.bytes).toBe(3_840_000);
     expect(out.warnings.join(' ')).toContain('标签');
+  });
+});
+
+describe('预览地址：作用域机制（/api/preview 依赖它）', () => {
+  /**
+   * server.ts 把整个请求包在 runOperation 里，probe 与 preview 共用一个作用域，
+   * 所以探测缓存的地址在预览时还活着。这条测试钉住这个前提——
+   * 如果谁把 preview 挪到作用域外，用户点「预览」就会永远拿到空地址。
+   */
+  test('同一作用域内 probe 之后仍能取到预览地址', async () => {
+    stubDetail();
+    stubUrls({ 320000: urlBody([{ br: 320000, size: 9_600_000 }]) });
+    stubHead({ '320000': 9_600_000 });
+
+    const src = await runOperation(async () => {
+      await probeNetease(SID);
+      return previewNetease('exhigh');
+    });
+    expect(src).toContain(CDN);
+  });
+
+  test('作用域外取不到（说明必须共用同一个 runOperation）', () => {
+    expect(() => previewNetease('exhigh')).toThrow(/作用域/);
   });
 });
