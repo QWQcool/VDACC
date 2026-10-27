@@ -187,7 +187,7 @@ parity 稳定后再决定 Python 是否退化为 yt-dlp helper。
 
 **M1 · 3.4：可控并发与批次选择（优先）。**
 
-- **N01 · 真正的 worker 池**：🟡 第一步完成（2026-10-26）：新增 `core/ffmpeg.ts` 的 `runFfmpeg()`，
+- **N01 · 真正的 worker 池**：✅ 2026-10-27 完成——`core/ffmpeg.ts` 的 `runFfmpeg()`，
   B站 合并、音乐写标签/封面缩放（网易云 / QQ / 酷我 / 酷狗共用 `core/audio`）全部改异步；
   取消走 200ms 轮询任务作用域并 kill 子进程，找不到 ffmpeg 用 `code=-2` 区分。
   实测合并 9.48 MB 视频（h264+aac）与 QQ 标签仍正常，测试 86。
@@ -204,9 +204,9 @@ parity 稳定后再决定 Python 是否退化为 yt-dlp helper。
 
 **M2 · 3.5：infOS 体验一致性与可维护性。**
 
-- **N03 · 前端模块化**：🟡 第一步完成（2026-10-27）——中英词条拆到 `web/vue/i18n.js`（`window.VDACC_I18N`），
-  app.js 减 88 行；中英切换实测正常。剩余：API 封装、任务状态、浮层继续拆；
-  验收仍待补浅/深 × 中/英 × 390/768/1440px 截图回归与 reduced-motion 检查。
+- **N03 · 前端模块化**：✅ 2026-10-27 完成——词条 `i18n.js`、`api.js`、`format.js`、`jobs.js`、`overlays.js`；
+  `app.js` 628 → 481 行；`tools/ui_shots.cjs` 覆盖浅/深 × 中/英 × 390/768/1440，12/12 通过。
+  剩余可选：reduced-motion 专项检查。
 - **N04 · 登录与附属文件状态**：✅ 2026-10-26 完成——`GET /api/auth`（本地凭据 + 在线校验，缓存 20s）、
   `POST /api/auth/<site>/login`（在电脑上开独立 Edge，手机只看状态）、设置面板「账号」区显示
   有效/已失效/无凭据；已完成 B站 任务多出「重取字幕/弹幕」按钮，走 `POST /api/jobs/:id/sidecar`
