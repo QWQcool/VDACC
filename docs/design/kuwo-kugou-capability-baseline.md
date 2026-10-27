@@ -64,5 +64,5 @@ bun test ts/tests → 139 pass / 0 fail（上一批后 128 + 11）
 
 **脱敏**：全部合成 JSON + 临时目录；未访问真实账号、未下载真实音频。**仅离线验证**。
 
-**下一批条件**：B站（`bilibili_api`）的档位降级与试听判定需要先弄清 DASH 双轨下
-「一条轨缺失」与「整档不可用」的区别，再写用例。
+**下一批**：B站（`bilibili_api`）已单独完成（2026-10-27），
+见 [`bilibili-capability-baseline.md`](bilibili-capability-baseline.md)。

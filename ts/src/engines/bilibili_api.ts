@@ -70,17 +70,41 @@ async function apiJson(path: string, referer: string): Promise<any> {
   };
   const cookie = cookieHeader();
   if (cookie) headers.Cookie = cookie;
+  const name = path.split('?')[0];
   const res = await fetch(API + path, { headers });
   const text = await res.text();
   if (!res.ok) {
-    throw new VdlError('download_failed', `B站接口 ${path.split('?')[0]} HTTP ${res.status}`);
+    // 接口层的 HTTP 错误不是「下载失败」——那时还没开始下载
+    throw new VdlError(`http_${res.status}`, `B站接口 ${name} HTTP ${res.status}`);
   }
-  const data = JSON.parse(text);
+  let data: any;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    // 风控/WAF 会返回 HTML：如实说「不是 JSON」，不要伪装成业务错误
+    throw new VdlError('api_error', `B站接口 ${name} 返回的不是 JSON（可能被风控）`);
+  }
   if (data?.code !== 0) {
-    throw new VdlError('download_failed',
-      `B站接口 ${path.split('?')[0]} code=${data?.code} ${data?.message || ''}`);
+    const message = String(data?.message || '').trim();
+    const label = `B站接口 ${name} 返回 code=${data?.code}${message ? ` ${message}` : ''}`;
+    // 只有 -404 语义明确（稿件/剧集不存在）。其余码（大会员、地区、风控…）不翻译成结论，
+    // 把平台自己的话交给用户判断；原来一律记成 download_failed 会让人以为下载坏了。
+    if (Number(data?.code) === -404) throw new VdlError('not_found', label);
+    throw new VdlError('api_error', label, '按平台提示确认稿件/账号/地区状态；这不是下载失败');
   }
   return data.result ?? data.data;
+}
+
+/**
+ * DASH 流的完整性预检：两条轨缺一条，合并出来就是无声视频/无画面的音频。
+ * 这里只**说明**，不阻断——确实存在无音轨的稿件（录屏、静音视频）。
+ */
+function dashWarnings(dash: any): string[] {
+  const warnings: string[] = [];
+  const audio = Array.isArray(dash?.audio) ? dash.audio : [];
+  if (!audio.length) warnings.push('这个视频没有音频轨，下载结果会是无声视频');
+  if (!cookieHeader()) warnings.push('未登录：清晰度以匿名放行为准（4K/1080P 通常需要登录）');
+  return warnings;
 }
 
 function bucketOf(width: number): [number, string] {
@@ -185,6 +209,7 @@ async function probeVideo(target: Target): Promise<ProbeResult> {
   const durationMs = Number(play.timelength || 0) || Number(view.duration || 0) * 1000;
   const formats = foldDash(play.dash, durationMs);
   if (!formats.length) throw new VdlError('no_stream', '没有视频轨');
+  const warnings = dashWarnings(play.dash);
   subtitleState().value = { bvid, cid: Number(current.cid) };
 
   const parts: Part[] = pages.length > 1 ? pages.map((p) => ({
@@ -206,7 +231,7 @@ async function probeVideo(target: Target): Promise<ProbeResult> {
       source_url: `https://www.bilibili.com/video/${bvid}${pages.length > 1 ? `?p=${page}` : ''}`,
       platform: 'bilibili', parts,
     },
-    formats, warnings: [], error: null,
+    formats, warnings, error: null,
   };
 }
 
@@ -234,6 +259,7 @@ async function probeBangumi(target: Target): Promise<ProbeResult> {
   const durationMs = Number(ep.duration || 0) || Number(play.timelength || 0);
   const formats = foldDash(dash, durationMs);
   if (!formats.length) throw new VdlError('no_stream', '没有视频轨');
+  const warnings = dashWarnings(dash);
   subtitleState().value = { epId: String(ep.id) };
 
   const parts: Part[] = episodes.map((e, i) => ({
@@ -255,7 +281,7 @@ async function probeBangumi(target: Target): Promise<ProbeResult> {
     parts,
   };
   return { schema: 2, ok: true, platform: 'bilibili', engine: 'bilibili-pgc', media,
-           formats, warnings: [], error: null };
+           formats, warnings, error: null };
 }
 
 async function streamTo(url: string, part: string,
@@ -517,7 +543,22 @@ async function getBilibiliApiImpl(
   };
   await streamTo(urls.video, vPart, sink);
   base = statSync(vPart).size;
-  if (urls.audio) await streamTo(urls.audio, aPart, sink);
+  // 探测到的总字节是同一个 CDN 给的真值：短了就是截断（或被中途降档）。
+  // 校验必须放在合并之前——合并成功只说明 ffmpeg 跑通了，不说明内容完整。
+  if (vPlanned > 0 && base < vPlanned * 0.95) {
+    throw new VdlError('incomplete_media',
+      `视频轨只拿到 ${base} 字节，探测到 ${vPlanned} 字节`,
+      '重试可续传；若持续偏小，可能是该清晰度被降级，换档再试');
+  }
+  if (urls.audio) {
+    await streamTo(urls.audio, aPart, sink);
+    const aGot = statSync(aPart).size;
+    if (aPlanned > 0 && aGot < aPlanned * 0.95) {
+      throw new VdlError('incomplete_media',
+        `音频轨只拿到 ${aGot} 字节，探测到 ${aPlanned} 字节`,
+        '重试可续传');
+    }
+  }
   if (process.env.VDL_DEBUG_SIZE) {
     console.log('[size] vPlanned', vPlanned, 'aPlanned', aPlanned, 'planned', planned,
       'expected', expected, 'vPart', statSync(vPart).size, 'aPart', statSync(aPart).size);

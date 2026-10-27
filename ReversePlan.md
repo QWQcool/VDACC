@@ -1,10 +1,11 @@
 # 会员资源、访问限制与 DRM 研究计划
 
-状态：指导稿（2026-10-27）。工作包 1–2 的离线部分已在 **QQ、网易云、酷我、酷狗** 四个引擎上执行
+状态：指导稿（2026-10-27）。工作包 1–2 的离线部分已在 **QQ、网易云、酷我、酷狗、B站** 五个引擎上执行
 （交付记录见 [`qq-capability-baseline.md`](docs/design/qq-capability-baseline.md) §8、
 [`netease-capability-baseline.md`](docs/design/netease-capability-baseline.md) §7、
-[`kuwo-kugou-capability-baseline.md`](docs/design/kuwo-kugou-capability-baseline.md) §5）；
-**没有任何新的在线能力被验证**，会员档位仍未实测；B站未覆盖。
+[`kuwo-kugou-capability-baseline.md`](docs/design/kuwo-kugou-capability-baseline.md) §5、
+[`bilibili-capability-baseline.md`](docs/design/bilibili-capability-baseline.md) §5）；
+**没有任何新的在线能力被验证**，会员档位仍未实测。
 定位：供讨论和拆任务的研究方案；正式路线图见 [Plan.md §2.6](Plan.md)。
 
 ## 0. 原始诉求与边界
