@@ -176,12 +176,43 @@ describe('网易云 probe：档位呈现', () => {
     stubHead({ '320000': 9_600_000 });
 
     const probe = await probeNetease(SID);
-    expect(probe.formats.map((f) => f.id)).toEqual(['lossless', 'exhigh']);
+    // 四档全部列出（无损/320K/128K/96K），接口没给的那两档也占位
+    expect(probe.formats.map((f) => f.id)).toEqual(['lossless', 'exhigh', 'standard', 'low']);
     const denied = probe.formats.find((f) => f.id === 'lossless');
     expect(denied?.available).toBe(false);
     expect(denied?.reason || '').toContain('404');
     // 至少要让用户看到「为什么不给无损」，不能 warnings 恒空
     expect(probe.warnings.length).toBeGreaterThan(0);
+  });
+
+  test('N1b 有账号但没会员：128K 仍然能用，不能被无损/320K 的 404 拖死', async () => {
+    writeCookie();
+    stubDetail();
+    stubUrls({
+      999000: { data: [{ id: Number(SID), code: 404, url: null, br: 999000, size: 0 }] },
+      320000: { data: [{ id: Number(SID), code: 404, url: null, br: 320000, size: 0 }] },
+      128000: urlBody([{ br: 128000, size: 3_840_000 }]),
+      96000: { data: [{ id: Number(SID), code: 404, url: null, br: 96000, size: 0 }] },
+    });
+    stubHead({ '128000': 3_840_000 });
+
+    const probe = await probeNetease(SID);
+    expect(probe.formats.filter((f) => f.available).map((f) => f.id)).toEqual(['standard']);
+    expect(probe.formats.find((f) => f.recommended)?.id).toBe('standard');
+  });
+
+  test('N1c 不同 br 拿到同一个文件时不重复列档位（同字节只留一条）', async () => {
+    stubDetail();
+    stubUrls({
+      128000: urlBody([{ br: 128000, size: 3_840_000, url: `${CDN}same.mp3` }]),
+      96000: urlBody([{ br: 96000, size: 3_840_000, url: `${CDN}same.mp3` }]),
+    });
+    stubHead({ same: 3_840_000 });
+
+    const probe = await probeNetease(SID);
+    const available = probe.formats.filter((f) => f.available);
+    expect(available.length).toBe(1);
+    expect(available[0].id).toBe('standard');
   });
 
   test('N2 已登录且全档被拒：filtered，且消息里带 code', async () => {

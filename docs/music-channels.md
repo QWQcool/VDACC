@@ -84,7 +84,9 @@
   `filtered`（不再让用户去登录）；显式档位不可用报 `no_stream`；下载字节 < 探测总字节 95% 报
   `incomplete_media`；酷狗把「获取失败 / 搜索没命中 / 接口标记付费」分开说，不再称公开档为
   「试听档」。见 `docs/design/kuwo-kugou-capability-baseline.md`。
-- **网易云状态口径（2026-10-27，仅离线验证）**：probe 返回无损/320K 两个档位，未放行的
+- **网易云档位（2026-10-27，含真实环境实测）**：probe 现在探**四档**（无损/320K/128K/96K）；
+  免费曲对无会员权益的账号至少能下 128K（实测《雨爱(钢琴版)》128K 3.93MB），会员专享曲仍全部 `code=404`。
+  128K 与 96K 常返回字节相同的文件，已按字节判重并说明。未放行的
   `available:false` 且 `reason` 带平台 `code`；详情查不到歌改报 `not_found`；显式档位不可用报
   `no_stream` 不换档；下载字节 < 接口声明 60% 报 `incomplete_media`。
   见 `docs/design/netease-capability-baseline.md`。

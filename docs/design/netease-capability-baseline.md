@@ -16,8 +16,8 @@
    ├─ getJson(`/api/song/detail/?id=…`)  :130
    │     ├─ 非 2xx → VdlError('network')   ← 网易云已经有独立的网络错误码
    │     └─ songs 为空 → VdlError('filtered', '查不到这首歌')   ← 码用错了，是 not_found
-   ├─ 逐档位取地址（只有 2 档）           :136
-   │     LEVELS = [999000 lossless, 320000 exhigh]
+   ├─ 逐档位取地址（4 档，2026-10-27 补低档）
+  │     LEVELS = [999000 lossless, 320000 exhigh, 128000 standard, 96000 low]
    │     ├─ `code≠200` 或 `url` 为空 → **直接 continue 丢弃**
    │     └─ 放行 → headSize(url) 覆盖 item.size 后进 formats
    ├─ formats 为空 → filtered（有 cookie）/ need_login（无 cookie）  :151
@@ -106,3 +106,39 @@ bun test ts/tests                        → 120 pass / 0 fail（QQ 批后 111 +
 
 **下一批条件**：酷我/酷狗 目前只记录「会员档被拒时如实报试听档」，没有独立测试；
 若要继续，先按同一模板补它们的合成响应用例，再谈改代码。
+
+## 8. 增补：补上 128K / 96K 低档（2026-10-27，真实环境驱动）
+
+### 为什么补
+
+真实 probe 发现：只探「无损 / 320K」时，**没有会员权益的账号会一首歌都下不了**，
+连平台本来对免费曲开放的 128K/96K 也拿不到。这不是「绕过会员」，而是把平台**已经允许**的范围用上。
+
+### 改了什么
+
+| 项 | 变更 |
+|---|---|
+| `LEVELS` | 增加 `128000 standard 标准 128K`、`96000 low 较低 96K`（共 4 档，顺序由高到低） |
+| 判重 | 实测 128K 与 96K 会返回**不同 URL 但字节完全相同**的文件；现在按「字节相同」判重并加一条 warning 说明，避免界面出现两个一样大的档位 |
+| 别名 | 被判重掉的档位 id 仍登记在地址表里，`--format low` 依然可用（按别名命中） |
+
+### 真实环境结果（2026-10-27）
+
+免费曲《雨爱(钢琴版)》(id 2007983648) 的真实 probe / 下载：
+
+```
+lossless  无损 FLAC  14.62 MB  推荐
+exhigh    极高 320K   9.82 MB
+standard  标准 128K   3.93 MB
+注意：较低 96K 接口返回的文件与已有档位字节相同，已合并为一条
+```
+
+下载 `--format standard` → 4,179,995 字节（含封面/标签），ffprobe：mp3 / 129,918 bps / 257.4s / 带 mjpeg 封面。
+对比：会员专享曲（如《晴天》id 186016）四档仍然全部 `code=404` —— **补档位不会让 VIP 曲变得可下**。
+
+### 测试
+
+```
+bun test ts/tests/netease-probe.test.ts → 13 pass / 0 fail（新增 N1b 低档可用、N1c 同字节判重）
+bun test ts/tests                        → 147 pass / 0 fail
+```

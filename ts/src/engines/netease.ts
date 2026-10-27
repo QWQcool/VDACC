@@ -15,13 +15,21 @@ import { throttle } from '../core/rate';
 import { format, type Format, type ProbeResult } from '../core/types';
 
 const API = 'https://music.163.com';
+/**
+ * 四档都探。只探无损/320K 的时候，**没有会员的账号一首歌都下不了**——
+ * 免费曲本来允许 128K/96K，那是平台放行的范围，不是绕过会员。
+ */
 const LEVELS: Array<[number, string, string]> = [
   [999000, 'lossless', '无损 FLAC'],
   [320000, 'exhigh', '极高 320K'],
+  [128000, 'standard', '标准 128K'],
+  [96000, 'low', '较低 96K'],
 ];
 
 /** `declared` 是接口声明的**整曲**字节数：下载完拿实际字节跟它比，才能发现试听/降质。 */
-const formatUrls = operationState(() => new Map<string, { url: string; declared: number }>());
+const formatUrls = operationState(
+  () => new Map<string, { url: string; declared: number; ext: string; label: string }>(),
+);
 const songState = operationState(() => ({ lastSong: null as any }));
 
 function cookieHeader(): string {
@@ -167,18 +175,27 @@ async function probeNeteaseImpl(url: string): Promise<ProbeResult> {
     const declared = Number(item.size || 0);
     const real = await headSize(url);
     const ext = String(item.type || 'mp3').toLowerCase();
-    formats.push(format({
-      id: level, label, ext, acodec: ext,
-      // HEAD 拿到的是「实际能下多少」，但也可能是试听片段的大小；
-      // 真正的完整性判定在 get（下载完成后的实际字节 vs declared）
-      bytes: real || declared || null,
-      bitrate: Number(item.br || 0) || null,
-    }));
-    formatUrls().set(level, { url, declared });
+    const size = real || declared || 0;
+    // 地址与档位信息都登记：即使下面因为「同一个文件」不单列，--format 用这个 id 仍能命中
+    formatUrls().set(level, { url, declared, ext, label });
 
-    if (real > 0 && declared > 0 && real < declared * 0.6) {
-      const mb = (n: number) => `${(n / 1048576).toFixed(2)} MB`;
-      warnings.push(`${label} 实际可下载 ${mb(real)}，明显小于接口声明 ${mb(declared)}（可能是试听片段）`);
+    // 不同 br 常常指向同一个文件：实测 128K 与 96K 会返回**不同 URL 但字节完全相同**的文件。
+    // 按「字节相同」判重而不是只比 URL，否则界面会出现「128K 3.93MB / 96K 3.93MB」这种自相矛盾的列表。
+    const sameFile = size > 0 && formats.some((f) => f.available && f.bytes === size);
+    if (sameFile) {
+      warnings.push(`${label} 接口返回的文件与已有档位字节相同，已合并为一条`);
+    } else {
+      formats.push(format({
+        id: level, label, ext, acodec: ext,
+        // HEAD 拿到的是「实际能下多少」，但也可能是试听片段的大小；
+        // 真正的完整性判定在 get（下载完成后的实际字节 vs declared）
+        bytes: size || null,
+        bitrate: Number(item.br || 0) || null,
+      }));
+      if (real > 0 && declared > 0 && real < declared * 0.6) {
+        const mb = (n: number) => `${(n / 1048576).toFixed(2)} MB`;
+        warnings.push(`${label} 实际可下载 ${mb(real)}，明显小于接口声明 ${mb(declared)}（可能是试听片段）`);
+      }
     }
   }
 
@@ -258,6 +275,16 @@ async function getNeteaseImpl(input: string, formatId: string | null, outDir: st
   let fmt: Format | undefined;
   if (wanted) {
     fmt = probe.formats.find((f) => f.id === wanted);
+    if (!fmt) {
+      // 与已列档位是同一个文件时不会单列，但地址仍登记着：按别名继续
+      const alias = formatUrls().get(wanted);
+      if (alias) {
+        fmt = format({
+          id: wanted, label: alias.label, ext: alias.ext,
+          bytes: alias.declared || null,
+        });
+      }
+    }
     if (!fmt || !fmt.available) {
       const usable = probe.formats.filter((f) => f.available).map((f) => f.id).join('、') || '无';
       throw new VdlError('no_stream', `档位不可用：${wanted}（${fmt?.reason || '该曲没有这个档位'}）`,
