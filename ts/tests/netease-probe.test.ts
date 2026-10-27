@@ -1,0 +1,255 @@
+/**
+ * 网易云 probe/get 的**离线**行为测试（ReversePlan 工作包 2，第二批）。
+ *
+ * 与 `qq-probe.test.ts` 同一套方法：替换 `globalThis.fetch` 喂合成响应、
+ * 用临时 `%LOCALAPPDATA%` 控制登录态、`VDL_FFMPEG` 指向不存在的路径避免真跑进程。
+ * 断言口径见 docs/design/netease-capability-baseline.md §4。
+ */
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { getNetease, probeNetease } from '../src/engines/netease';
+
+const SID = '1901371647';
+const CDN = 'https://m701.music.126.net/';
+
+type Route = {
+  name: string;
+  match: (url: string, init: RequestInit | undefined) => boolean;
+  handle: (url: string, init: RequestInit | undefined) => Response | Promise<Response>;
+};
+
+const realFetch = globalThis.fetch;
+const realLocalAppData = process.env.LOCALAPPDATA;
+const realFfmpeg = process.env.VDL_FFMPEG;
+
+let routes: Route[] = [];
+let tmpRoot = '';
+let outDir = '';
+
+beforeEach(() => {
+  tmpRoot = mkdtempSync(join(tmpdir(), 'vdacc-ne-'));
+  outDir = join(tmpRoot, 'out');
+  process.env.LOCALAPPDATA = tmpRoot;
+  process.env.VDL_FFMPEG = join(tmpRoot, 'no-such-ffmpeg');
+  routes = [];
+  globalThis.fetch = (async (input: any, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : String(input?.url || '');
+    for (const route of routes) {
+      if (route.match(url, init)) return route.handle(url, init);
+    }
+    throw new TypeError(`fetch failed: 未打桩的请求 ${url}`);
+  }) as typeof fetch;
+});
+
+afterEach(() => {
+  globalThis.fetch = realFetch;
+  if (realLocalAppData === undefined) delete process.env.LOCALAPPDATA;
+  else process.env.LOCALAPPDATA = realLocalAppData;
+  if (realFfmpeg === undefined) delete process.env.VDL_FFMPEG;
+  else process.env.VDL_FFMPEG = realFfmpeg;
+  rmSync(tmpRoot, { recursive: true, force: true });
+});
+
+/* ─────────────────────────── 合成响应 ─────────────────────────── */
+
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
+function detailBody(patch: Record<string, unknown> = {}) {
+  return {
+    songs: [{
+      id: Number(SID),
+      name: '测试曲',
+      duration: 240_000,
+      // 封面留空：避免测试里启动封面下载 + ffmpeg 缩放
+      album: { picUrl: '' },
+      artists: [{ name: '歌手A' }, { name: '歌手B' }],
+      ...patch,
+    }],
+  };
+}
+
+function urlBody(entries: Array<{ br: number; code?: number; url?: string | null; size?: number; type?: string }>) {
+  return {
+    data: entries.map((e) => ({
+      id: Number(SID),
+      br: e.br,
+      code: e.code ?? 200,
+      url: e.url === null ? null : (e.url ?? `${CDN}${e.br}.mp3`),
+      size: e.size ?? 0,
+      type: e.type ?? 'mp3',
+    })),
+  };
+}
+
+function stubDetail(body: unknown = detailBody()) {
+  routes.push({
+    name: 'detail',
+    match: (url) => url.includes('/api/song/detail/'),
+    handle: () => json(body),
+  });
+}
+
+/** 两个档位各打一枪；没登记的 br 返回「没有这首歌的地址」。 */
+function stubUrls(map: Record<number, unknown>) {
+  routes.push({
+    name: 'player-url',
+    match: (url) => url.includes('/api/song/enhance/player/url'),
+    handle: (url) => {
+      const br = Number(/br=(\d+)/.exec(url)?.[1] || 0);
+      const body = map[br];
+      return body ? json(body) : json({ data: [{ id: Number(SID), code: 404, url: null, br, size: 0 }] });
+    },
+  });
+}
+
+function stubHead(sizes: Record<string, number> = {}) {
+  routes.push({
+    name: 'head',
+    match: (url, init) => url.startsWith(CDN) && String(init?.method || 'GET').toUpperCase() === 'HEAD',
+    handle: (url) => {
+      const key = Object.keys(sizes).find((k) => url.includes(k));
+      return new Response(null, { status: 200, headers: { 'content-length': String(key ? sizes[key] : 0) } });
+    },
+  });
+}
+
+function stubDownload(bytes: number) {
+  routes.push({
+    name: 'download',
+    match: (url, init) => url.startsWith(CDN) && String(init?.method || 'GET').toUpperCase() === 'GET',
+    handle: () => new Response(new Uint8Array(bytes), {
+      status: 200,
+      headers: { 'content-length': String(bytes) },
+    }),
+  });
+}
+
+function writeCookie() {
+  const dir = join(tmpRoot, 'vdl', 'auth');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'netease.json'), JSON.stringify({
+    cookies: [{ name: 'MUSIC_U', value: 'FAKE', domain: '.music.163.com' }],
+  }), 'utf8');
+}
+
+async function codeOf(run: () => Promise<unknown>): Promise<string> {
+  try {
+    await run();
+    return 'ok';
+  } catch (error: any) {
+    return String(error?.code || error?.name || 'unknown');
+  }
+}
+
+/* ─────────────────────────── 用例 ─────────────────────────── */
+
+describe('网易云 probe：档位呈现', () => {
+  test('N0 两个档位都放行时都进 formats，推荐无损', async () => {
+    stubDetail();
+    stubUrls({
+      999000: urlBody([{ br: 999000, size: 25_000_000, type: 'flac' }]),
+      320000: urlBody([{ br: 320000, size: 9_600_000, type: 'mp3' }]),
+    });
+    stubHead({ '999000': 25_000_000, '320000': 9_600_000 });
+
+    const probe = await probeNetease(SID);
+    expect(probe.formats.filter((f) => f.available).map((f) => f.id)).toEqual(['lossless', 'exhigh']);
+    expect(probe.formats.find((f) => f.recommended)?.id).toBe('lossless');
+    expect(probe.media?.title).toBe('测试曲');
+  });
+
+  test('N1 未放行档位也要出现：available=false 且 reason 带真实 code', async () => {
+    stubDetail();
+    stubUrls({
+      999000: { data: [{ id: Number(SID), code: 404, url: null, br: 999000, size: 0 }] },
+      320000: urlBody([{ br: 320000, size: 9_600_000 }]),
+    });
+    stubHead({ '320000': 9_600_000 });
+
+    const probe = await probeNetease(SID);
+    expect(probe.formats.map((f) => f.id)).toEqual(['lossless', 'exhigh']);
+    const denied = probe.formats.find((f) => f.id === 'lossless');
+    expect(denied?.available).toBe(false);
+    expect(denied?.reason || '').toContain('404');
+    // 至少要让用户看到「为什么不给无损」，不能 warnings 恒空
+    expect(probe.warnings.length).toBeGreaterThan(0);
+  });
+
+  test('N2 已登录且全档被拒：filtered，且消息里带 code', async () => {
+    writeCookie();
+    stubDetail();
+    stubUrls({
+      999000: { data: [{ id: Number(SID), code: 404, url: null, br: 999000, size: 0 }] },
+      320000: { data: [{ id: Number(SID), code: 404, url: null, br: 320000, size: 0 }] },
+    });
+
+    let caught: any = null;
+    try {
+      await probeNetease(SID);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught?.code).toBe('filtered');
+    expect(String(caught?.message || '')).toContain('404');
+  });
+
+  test('N3 未登录且全档被拒：need_login', async () => {
+    stubDetail();
+    stubUrls({});
+    expect(await codeOf(() => probeNetease(SID))).toBe('need_login');
+  });
+
+  test('N4 详情里查不到这首歌：not_found，不是 filtered', async () => {
+    stubDetail({ songs: [] });
+    expect(await codeOf(() => probeNetease(SID))).toBe('not_found');
+  });
+
+  test('N7 接口 5xx：network（已有的正确行为，防回归）', async () => {
+    routes.push({
+      name: 'detail-500',
+      match: (url) => url.includes('/api/song/detail/'),
+      handle: () => new Response('boom', { status: 500 }),
+    });
+    expect(await codeOf(() => probeNetease(SID))).toBe('network');
+  });
+});
+
+describe('网易云 get：不静默降级、不把片段当完整', () => {
+  test('N5 显式指定不可用档位：报 no_stream，不换成 320K', async () => {
+    stubDetail();
+    stubUrls({ 320000: urlBody([{ br: 320000, size: 9_600_000 }]) });
+    stubHead({ '320000': 9_600_000 });
+    stubDownload(200_000);
+
+    expect(await codeOf(() => getNetease(SID, 'lossless', outDir))).toBe('no_stream');
+  });
+
+  test('N6 实际字节远小于接口声明：不报「完成」', async () => {
+    // 声明 9.6MB，只给 480KB —— 典型试听/降质
+    stubDetail();
+    stubUrls({ 320000: urlBody([{ br: 320000, size: 9_600_000 }]) });
+    stubHead({ '320000': 480_000 });
+    stubDownload(480_000);
+
+    expect(await codeOf(() => getNetease(SID, 'exhigh', outDir))).toBe('incomplete_media');
+  });
+
+  test('N6b 字节数与声明相符时正常完成（防误杀）', async () => {
+    stubDetail();
+    stubUrls({ 320000: urlBody([{ br: 320000, size: 3_840_000 }]) });
+    stubHead({ '320000': 3_840_000 });
+    stubDownload(3_840_000);
+
+    const out: any = await getNetease(SID, 'exhigh', outDir);
+    expect(out.bytes).toBe(3_840_000);
+    expect(out.warnings.join(' ')).toContain('标签');
+  });
+});

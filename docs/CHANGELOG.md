@@ -5,6 +5,13 @@
 
 ## 未发布
 
+- **网易云：档位与完整性如实报告**（ReversePlan 工作包 2，**仅离线验证**）：
+  `probe` 两个档位（无损/320K）全部返回，未放行的 `available:false` + `reason` 带平台 `code`
+  （如 `code=404`），`warnings` 不再恒为空；详情查不到歌改报 `not_found`（原来是 `filtered`）；
+  全档被拒的消息带上 code；显式指定档位不可用时报 `no_stream`，不再静默降到另一档；
+  下载字节 < 接口声明整曲大小的 60% 时报 `incomplete_media`（无损档的试听片段也能上百 KB，
+  原来只有 <100KB 才拦）。新增 9 条合成响应测试（`ts/tests/netease-probe.test.ts`），
+  测试 111 → **120 pass**。线上档位行为未重新验证。
 - **QQ 音乐：受限与未知不再伪装成可用**（ReversePlan 工作包 1–2，**仅离线验证**）：
   `probe` 现在返回全部四个档位，未放行的档位 `available:false` + `reason` 带真实 `result` 代码
   （如 `104003`），不再用「歌曲付费或账号无对应会员」这种没有证据的推断；有凭据且全档被拒报

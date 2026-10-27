@@ -236,6 +236,9 @@ parity 稳定后再决定 Python 是否退化为 yt-dlp helper。
 [`docs/design/qq-capability-baseline.md`](docs/design/qq-capability-baseline.md)；
 四档全部进 probe（不可用档带真实 `result` 代码）、全档被拒区分 `filtered`/`need_login`、
 显式档位不再静默降级、试听片段不再报完成；测试 101 → 111。线上档位未复测，会员账号未验证。
+**网易云第二批同日完成（同样仅离线验证）**：见
+[`docs/design/netease-capability-baseline.md`](docs/design/netease-capability-baseline.md)；
+两档全量呈现、详情缺失改 `not_found`、显式档位不降级、`incomplete_media`；测试 111 → 120。
 
 **持续边界**：schema=2 兼容；业务仍在 TS 引擎，对外字段集中定义；legacy 冻结。
 私密、直播、收藏夹抓取、站点广度竞赛不做。
