@@ -12,6 +12,7 @@
 | 每个版本改了什么 | `docs/CHANGELOG.md` |
 | 不能违反的红线、已验证事实 | `AGENTS.md` |
 | 怎么用（安装、命令、界面） | `README.md` |
+| 怎么发版（检查清单、体积基线） | `docs/RELEASE.md`（基线数字在 `docs/release-baseline.json`） |
 | 给其它 Agent 的契约 | `ts/skill/SKILL.md`（legacy：`legacy/python/skill/SKILL.md`） |
 | UI 参考、视觉基线、概念图 | `docs/design/` |
 | 第三方来源与授权 | `NOTICE` / `THIRD_PARTY.md` |
@@ -222,7 +223,11 @@ parity 稳定后再决定 Python 是否退化为 yt-dlp helper。
   （Bun/ffmpeg/组件/配置/输出目录/三站凭据，fail 才退出码 1）；yt-dlp 安装改为先取官方
   `SHA2-256SUMS` 再校验、把 SHA256 记进配置，`/api/components` 依据记录报 `verified`。
   实测重装 17,880,111 字节、SHA256 `33121d19…`、doctor 显示「已校验」。
-  **仍未做**：干净机器验收、包清单/体积基线（exe 约 110MB）、CI/标签/Release 收口。
+  **2026-10-27 收口**：新增 `tools/release_baseline.cjs`（体积基线 `docs/release-baseline.json`，
+  exe **91.95 MB** / zip **42.58 MB** / 3 个文件，两次构建漂移 0.0%）与 `docs/RELEASE.md`
+  （版本号四处同步、必跑项、CI 手动触发、标签与 Release、回滚）。
+  **仍未做**：干净机器验收（需要一台没有 Bun/Python/ffmpeg 的 Windows，这是 N05 唯一缺的硬证据）；
+  自动 CI 仍因配额暂停。
 - **N06 · Android 真机**：✅ 2026-10-26 在 realme RMX5200 / Android 16 完成壳子验收（安装、连接、解析、下载、预览、取消/重试、错误 token、电脑离线、前后台）；局域网路径未打通（未加防火墙规则）。
 - **N07 · Android 独立端（C 路线）**：🟡 **设计稿完成（2026-10-27）**，见 `docs/design/android-standalone-plan.md`。
   方案：WebView 复用 Vue 界面 + TS 引擎打成 bundle + Kotlin 桥（fs / transfer / crypto）+ 前台下载服务 + Media3 合并；

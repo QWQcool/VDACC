@@ -1,0 +1,12 @@
+{
+  "note": "体积基线；完整性由 dist/video-acquire-ts/manifest.json + SHA256SUMS 负责",
+  "version": "3.4.2",
+  "fileCount": 3,
+  "totalBytes": 96420363,
+  "zipBytes": 44649402,
+  "files": {
+    "references/engines.md": 1221,
+    "SKILL.md": 3398,
+    "vdl.exe": 96415744
+  }
+}

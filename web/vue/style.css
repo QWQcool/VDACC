@@ -496,5 +496,8 @@
   .title-row h3 { font-size: 17px; line-height: 24px; }
 }
 @media (prefers-reduced-motion: reduce) {
+  /* 系统开了「减少动态效果」：所有过渡/动画直接关掉（界面只有位移与淡入，丢掉不损失信息） */
   * { animation: none !important; transition: none !important; }
+  /* 兜底：以后若有人给容器加 scroll-behavior: smooth，这里统一压掉 */
+  html, body { scroll-behavior: auto !important; }
 }

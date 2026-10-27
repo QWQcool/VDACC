@@ -5,6 +5,15 @@
 
 ## 未发布
 
+- **发布收口（N05）与减少动态效果检查**：新增 `tools/release_baseline.cjs` + `docs/release-baseline.json`
+  记录 Skill 包体积基线（exe **91.95 MB** / zip **42.58 MB** / 3 个文件；两次构建漂移 0.0%），
+  漂移 ≥25% 直接失败，避免「这次发的包为什么大了一倍」靠记忆；**只记体积不记哈希**，
+  完整性仍由 `manifest.json` + `SHA256SUMS` 负责。新增 `docs/RELEASE.md` 检查清单
+  （版本号四处同步、必跑项、CI 手动触发、标签/Release、回滚），并如实标注**干净机器验收仍未做**。
+  界面侧新增 `tools/reduced_motion_check.cjs`：用真实 Edge 把 `prefers-reduced-motion: reduce`
+  下的**计算后样式**读出来（不是查 CSS 里有没有 @media 这种恒真断言），并用 `no-preference`
+  做对照防止误报；四个探针（`.btn`/`.input`/`.bar i`/`.slideover`）在 reduce 下全部 0s/无动画，
+  对照组有 0.15s/0.22s 过渡与 `slide-in` 动画。顺手补了 `scroll-behavior: auto !important` 兜底。
 - **酷我：接口没给元数据时，标题从音频文件自带的 ID3 里取**：酷我 `songinfoandlrc` 会偶发
   `status=301 音乐查询失败`（连续请求更容易触发），此时文件名会变成
   `474678847_kuwo-474678847_128kbps.mp3`。但 CDN 给的 mp3 自己带 ID3（实测

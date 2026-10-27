@@ -8,6 +8,8 @@
     "probe": "bun ts/src/cli.ts probe",
     "get": "bun ts/src/cli.ts get",
     "test": "bun test ts/tests",
-    "parity": "python ts/scripts/parity.py"
+    "parity": "python ts/scripts/parity.py",
+    "baseline": "node tools/release_baseline.cjs",
+    "motion": "node tools/reduced_motion_check.cjs"
   }
 }
