@@ -223,6 +223,7 @@
                 <div class="quality-tray">
                   <button v-for="f in result.formats" :key="f.id"
                           :data-format-id="f.id" :aria-pressed="selected.includes(f.id)" :disabled="!f.available"
+                          :title="f.reason || ''"
                           :class="['q', { on: selected.includes(f.id) }]"
                           @click="toggleFormat(f.id)">
                     <b>{{ f.label }}</b>

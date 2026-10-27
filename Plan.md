@@ -232,6 +232,10 @@ parity 稳定后再决定 Python 是否退化为 yt-dlp helper。
 执行依赖：F01–F07 → N01/N02 → N03/N04；N05 可在稳定源码上独立推进；N06 依赖设备和稳定连接恢复。
 
 **付费限制与 DRM 研究（2026-10-27 决策更新）**：取消此前对付费绕过和 DRM 的项目禁令，允许将付费限制、会员凭证及 DRM 相关机制纳入研究。该方向目前仅为研究意向，尚无经验证的实现或支持承诺；工作步骤、证据与未验证项见 [ReversePlan.md](ReversePlan.md)。DRM、普通加密、付费限制和版权权限分别判断，不可混为一谈。
+**QQ 第一批（工作包 1–2）已完成，仅离线验证**：数据流与已知/未知清单见
+[`docs/design/qq-capability-baseline.md`](docs/design/qq-capability-baseline.md)；
+四档全部进 probe（不可用档带真实 `result` 代码）、全档被拒区分 `filtered`/`need_login`、
+显式档位不再静默降级、试听片段不再报完成；测试 101 → 111。线上档位未复测，会员账号未验证。
 
 **持续边界**：schema=2 兼容；业务仍在 TS 引擎，对外字段集中定义；legacy 冻结。
 私密、直播、收藏夹抓取、站点广度竞赛不做。

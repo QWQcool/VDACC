@@ -72,6 +72,10 @@
 - **专辑批量已接**：`--album` 支持网易云 `/api/album/{id}` 与 QQ `fcg_v8_album_info_cp`，
   上限 20（`core/album.ts` 的 `planAlbum`），`--dry-run` 先看曲目；逐首下载，单首失败继续并在结尾汇总。
 - **歌词已落盘**：`fcg_query_lyric_new.fcg`（`nobase64=1`）→ 同名 `.lrc`，失败不影响音频。
+- **状态口径（2026-10-27，仅离线验证）**：probe 现在返回全部四个档位，不可用档 `available:false`
+  且 `reason` 带真实 `result` 代码（或「接口没有返回」），不再推断成会员/付费；
+  显式指定的档位不可用时报 `no_stream` 而不是静默换档；下载字节明显小于接口声明的整曲大小
+  （<60%）时报 `incomplete_media`，不把试听片段当完整下载。见 `docs/design/qq-capability-baseline.md`。
 - 未做（不假装支持）：会员档位实测（当前账号 320K/FLAC 仍 104003）、歌单。
 - **酷我 / 酷狗已接入**：公开接口 probe + 下载（`.part` 续传 + 限速）+ ffmpeg 标签/封面，
   酷我另落 `.lrc`；已注册 `platformOf` / server / cli。实测：酷我《花海》128kbps 3,368,054 字节，

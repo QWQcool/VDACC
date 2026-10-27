@@ -5,6 +5,14 @@
 
 ## 未发布
 
+- **QQ 音乐：受限与未知不再伪装成可用**（ReversePlan 工作包 1–2，**仅离线验证**）：
+  `probe` 现在返回全部四个档位，未放行的档位 `available:false` + `reason` 带真实 `result` 代码
+  （如 `104003`），不再用「歌曲付费或账号无对应会员」这种没有证据的推断；有凭据且全档被拒报
+  `filtered`、无凭据才报 `need_login`；凭据过期单独提示；显式指定档位不可用时改报 `no_stream`
+  （原来会静默换成别的档，用户以为拿到 320K）；下载字节 < 接口声明整曲大小的 60% 时报
+  `incomplete_media`，不再把试听片段报成「完成」。CLI 打印不可用档位原因，界面档位按钮
+  `:disabled` 有可见样式并带 `title`。新增 10 条合成响应测试（`ts/tests/qq-probe.test.ts`），
+  测试 101 → **111 pass**。线上档位行为未重新验证。
 - **任务管理**：`DELETE /api/jobs/:id`（只允许已结束任务）、`POST /api/jobs/clear-finished`、
   `POST /api/jobs/retry-failed`；界面在任务卡加「删除」「打开文件夹」（复用 `/api/reveal`），
   列表头加「重试失败 (N)」「清空已结束」。删除通过 SSE `job-removed` 推给所有界面，无需刷新。
