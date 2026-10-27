@@ -278,6 +278,12 @@
                 <h2>{{ t('jobs') }}</h2>
                 <span class="en">QUEUE</span>
                 <span class="spacer"></span>
+                <button class="btn ghost sm" v-if="failedJobs.length" @click="retryFailed">
+                  {{ t('retryFailed') }} ({{ failedJobs.length }})
+                </button>
+                <button class="btn ghost sm" v-if="finishedJobs.length" @click="clearFinished">
+                  {{ t('clearFinished') }}
+                </button>
                 <span class="section-label">{{ jobs.length }}</span>
               </div>
 
@@ -310,12 +316,15 @@
                 </div>
                 <div class="job-actions" v-else-if="j.status === 'failed' || j.status === 'cancelled'">
                   <button class="btn ghost sm" @click="retry(j.id)">{{ t('retry') }}</button>
+                  <button class="btn ghost sm" @click="removeJob(j)">{{ t('remove') }}</button>
                 </div>
                 <div class="job-actions" v-else-if="j.status === 'done'">
                   <button class="btn ghost sm" v-if="isBiliJob(j)" @click="refetchJobSidecars(j)">
                     {{ t('refetchSidecars') }}
                   </button>
+                  <button class="btn ghost sm" v-if="j.path" @click="revealJob(j)">{{ t('reveal') }}</button>
                   <button class="btn ghost sm" @click="previewJob(j)">▶ {{ t('preview') }}</button>
+                  <button class="btn ghost sm" @click="removeJob(j)">{{ t('remove') }}</button>
                 </div>
               </div>
               </template>
@@ -431,6 +440,20 @@
               <span class="help">{{ authBusy ? t('authChecking') : t('accountsHelp') }}</span>
               <span style="flex:1"></span>
               <button class="btn ghost sm" :disabled="authBusy" @click="loadAuth">{{ t('refresh') }}</button>
+            </div>
+          </div>
+
+          <div class="field">
+            <label>{{ t('diagnostics') }}</label>
+            <div class="comp-row" v-for="c in diagRows" :key="c.id" style="flex-wrap:wrap">
+              <span class="name">{{ c.label }}</span>
+              <span class="badge" :class="c.level === 'ok' ? 'ok' : c.level === 'warn' ? 'warn' : 'fail'">{{ c.detail }}</span>
+              <span class="help" v-if="c.action" style="flex-basis:100%">{{ c.action }}</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span class="help">{{ diagBusy ? t('diagRunning') : t('diagnosticsHelp') }}</span>
+              <span style="flex:1"></span>
+              <button class="btn ghost sm" :disabled="diagBusy" @click="runDiagnostics">{{ t('runDiagnostics') }}</button>
             </div>
           </div>
 

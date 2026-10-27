@@ -194,4 +194,23 @@ describe('队列持久化与事件重连', () => {
     expect(snapshot).toContain(`"id":"${id}"`);
     expect(snapshot).toContain('engine_unavailable');
   });
+
+  test('删除与清空历史：只删已结束，删除后列表与磁盘一致', async () => {
+    const del = await authed('/api/jobs/aabb', { method: 'DELETE' });
+    expect(del.status).toBe(200);
+    const afterDelete = (await (await authed('/api/jobs')).json() as any).jobs;
+    expect(afterDelete.some((j: any) => j.id === 'aabb')).toBe(false);
+
+    const again = await authed('/api/jobs/aabb', { method: 'DELETE' });
+    expect(again.status).toBe(404);
+
+    const cleared = await (await authed('/api/jobs/clear-finished', { method: 'POST' })).json() as any;
+    expect(cleared.ok).toBe(true);
+    expect(cleared.count).toBeGreaterThan(0);
+
+    const list = (await (await authed('/api/jobs')).json() as any).jobs;
+    expect(list.length).toBe(0);
+    const stored = JSON.parse(readFileSync(join(TMP, 'jobs.json'), 'utf8')).jobs;
+    expect(stored.length).toBe(0);
+  });
 });

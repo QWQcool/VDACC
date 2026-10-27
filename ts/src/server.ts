@@ -12,7 +12,7 @@ import { fetchMediaStream, jailedPath, originAllowed } from './core/security';
 import { writeJsonAtomic } from './core/storage';
 import { UA } from './core/http';
 import { platformOf } from './core/platform';
-import { pickSha256For } from './core/doctor';
+import { pickSha256For, runDoctor } from './core/doctor';
 import { isSameActiveJob } from './core/jobmatch';
 import { runOperation } from './core/operation';
 import { currentLimitBytesPerSec, setLimitBytesPerSec } from './core/rate';
@@ -111,6 +111,15 @@ loadStore();
 
 function emit(job: Job) {
   const payload = `data: ${JSON.stringify({ type: 'job', job })}\n\n`;
+  for (const client of clients) {
+    try { client.enqueue(encoder.encode(payload)); } catch { clients.delete(client); }
+  }
+}
+
+/** 删除/清空后让所有界面同步移除，否则刷新前会看到「幽灵任务」。 */
+function emitRemoved(ids: string[]) {
+  if (!ids.length) return;
+  const payload = `data: ${JSON.stringify({ type: 'job-removed', ids })}\n\n`;
   for (const client of clients) {
     try { client.enqueue(encoder.encode(payload)); } catch { clients.delete(client); }
   }
@@ -393,6 +402,15 @@ const server = Bun.serve({
       }
     }
 
+    // 只读诊断：ffmpeg / 组件 / 目录 / 凭据，不下载、不改配置
+    if (path === '/api/doctor' && req.method === 'GET') {
+      try {
+        return json(await runDoctor());
+      } catch (err) {
+        return json(failBody('ts', err));
+      }
+    }
+
     // 账号状态：本地是否有凭据 + 在线是否仍有效（缓存 20s）
     if (path === '/api/auth' && req.method === 'GET') {
       const local = authStatus();
@@ -613,6 +631,53 @@ const server = Bun.serve({
     if (jobMatch && req.method === 'GET') {
       const job = jobs.get(jobMatch[1]);
       return job ? json({ ok: true, job }) : json({ ok: false, error: { code: 'not_found' } }, 404);
+    }
+
+    // 删除单条历史：只允许已结束的任务，避免把正在写的文件留在半截
+    const deleteMatch = /^\/api\/jobs\/([0-9a-f]+)$/.exec(path);
+    if (deleteMatch && req.method === 'DELETE') {
+      const job = jobs.get(deleteMatch[1]);
+      if (!job) return json({ ok: false, error: { code: 'not_found', message: '任务不存在' } }, 404);
+      if (job.status === 'queued' || job.status === 'running') {
+        return json({ ok: false, error: { code: 'not_finished', message: '先取消任务再删除' } }, 409);
+      }
+      jobs.delete(job.id);
+      const at = order.indexOf(job.id);
+      if (at >= 0) order.splice(at, 1);
+      scheduleSave();
+      emitRemoved([job.id]);
+      return json({ ok: true, removed: [job.id] });
+    }
+
+    // 清空已结束（done / failed / cancelled），活跃任务不受影响
+    if (path === '/api/jobs/clear-finished' && req.method === 'POST') {
+      const removed = order.filter((id) => {
+        const job = jobs.get(id);
+        return !!job && ['done', 'failed', 'cancelled'].includes(job.status);
+      });
+      for (const id of removed) {
+        jobs.delete(id);
+        const at = order.indexOf(id);
+        if (at >= 0) order.splice(at, 1);
+      }
+      scheduleSave();
+      emitRemoved(removed);
+      return json({ ok: true, removed, count: removed.length });
+    }
+
+    // 批量重试失败任务：沿用原档位与附属开关，交给 submitJobs 去重
+    if (path === '/api/jobs/retry-failed' && req.method === 'POST') {
+      const failed = order
+        .map((id) => jobs.get(id))
+        .filter((job): job is Job => !!job && job.status === 'failed');
+      let created = 0;
+      for (const job of failed) {
+        const result = submitJobs(job.url, [job.formatId || ''], {
+          cover: job.cover, subs: job.subs, danmaku: job.danmaku,
+        });
+        created += result.created.length;
+      }
+      return json({ ok: true, failed: failed.length, created });
     }
 
     const actionMatch = /^\/api\/jobs\/([0-9a-f]+)\/(cancel|retry)$/.exec(path);

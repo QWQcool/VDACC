@@ -51,6 +51,8 @@ createApp({
     // 账号状态（/api/auth）：本地凭据 + 在线校验结果
     const authRows = ref([]);
     const authBusy = ref(false);
+    const diagRows = ref([]);
+    const diagBusy = ref(false);
     const checkedParts = ref([]);
     const isBatch = computed(() =>
       !!(result.value && result.value.media.parts.length > 1));
@@ -67,6 +69,7 @@ createApp({
       jobs.value.filter((j) => j.status === 'running' || j.status === 'queued'));
     const finishedJobs = computed(() =>
       jobs.value.filter((j) => j.status !== 'running' && j.status !== 'queued'));
+    const failedJobs = computed(() => jobs.value.filter((j) => j.status === 'failed'));
     const orderedJobs = computed(() => [...activeJobs.value, ...finishedJobs.value]);
 
     const { size, dur, platformClass, jobName } = window.VDACC_FORMAT;
@@ -278,6 +281,37 @@ createApp({
       window.VDACC_JOBS.upsert(jobs.value, job);
     }
 
+    async function removeJob(job) {
+      const data = await api(`/api/jobs/${job.id}`, { method: 'DELETE' });
+      if (data.ok) jobs.value = jobs.value.filter((j) => j.id !== job.id);
+      else message.value = (data.error && data.error.message) || 'failed';
+    }
+
+    async function clearFinished() {
+      const data = await api('/api/jobs/clear-finished', { method: 'POST' });
+      if (data.ok) {
+        const gone = new Set(data.removed || []);
+        jobs.value = jobs.value.filter((j) => !gone.has(j.id));
+        message.value = `${t('clearFinished')} ${data.count || 0}`;
+      } else message.value = (data.error && data.error.message) || 'failed';
+    }
+
+    async function retryFailed() {
+      const data = await api('/api/jobs/retry-failed', { method: 'POST' });
+      message.value = data.ok
+        ? `${t('retryFailed')} ${data.created || 0}/${data.failed || 0}`
+        : (data.error && data.error.message) || 'failed';
+    }
+
+    async function revealJob(job) {
+      if (!job.path) return;
+      const data = await api('/api/reveal', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: { path: job.path },
+      });
+      if (!data.ok) message.value = (data.error && data.error.message) || 'failed';
+    }
+
     async function cancel(id) {
       const data = await api(`/api/jobs/${id}/cancel`, { method: 'POST' });
       if (data.ok) upsert(data.job);
@@ -374,6 +408,14 @@ createApp({
       else message.value = (data.error && data.error.message) || 'failed';
     }
 
+    async function runDiagnostics() {
+      diagBusy.value = true;
+      const data = await api('/api/doctor');
+      diagBusy.value = false;
+      if (data.ok) diagRows.value = data.checks || [];
+      else message.value = (data.error && data.error.message) || 'failed';
+    }
+
     async function loginSite(site) {
       const data = await api(`/api/auth/${site}/login`, { method: 'POST' });
       message.value = data.message || (data.ok ? t('login') : 'failed');
@@ -451,6 +493,11 @@ createApp({
       events.onmessage = (ev) => {
         try {
           const data = JSON.parse(ev.data);
+          if (data.type === 'job-removed') {
+            const gone = new Set(data.ids || []);
+            jobs.value = jobs.value.filter((j) => !gone.has(j.id));
+            return;
+          }
           if (data.job) upsert(data.job);
         } catch { /* ignore */ }
       };
@@ -469,9 +516,11 @@ createApp({
       settingsOpen, sOutDir, sTheme, sLimitRateMB, sConcurrency, sGeneric,
       compStatus, compBusy, previewUrl,
       authRows, authBusy, loadAuth, loginSite, authBadge, authText,
+      diagRows, diagBusy, runDiagnostics,
       isBiliJob, refetchJobSidecars,
       checkedParts, isBatch, allChecked, someChecked, estimated, toggleAll, togglePart,
-      activeJobs, finishedJobs, orderedJobs,
+      activeJobs, finishedJobs, failedJobs, orderedJobs,
+      removeJob, clearFinished, retryFailed, revealJob,
       album, albumTracks, checkedTracks, allTracks, toggleTrack, toggleAllTracks,
       loadingMore, loadMoreTracks,
       toggleLang, toggleTheme, toggleFormat, persistSidecars, probe, probePart, download, cancel, retry,
