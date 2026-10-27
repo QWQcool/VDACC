@@ -1,8 +1,11 @@
 package com.vdacc.app;
 
+import android.Manifest;
 import android.app.Activity;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.os.Build;
 import android.os.Bundle;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -21,30 +24,48 @@ import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.Toast;
 
+import com.vdacc.app.bridge.Bridge;
+
 /**
- * 极薄的 WebView 壳：连电脑上跑着的 VDACC 服务（--lan 启动），界面与下载都在电脑端。
- * 不引第三方依赖，避免为一个壳子拉进整套 AndroidX。
+ * 两种模式共用一个壳：
  *
- * 地址栏只在「连不上」时露出：正常加载完自动收起，右下角留一个「地址」小按钮随时叫回来；
- * 电脑离线时显示自己的错误页（带重试），而不是 Chromium 那句 ERR_xxx。
+ * - **本地引擎（默认）**：加载 `file:///android_asset/ui/m0.html`，解析/下载都在本机跑
+ *   （M0 只有自检页；M1 之后是 Vue 界面 + local-api.js）。
+ * - **连电脑**：原来的用法，加载 `http://<电脑IP>:8765/?token=...`，界面与下载都在电脑端。
+ *
+ * 为什么保留局域网模式：它是已经验收过的可用路径（USB 反向代理实测通过），
+ * 端上能力没补齐之前不能把它弄丢；两种模式互不干扰，靠右下角按钮切换。
+ *
+ * 安全上的两条：
+ * 1. 只对 `file:///android_asset/` 打开 fileAccess；连电脑时关掉，远程页面不能读本地文件。
+ * 2. 桥的 trusted 状态由 onPageStarted 的 URL 前缀决定，非本地页面调用一律拒绝
+ *    （Android 的 @JavascriptInterface 没有来源白名单参数，只能自己做）。
  */
 public class MainActivity extends Activity {
+    private static final String LOCAL_URL = "file:///android_asset/ui/m0.html";
     private static final String DEFAULT_URL = "http://192.168.1.100:8765/";
     private static final String PREF = "vdacc";
+    private static final int REQ_STORAGE = 1001;
 
     private WebView web;
     private EditText address;
     private SharedPreferences prefs;
     private LinearLayout bar;
     private Button addressToggle;
+    private Button modeToggle;
+    private Bridge bridge;
+
+    private boolean localMode = true;
+    private boolean autoProbe = false;
+    private boolean barVisible = true;
     private boolean errorShown = false;
     private String failedUrl = "";
 
     /** 错误页里的「重试」按钮走这里，避免在错误页上再嵌一层地址栏。 */
-    private class Bridge {
+    private class ErrorPageBridge {
         @JavascriptInterface
         public void retry() {
-            runOnUiThread(MainActivity.this::load);
+            runOnUiThread(MainActivity.this::reloadCurrent);
         }
     }
 
@@ -71,7 +92,9 @@ public class MainActivity extends Activity {
 
         // 允许 `adb shell am start ... -e url http://...` 直接带地址（装机联调用，也方便脚本）
         String launch = getIntent() != null ? getIntent().getStringExtra("url") : null;
-        if (launch != null && !launch.trim().isEmpty()) address.setText(launch.trim());
+        if (launch != null && !launch.trim().isEmpty()) {
+            address.setText(launch.trim());
+        }
 
         Button connect = new Button(this);
         connect.setText("连接");
@@ -89,12 +112,18 @@ public class MainActivity extends Activity {
         settings.setDomStorageEnabled(true);      // 界面用 localStorage 存 token / 主题 / 开关
         settings.setDatabaseEnabled(true);
         settings.setMediaPlaybackRequiresUserGesture(false); // 预览视频不要求再点一次
-        web.addJavascriptInterface(new Bridge(), "vdacc");
+
+        bridge = new Bridge(this, web);
+        web.addJavascriptInterface(bridge, Bridge.NAME);
+        web.addJavascriptInterface(new ErrorPageBridge(), "vdacc");
+        // 调试期留一个入口：chrome://inspect 可以看到页面控制台（M0 排查用）
+        WebView.setWebContentsDebuggingEnabled(true);
+
         web.setWebViewClient(new WebViewClient() {
             @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
-                if (!errorShown) showBar(false);
+                if (!localMode && !errorShown) setBarVisible(false);
             }
 
             @Override
@@ -102,10 +131,14 @@ public class MainActivity extends Activity {
                 // 只有主文档失败才换错误页；封面之类的子资源失败不该顶掉整个界面
                 if (request == null || !request.isForMainFrame()) return;
                 errorShown = true;
-                failedUrl = request.getUrl() != null ? request.getUrl().toString() : address.getText().toString();
-                showBar(true);
                 String detail = error == null || error.getDescription() == null
                         ? "" : error.getDescription().toString();
+                if (localMode) {
+                    view.loadDataWithBaseURL(null, localErrorHtml(detail), "text/html", "utf-8", null);
+                    return;
+                }
+                failedUrl = request.getUrl() != null ? request.getUrl().toString() : address.getText().toString();
+                setBarVisible(true);
                 view.loadDataWithBaseURL(failedUrl, errorHtml(detail), "text/html", "utf-8", null);
             }
         });
@@ -119,20 +152,83 @@ public class MainActivity extends Activity {
         addressToggle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
         addressToggle.setAlpha(0.86f);
         addressToggle.setVisibility(View.GONE);
-        addressToggle.setOnClickListener(v -> showBar(true));
-        FrameLayout.LayoutParams floatLp = new FrameLayout.LayoutParams(dp(64), dp(40),
+        addressToggle.setOnClickListener(v -> setBarVisible(true));
+        FrameLayout.LayoutParams addrLp = new FrameLayout.LayoutParams(dp(64), dp(40),
                 Gravity.END | Gravity.BOTTOM);
-        floatLp.setMargins(0, 0, dp(10), dp(14));
-        root.addView(addressToggle, floatLp);
+        addrLp.setMargins(0, 0, dp(10), dp(14));
+        root.addView(addressToggle, addrLp);
+
+        modeToggle = new Button(this);
+        modeToggle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        modeToggle.setAlpha(0.86f);
+        modeToggle.setOnClickListener(v -> {
+            localMode = !localMode;
+            applyMode();
+        });
+        FrameLayout.LayoutParams modeLp = new FrameLayout.LayoutParams(dp(86), dp(40),
+                Gravity.END | Gravity.BOTTOM);
+        modeLp.setMargins(0, 0, dp(10), dp(62));
+        root.addView(modeToggle, modeLp);
 
         setContentView(root);
 
-        if (!address.getText().toString().trim().isEmpty()) load();
+        // Android 9 及以下写公共 Download 需要「存储」权限（10+ 走 MediaStore，不需要）
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
+                && checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQ_STORAGE);
+        }
+
+        // 带 url 启动参数 => 老用法（连电脑）；否则进本地引擎模式
+        localMode = launch == null || launch.trim().isEmpty();
+        // 验收脚本用：`am start ... -e probe 1` 让页面自动跑一次落盘探针，省掉「滚动 + 手点」
+        autoProbe = getIntent() != null && getIntent().getStringExtra("probe") != null;
+        applyMode();
     }
 
-    private void showBar(boolean show) {
+    /** 本地页面地址；带 `-e probe 1` 启动时让页面自动跑一次落盘探针（验收脚本用）。 */
+    private String localUrl() {
+        return autoProbe ? LOCAL_URL + "?probe=1" : LOCAL_URL;
+    }
+
+    /** 把当前模式刷到界面上：本地模式不显示地址栏（它在那儿没有意义）。 */
+    private void applyMode() {
+        if (localMode) {
+            modeToggle.setText("连电脑");
+            bar.setVisibility(View.GONE);
+            addressToggle.setVisibility(View.GONE);
+            // targetSdk >= 30 时 fileAccess 默认关闭，不显式打开会连 asset 页面都加载不了
+            web.getSettings().setAllowFileAccess(true);
+            errorShown = false;
+            web.loadUrl(localUrl());
+            return;
+        }
+
+        modeToggle.setText("本地引擎");
+        // 远程页面不许读本地文件：同一个 WebView 里切模式时必须显式收回
+        web.getSettings().setAllowFileAccess(false);
+        setBarVisible(true);
+        String url = address.getText().toString().trim();
+        if (url.startsWith("http://") || url.startsWith("https://")) load();
+    }
+
+    private void setBarVisible(boolean show) {
+        if (localMode) {
+            bar.setVisibility(View.GONE);
+            addressToggle.setVisibility(View.GONE);
+            return;
+        }
+        barVisible = show;
         bar.setVisibility(show ? View.VISIBLE : View.GONE);
         addressToggle.setVisibility(show ? View.GONE : View.VISIBLE);
+    }
+
+    private void reloadCurrent() {
+        if (localMode) {
+            errorShown = false;
+            web.loadUrl(localUrl());
+            return;
+        }
+        load();
     }
 
     private void load() {
@@ -143,12 +239,13 @@ public class MainActivity extends Activity {
         }
         prefs.edit().putString("url", url).apply();
         errorShown = false;
+        barVisible = false;
         web.loadUrl(url);
     }
 
     /** 离线页：说明「任务在电脑上跑」，并给一个真的重试按钮。 */
     private String errorHtml(String detail) {
-        String safe = detail.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+        String safe = esc(detail);
         return "<!doctype html><html lang=\"zh\"><head><meta charset=\"utf-8\">"
                 + "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
                 + "<style>"
@@ -172,6 +269,34 @@ public class MainActivity extends Activity {
                 + "</div></body></html>";
     }
 
+    /** 本地页面加载失败（APK 里没有打包进引擎/页面）：说清楚是安装包的问题，别让人以为是断网。 */
+    private String localErrorHtml(String detail) {
+        String safe = esc(detail);
+        return "<!doctype html><html lang=\"zh\"><head><meta charset=\"utf-8\">"
+                + "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+                + "<style>"
+                + "body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;"
+                + "background:#f6f7fb;color:#171923;font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;padding:24px}"
+                + ".box{max-width:360px;width:100%;background:#fff;border:1px solid rgba(15,23,42,.08);"
+                + "border-radius:14px;padding:24px}"
+                + "h1{font-size:17px;margin:0 0 8px}p{font-size:13px;line-height:21px;color:#596174;margin:0 0 6px}"
+                + "code{font-size:11px;color:#8b93a7;word-break:break-all}"
+                + "button{margin-top:18px;width:100%;height:42px;border:0;border-radius:10px;color:#fff;font-size:14px;"
+                + "font-weight:600;background:linear-gradient(180deg,#f062a8,#ec4899)}"
+                + "</style></head><body><div class=\"box\">"
+                + "<h1>本地引擎页面没加载出来</h1>"
+                + "<p>安装包里缺少 <code>assets/ui/m0.html</code> 或 <code>assets/engine/engine.bundle.js</code>。"
+                + "先跑 <code>bun mobile/android/engine/build.mjs</code> 再重新构建 APK。</p>"
+                + (safe.isEmpty() ? "" : "<p><code>" + safe + "</code></p>")
+                + "<button onclick=\"vdacc.retry()\">重试</button>"
+                + "</div></body></html>";
+    }
+
+    private static String esc(String raw) {
+        if (raw == null) return "";
+        return raw.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+    }
+
     private int dp(int value) {
         return Math.round(value * getResources().getDisplayMetrics().density);
     }
@@ -183,5 +308,15 @@ public class MainActivity extends Activity {
             return true;
         }
         return super.onKeyDown(keyCode, event);
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (bridge != null) bridge.close();
+        if (web != null) {
+            web.removeJavascriptInterface(Bridge.NAME);
+            web.destroy();
+        }
+        super.onDestroy();
     }
 }

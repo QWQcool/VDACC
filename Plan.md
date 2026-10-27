@@ -224,9 +224,12 @@ parity 稳定后再决定 Python 是否退化为 yt-dlp helper。
   实测重装 17,880,111 字节、SHA256 `33121d19…`、doctor 显示「已校验」。
   **仍未做**：干净机器验收、包清单/体积基线（exe 约 110MB）、CI/标签/Release 收口。
 - **N06 · Android 真机**：✅ 2026-10-26 在 realme RMX5200 / Android 16 完成壳子验收（安装、连接、解析、下载、预览、取消/重试、错误 token、电脑离线、前后台）；局域网路径未打通（未加防火墙规则）。
-- **N07 · Android 独立端（C 路线）**：🟡 **设计稿完成（2026-10-27）**，见 `docs/design/android-standalone-plan.md`。
-  方案：WebView 复用 Vue 界面 + TS 引擎打成 bundle + Kotlin 桥（fs / transfer / crypto）+ 前台下载服务 + Media3 合并；
-  已列模块划分、16 个桥接口、复用/重写矩阵、M0–M5 里程碑、M1 验收清单与风险。**尚未开工**，待确认 minSdk、输出目录与 UI 布局。
+- **N07 · Android 独立端（C 路线）**：🟡 **M0 已完成（2026-10-27）**，见 `docs/design/android-standalone-plan.md` §13（决策）与 §2.1（实测）。
+  方案：WebView 复用 Vue 界面 + TS 引擎打成 bundle + Kotlin 桥（fs / transfer / crypto）+ 前台下载服务 + Media3 合并。
+  M0 实测：引擎 bundle 8.5KB（gzip 4.6KB）、APK 846KB；桥 `paths`/`crypto.md5Hex`/`fs`（16KB 分块 + staging→publish）
+  在真机（RMX5200 / Android 16）跑通，落盘 md5 与设备 `md5sum` 一致；局域网模式回归通过。
+  已定：minSdk 26、输出 `Download/VDACC`（MediaStore + staging `.part`）、桥用 Kotlin、UI 复用 Vue。
+  **下一步 M1**（抖音单文件 + 网易云 + 前台下载 + 取消/续传）。
 - **HarmonyOS NEXT**：仍等待华为开发者账号与 DevEco 签名；独立端方案可复用同一份 JS 引擎 bundle 与桥接口设计。
 
 执行依赖：F01–F07 → N01/N02 → N03/N04；N05 可在稳定源码上独立推进；N06 依赖设备和稳定连接恢复。

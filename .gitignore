@@ -26,6 +26,9 @@ __pycache__/
 _article/
 征文相关截图/
 
+# 临时脚本与截图（联调产物，不入库）
+.tmp/
+
 # 杂项
 *.log
 Thumbs.db

@@ -5,6 +5,12 @@
 
 ## 未发布
 
+- **Android 端 M0（技术验证）**：`mobile/android/` 从「只当屏幕」变成「本机跑引擎」。
+  引擎由 Bun 打成单个 IIFE（8.5KB / gzip 4.6KB），`node:path`/`node:crypto` 映射到自带 shim；
+  Kotlin 桥提供 `paths` / `crypto.md5Hex` / `fs.{openWrite,writeChunk,closeWrite,publish,stat,mkdirp}`，
+  通道是「同步 post + 异步回投」。落盘分两段：私有 `staging/*.part` → `MediaStore` 的 `Download/VDACC`。
+  真机（RMX5200 / Android 16）实测：自检 15/15、4 个 16KB 分块写出 53,131 字节、
+  页面 md5 与设备 `md5sum` 一致、`.part` 已清理；局域网模式回归通过。minSdk 提到 26。
 - **任务管理**：`DELETE /api/jobs/:id`（只允许已结束任务）、`POST /api/jobs/clear-finished`、
   `POST /api/jobs/retry-failed`；界面在任务卡加「删除」「打开文件夹」（复用 `/api/reveal`），
   列表头加「重试失败 (N)」「清空已结束」。删除通过 SSE `job-removed` 推给所有界面，无需刷新。

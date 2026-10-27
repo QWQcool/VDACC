@@ -69,6 +69,7 @@
 | Bun | 本机 **1.4.4**（`winget install Oven-sh.Bun`，shim 同目录）。装在用户 PATH 的目录里，**已开着的终端不会刷新**，新装后 `where bun` 报找不到属正常，新开窗口或直接探 `%LOCALAPPDATA%\Microsoft\WinGet\Links\bun.exe` 即可 |
 | Playwright | 1.64.0，用 `channel=msedge` 复用系统 Edge，不下载 chromium |
 | venv | `venv\Scripts\python.exe` = **3.13.4**（系统 `python` = 3.13.14），已装 playwright 1.64.0 + yt-dlp 2026.8.19，legacy 可直接跑 |
+| Android 端 M0 | 引擎 bundle 8.5KB（gzip 4.6KB）、APK 846KB、minSdk 26；桥（paths / md5 / fs 分块+publish）在 realme RMX5200 / Android 16 真机跑通，落盘 md5 与 `md5sum` 一致。JS 侧 md5 必须纯 JS（`node:crypto` 是同步 API，桥是异步），已与原生 `MessageDigest` 交叉校验 |
 
 ffmpeg 为什么是硬前提：B站/YouTube 全是 DASH 音视频分离，yt-dlp 下完会得到
 `.fXXX.mp4` + `.fXXX.m4a` 两个文件然后警告 ffmpeg 不存在，结果是**无声视频**。
@@ -85,7 +86,9 @@ ffmpeg 为什么是硬前提：B站/YouTube 全是 DASH 音视频分离，yt-dlp
 ├─ ts/skill/         TS Skill 源（SKILL.md + references），由 tools/build_skill_ts.py 组装
 ├─ legacy/python/    Python 归档：vdl / skill / tests / tools / dy_* / VDACC.bat（冻结，仅参考）
 ├─ docs/             CHANGELOG.md、music-channels.md、design/
-├─ mobile/android/   Android WebView 壳（源码入库，build/ 与 .gradle/ 不入库）
+├─ mobile/android/   Android 壳：本地引擎模式（引擎 bundle 在 assets）+ 连电脑模式
+│                    engine/ 是引擎打包工程（Bun.build + shims），见同目录 README
+│                    源码入库，build/ 与 .gradle/ 不入库
 ├─ tools/            构建脚本（build_skill_ts.py；legacy 构建在 legacy/python/tools/）
 ├─ VDACC.bat         双击启动：起服务 + --open 打开浏览器
 ├─ 下载/             输出目录（不入库）

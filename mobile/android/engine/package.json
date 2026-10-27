@@ -1,0 +1,9 @@
+{
+  "name": "vdacc-engine",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun build.mjs",
+    "selftest": "bun selftest.mjs"
+  }
+}

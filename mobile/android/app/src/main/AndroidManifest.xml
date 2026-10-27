@@ -3,6 +3,15 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!--
+      只有 Android 9 及以下才需要靠它直接写 /storage/emulated/0/Download/VDACC；
+      Android 10+ 走 MediaStore（IS_PENDING + RELATIVE_PATH），不需要任何存储权限。
+      maxSdkVersion=28 让新系统上根本不会申请这条权限，避免「装了个下载器却要存储权限」的疑问。
+    -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+
     <!-- usesCleartextTraffic：服务端是 http://<局域网IP>:端口，没有 TLS；壳子只连自己的电脑 -->
     <application
         android:label="@string/app_name"

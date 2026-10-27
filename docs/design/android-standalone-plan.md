@@ -43,13 +43,23 @@
 | UI | 单页 app.js | Vue 3 已拆 i18n/api/format/jobs/overlays |
 | 后台 | WebView 页面（有被系统冻结风险） | 不涉及 |
 
+### 2.1 M0 实测结论（2026-10-27，realme RMX5200 / Android 16）
+
+| 结论 | 证据 |
+|---|---|
+| 参考实现「md5 必须纯 JS」在 Android 上同样成立 | `node:crypto` 的 `createHash` 是同步 API，桥是异步；M0 用纯 JS MD5，并与原生 `MessageDigest` 交叉校验一致 |
+| 鸿蒙的 `urlPermissionList` 在 Android 没有等价物 | `@JavascriptInterface` 由**渲染线程直调**，`onPageStarted` 记标志会漏（真机实测 `paths` 被误判 untrusted）；改为每次调用在 UI 线程读 `web.url` |
+| 鸿蒙只能写沙箱，Android 可以进公共 Download | 鸿蒙映射 `${filesDir}/mg-out`；Android 走 `MediaStore.Downloads` + `RELATIVE_PATH`，但同时需要 staging 承接 `.part` 续传 |
+| 引擎 bundle 体积远小于预估 | M0 只打纯函数：8.5KB（gzip 4.6KB）；APK 846KB |
+| 分块写必须验到多块 | 141 字节的探针只走 1 块，等于没验分块；默认探针改成 ~52KB / 4 块，md5 与设备 `md5sum` 完全一致 |
+
 ---
 
 ## 3. 架构总览（Android）
 
 ```
 ┌──────────────────────────── App 进程 ────────────────────────────┐
-│  MainActivity (Kotlin)                                           │
+│  MainActivity (Java)                                             │
 │   ├─ WebView  ← assets/ui/（复用 web/vue，注入 local-api.js）      │
 │   │      ↕ window.VDACC_BRIDGE（@JavascriptInterface，JSON+reqId） │
 │   ├─ Bridge (Kotlin)                                             │
@@ -64,7 +74,8 @@
 - **UI 不用重写**：`web/vue` 已经拆出 `api.js`，端上把它替换成 `local-api.js`，把原来的 `/api/*` 调用映射到 `window.VDACC_ENGINE.*`；
 - **引擎不进主线程**：JS 引擎跑在 WebView 的独立 world（或专用 WebView），下载字节由原生 `transfer` 负责，JS 只算 URL、进度、命名；
 - **前台服务持有下载**：WebView 只做控制面，页面被杀也不影响下载；完成后从通知点回 App；
-- **不引入 Capacitor**：现有壳是零依赖 Java WebView，继续用 `@JavascriptInterface` 即可；Capacitor 只是参考它的 Range 分片策略。
+- **不引入 Capacitor**：现有壳是零运行时依赖的 WebView，继续用 `@JavascriptInterface` 即可；Capacitor 只是参考它的 Range 分片策略。
+  桥用 Kotlin（语言插件，非运行时框架），依赖清单仍为空。
 
 ---
 
@@ -89,7 +100,8 @@
 | 方法 | 入参 | 返回 | 说明 |
 |---|---|---|---|
 | `fs.stat` / `fs.mkdirp` / `fs.remove` / `fs.rename` / `fs.list` | 路径 | 元数据 | 走 app 私有目录或 SAF 映射 |
-| `fs.openWrite` / `fs.writeChunk` / `fs.closeWrite` | 路径、base64/ArrayBuffer | bytes | 分块写，避免整文件进内存 |
+| `fs.openWrite` / `fs.writeChunk` / `fs.closeWrite` | 文件名、base64 | `{handle}` / bytes / `{bytes,path}` | 分块写，避免整文件进内存；落**私有 staging 的 `.part`** |
+| `fs.publish` | 文件名 | `{path, name, outKind, bytes}` | 把 `.part` 落进 `Download/VDACC`（29+ 走 MediaStore，26–28 走 File+权限） |
 | `fs.readChunk` | 路径、offset、len | base64 | 续传/校验用 |
 | `transfer.start` | `{url, headers, dest, resume, limitBytesPerSec}` | `{id}` | 原生 OkHttp 流式写盘 |
 | `transfer.cancel` | `{id}` | ok | 立即停 |
@@ -125,23 +137,31 @@
 mobile/android/
 ├─ app/src/main/
 │  ├─ java/com/vdacc/app/
-│  │  ├─ MainActivity.kt              # 现有 MainActivity.java 迁移/扩展
-│  │  ├─ bridge/Bridge.kt             # @JavascriptInterface 入口
-│  │  ├─ bridge/Transfer.kt           # OkHttp 下载器
-│  │  ├─ bridge/Fs.kt                 # 私有目录 + SAF
-│  │  ├─ service/DownloadService.kt   # 前台服务 + 通知
-│  │  ├─ media/Muxer.kt               # Media3 Transformer
-│  │  ├─ media/Tagger.kt              # jaudiotagger
-│  │  └─ store/JobStore.kt
+│  │  ├─ MainActivity.java            # 壳（本地引擎 / 连电脑 两种模式）
+│  │  ├─ bridge/Bridge.kt             # ✅ M0：@JavascriptInterface 入口
+│  │  ├─ bridge/Fs.kt                 # ✅ M0：staging 分块写 + publish
+│  │  ├─ bridge/Paths.kt              # ✅ M0：staging / out / cache 语义
+│  │  ├─ bridge/BridgeException.kt    # ✅ M0：带错误码的异常
+│  │  ├─ bridge/Transfer.kt           # M1：OkHttp 下载器
+│  │  ├─ service/DownloadService.kt   # M1：前台服务 + 通知
+│  │  ├─ media/Muxer.kt               # M2：Media3 Transformer
+│  │  ├─ media/Tagger.kt              # M3：jaudiotagger
+│  │  └─ store/JobStore.kt            # M4
 │  ├─ assets/
-│  │  ├─ ui/                          # web/vue 构建产物（i18n/api/format/jobs/overlays）
-│  │  └─ engine/engine.bundle.js      # esbuild 打平的 TS 引擎
+│  │  ├─ ui/m0.html                   # ✅ M0 验证页（M1 换成 Vue 产物）
+│  │  └─ engine/engine.bundle.js      # ✅ 构建产物（入库，便于直接打 APK）
 │  └─ res/…
-├─ engine/                            # 引擎构建工程（esbuild 配置 + shims）
+├─ engine/                            # ✅ 引擎构建工程
+│  ├─ build.mjs                       #   Bun.build：target=browser / format=iife / node:* → shims
+│  ├─ selftest.mjs                    #   无设备自检（含内存假 fs）
+│  ├─ src/entry.ts                    #   端上入口，挂 globalThis.VDACC_ENGINE
+│  └─ shims/{bridge,path,crypto,md5}.ts
 └─ README.md
 ```
 
-构建链：`bun build ts/src/mobile/entry.ts --target=browser --outfile .../engine.bundle.js`；shims 通过 alias 注入。
+构建链：`bun mobile/android/engine/build.mjs` → `app/src/main/assets/engine/engine.bundle.js`。
+`node:*` 通过 Bun.build 插件映射到 `engine/shims/*`，**未映射的模块直接构建失败**（不静默降级）。
+入口刻意放在 `engine/src/entry.ts` 而不是 `ts/src/mobile/`：`ts/**` 保持零改动，桌面端回归风险为 0。
 
 ---
 
@@ -184,7 +204,7 @@ mobile/android/
 
 | 里程碑 | 内容 | 估时 |
 |---|---|---|
-| M0 | 桥骨架 + 引擎打包 + 空 UI 跑通（`health` 由本地伪造） | 3–4 天 |
+| M0 | ✅ **已完成（2026-10-27）**：引擎 bundle（Bun.build，iife，8.5KB/gzip 4.6KB）+ Kotlin 桥（paths/md5/fs 分块写/publish）+ 真机验证页 | 3–4 天 |
 | M1 | 抖音单文件 + 网易云 + 前台下载 + 取消/续传（§8 清单） | 1 周 |
 | M2 | B站（分P/字幕/弹幕）+ Media3 合并 + 超限拆轨 | 1 周 |
 | M3 | QQ/酷我/酷狗 + 标签/封面 | 4–5 天 |
@@ -216,13 +236,21 @@ mobile/android/
 
 ---
 
-## 13. 待你确认
+## 13. 已确认决策（2026-10-27）
 
-1. **minSdk**：建议 26（Android 8），覆盖前台服务与 Media3；
-2. **输出位置**：默认 `Download/VDACC`，是否要支持 SAF 自选目录（增加适配量）；
-3. **UI**：直接复用现有 Vue 页面（推荐），还是为手机做一套更紧凑的布局；
-4. **应用身份**：沿用 `com.vdacc.app`，与现有壳同一个包名（可覆盖安装）；
-5. **是否接受**「超过 150MB 不合并、拆成两轨」的行为（与参考实现一致）。
+| # | 项 | 结论 |
+|---|---|---|
+| 1 | **minSdk** | **26**（`build.gradle` 已改；API 24–25 放弃） |
+| 2 | **输出位置** | 默认 `Download/VDACC`；**落盘分两段**：私有 `files/staging/<name>.part` → `fs.publish` 进 MediaStore。SAF 自选目录推迟到 M4 |
+| 3 | **UI** | 复用现有 Web 界面（M0 用独立验证页，M1 接 Vue） |
+| 4 | **应用身份** | 沿用 `com.vdacc.app`（与现有壳同包名，可覆盖安装） |
+| 5 | 150MB 拆轨 | 接受（与参考实现同向，阈值改 150MB） |
+| 6 | **桥的语言** | **Kotlin**（2.0.21 语言插件；无 AndroidX/OkHttp/Room，运行时依赖仍为空）。理由是空安全 + 少样板，代价是首次构建联网下载约 50MB 插件 |
+
+> 关于「能不能用 TS / Go / C++ 写桥」：Android 组件（Activity/Service）必须由 dex 里的 JVM 类实例化，
+> WebView 也没有 NDK 绑定，`@JavascriptInterface` 只接受 JVM 对象。native（C++/Go/Rust）只能作为
+> JNI 背后的库，替代不了这层壳；`nodejs-mobile` 可行但要把整个 Node 塞进 APK，而我们已经有 WebView
+> 在跑 JS，属于重复投入。结论：**引擎是 TS，桥是宿主原生语言**。
 
 ---
 

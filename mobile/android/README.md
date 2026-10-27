@@ -1,113 +1,138 @@
-# VDACC 移动壳（Android）
+# VDACC 移动端（Android）
 
-极薄的 WebView 壳：手机上只负责显示界面，解析与下载都在电脑端的 `ts/src/server.ts` 里跑。
+同一个 APK 里有两种模式，右下角按钮切换：
 
-## 一、电脑端准备
+| 模式 | 说明 | 数据在哪 |
+|---|---|---|
+| **本地引擎**（默认，M0 起） | 加载 `file:///android_asset/ui/*.html`，TS 引擎打成 bundle 跑在 WebView 里，文件直接落手机 | 手机本地 |
+| **连电脑** | 加载电脑上的 `http://<IP>:8765/?token=...`，解析与下载都在 PC 上跑 | 电脑 |
+
+本地引擎模式是 M0 的技术验证页（自检 + 落盘探针），产品界面从 M1 开始接。
+连电脑模式的用法与验收记录见文末，两者互不影响。
+
+## 一、构建
+
+构建分两步：**先打引擎 bundle，再打 APK**。引擎产物在仓库里有一份（`app/src/main/assets/engine/engine.bundle.js`），
+改了 `ts/src/core/*` 或 `mobile/android/engine/*` 之后必须重新打，否则装进 APK 的是旧引擎。
+
+```bat
+rem 1) 引擎 bundle（Bun 自带 bundler，无第三方依赖）
+cd mobile\android\engine
+bun build.mjs
+bun selftest.mjs          rem 无设备自检：15 条纯函数/桥断言 + 8 条落盘探针断言
+
+rem 2) APK
+set JAVA_HOME=%LOCALAPPDATA%\vdacc-tools\jdk17
+set ANDROID_HOME=%LOCALAPPDATA%\vdacc-tools\android-sdk
+%LOCALAPPDATA%\vdacc-tools\gradle-8.7\bin\gradle.bat -p mobile\android assembleDebug
+```
+
+产物：`mobile/android/app/build/outputs/apk/debug/app-debug.apk`（M0 实测约 830 KB）。
+
+工具链（本机已装，均不入库）：
+
+| 组件 | 版本 | 位置 |
+|---|---|---|
+| JDK 17（Temurin） | 17.0.20.1 | `%LOCALAPPDATA%\vdacc-tools\jdk17` |
+| Android SDK | platform-tools / platform-34 / build-tools 34.0.0 | `%LOCALAPPDATA%\vdacc-tools\android-sdk` |
+| Gradle | 8.7 | `%LOCALAPPDATA%\vdacc-tools\gradle-8.7`（用腾讯镜像下载，官方源超时） |
+| Kotlin 插件 | 2.0.21 | Gradle 首次构建联网下载（约 50MB），之后走缓存 |
+
+> `JAVA_HOME` 必须指向**一个真实的 JDK 目录**。历史上这里写过
+> `C:\Program Files\Eclipse Adoptium\jdk-17.0.20.101-hotspot`，本机已不存在，按上表为准。
+
+## 二、M0 验收（真机）
+
+```bat
+set ADB=%LOCALAPPDATA%\vdacc-tools\android-sdk\platform-tools\adb.exe
+
+rem 安装（realme/OPPO 上直接 install -r 可能报 Failure [-99]，用下面这条更稳）
+%ADB% install -r mobile\android\app\build\outputs\apk\debug\app-debug.apk
+
+rem 打开 App（默认就是本地引擎模式）；带 -e probe 1 会让页面自动跑一次落盘探针
+%ADB% shell am start -n com.vdacc.app/.MainActivity -e probe 1
+
+rem 看结果
+%ADB% shell ls -l /sdcard/Download/VDACC/
+%ADB% shell md5sum /sdcard/Download/VDACC/m0-probe.txt
+%ADB% exec-out screencap -p > shot.png
+```
+
+2026-10-27 实测（realme RMX5200 / Android 16 / API 36）：
+
+| 项 | 结果 |
+|---|---|
+| `assembleDebug` | BUILD SUCCESSFUL，APK 846,793 字节 |
+| 引擎自检 | 15/15 通过（含「JS 纯 JS MD5」与「桥 MessageDigest MD5」对同一中文串一致） |
+| 落盘探针 | 4 个 16KB 分块 → 53,131 字节 → `Download/VDACC/m0-probe.txt` |
+| 一致性 | 页面显示的 md5 与设备 `md5sum` **完全相同**（`0e7a2690…`） |
+| 暂存清理 | publish 成功后 `.part` 已删除（`files/staging/` 为空） |
+| 局域网模式 | 回归通过：`adb reverse` + `-e url http://127.0.0.1:8765/?token=...`，桌面界面正常、可切回本地 |
+
+## 三、桥与目录（M0 已实现的部分）
+
+```
+app/src/main/java/com/vdacc/app/
+├─ MainActivity.java          两种模式的壳（本地 / 连电脑）
+└─ bridge/
+   ├─ Bridge.kt               @JavascriptInterface 入口：同步 post + 异步回投
+   ├─ Fs.kt                   staging 分块写 + publish 到 Download/VDACC
+   ├─ Paths.kt                目录语义（staging / out / cache）
+   └─ BridgeException.kt      带错误码的异常
+```
+
+已实现的桥方法：`paths`、`crypto.md5Hex`、`fs.openWrite`、`fs.writeChunk`、`fs.closeWrite`、
+`fs.publish`、`fs.stat`、`fs.mkdirp`。通道与字段形状见
+`docs/design/android-standalone-plan.md` §5。
+
+两条硬约束（写新方法前必须知道）：
+
+1. **写文件分两段**：先写私有 `files/staging/<name>.part`，完成后 `fs.publish` 才落到公共
+   `Download/VDACC`。Android 10+ 直接 `File` 写公共目录会失败，必须走 MediaStore；
+   而 MediaStore 条目没法按偏移续写，所以 `.part` 只能留在私有目录。
+2. **桥只信任本地 asset 页面**：Android 的 `@JavascriptInterface` 没有来源白名单，
+   `Bridge` 每次调用都在 UI 线程读 `web.url` 判断前缀。远程页面（连电脑模式）调用一律拒绝。
+
+## 四、连电脑模式（原有用法，最小要求不变）
 
 ```bash
 bun ts/src/server.ts --port 8765 --token <随便一串> --lan
 ```
 
-`--lan` 会绑定 `0.0.0.0`，并把可用的局域网地址打印出来，例如：
+`--lan` 会绑 `0.0.0.0` 并打印可用的局域网地址；首次运行 Windows 可能弹防火墙授权，
+要允许「专用网络」。手机与电脑需在同一 Wi-Fi；服务端是 `http://`，所以 `usesCleartextTraffic=true`。
 
-```
-⚠️  --lan：服务已绑定 0.0.0.0，同一局域网内的设备都能访问（仍需 token）。
-手机访问: http://192.168.1.23:8765/?token=xxxx
-```
-
-首次运行 Windows 可能弹防火墙授权，要允许「专用网络」，否则手机连不上。
-
-## 二、手机端
-
-安装 `app-debug.apk`（构建产物在 `app/build/outputs/apk/debug/`），打开后把上面那条
-`http://<电脑IP>:8765/?token=...` 粘进地址栏，点「连接」。地址会存下来，下次打开自动加载。
-
-- 需要手机和电脑在**同一个 Wi-Fi**；
-- 只支持 `http://`（服务端没上 TLS），所以 `usesCleartextTraffic=true`；
-- 界面里所有操作（解析、下载、预览、设置）都走回电脑，手机只当屏幕。
-
-## 三、联调接口（留给自测/自动化）
-
-地址可以不带界面手输，直接由启动参数带进去：
+USB 联调（不需要同网段）：
 
 ```bat
-adb install -r mobile\android\app\build\outputs\apk\debug\app-debug.apk
-adb shell am start -n com.vdacc.app/.MainActivity -e url "http://192.168.1.23:8765/?token=xxx"
-adb exec-out screencap -p > shot.png
+%ADB% reverse tcp:8765 tcp:8765
+%ADB% shell am start -n com.vdacc.app/.MainActivity -e url "http://127.0.0.1:8765/?token=xxx"
 ```
 
-`-e url` 会填进地址栏并立即加载；不传则用上次保存的地址。当前 APK **没有在这个开发机上安装过**
-（连接的那台是别人的手机），等正式测试机接上再走上面三步。
+不带 `-e url` 启动就是本地引擎模式；进入连电脑模式后地址会存在 App 里，下次切过去自动加载。
 
-## 四、自己构建
-
-```bat
-set JAVA_HOME=C:\Program Files\Eclipse Adoptium\jdk-17.0.20.101-hotspot
-set ANDROID_HOME=%LOCALAPPDATA%\vdacc-tools\android-sdk
-%LOCALAPPDATA%\vdacc-tools\gradle-8.7\bin\gradle.bat -p mobile\android assembleDebug
-```
-
-工具链（本机已装，均不入库；2026-10-24 实装并验证）：
-
-| 组件 | 版本 | 位置 | 安装方式 |
-|---|---|---|---|
-| JDK 17（Temurin） | 17.0.20.1 | `C:\Program Files\Eclipse Adoptium\jdk-17.0.20.101-hotspot` | `winget install EclipseAdoptium.Temurin.17.JDK` |
-| Android SDK | platform-tools / platform-34 / build-tools 34.0.0 | `%LOCALAPPDATA%\vdacc-tools\android-sdk` | cmdline-tools + `sdkmanager` |
-| Gradle | 8.7 | `%LOCALAPPDATA%\vdacc-tools\gradle-8.7` | zip；**用腾讯镜像**（`https://mirrors.cloud.tencent.com/gradle/`，12s）而不是官方源（超时） |
-
-换机复现：
-
-```bat
-winget install EclipseAdoptium.Temurin.17.JDK
-
-rem 下载 commandlinetools-win-*_latest.zip，解压到 android-sdk 后必须再套一层
-rem cmdline-tools 目录，最终是 android-sdk\cmdline-tools\latest\bin\sdkmanager.bat
-rem （少了这层 sdkmanager 会找不到自己的 SDK 根）
-%LOCALAPPDATA%\vdacc-tools\android-sdk\cmdline-tools\latest\bin\sdkmanager.bat ^
-  --sdk_root=%LOCALAPPDATA%\vdacc-tools\android-sdk ^
-  --licenses
-%LOCALAPPDATA%\vdacc-tools\android-sdk\cmdline-tools\latest\bin\sdkmanager.bat ^
-  --sdk_root=%LOCALAPPDATA%\vdacc-tools\android-sdk ^
-  "platform-tools" "platforms;android-34" "build-tools;34.0.0"
-```
-
-实测构建：`BUILD SUCCESSFUL in 2m 43s`（首次含 AGP 8.5.2 下载），产物
-`app/build/outputs/apk/debug/app-debug.apk` **9.2KB**。
-
-## 五、真机验收记录（2026-10-26）
+## 五、历史验收记录（2026-10-26，连电脑模式）
 
 设备：realme `RMX5200`，Android 16（SDK 36），USB 调试已授权。
 
 | 项 | 结果 |
 |---|---|
 | 安装 | `adb install -r` 报 `Failure [-99]`（realme 限制流式安装）；改用 `adb push` + `adb shell pm install -r -t` **成功** |
-| 连接 | `adb reverse tcp:8765 tcp:8765` → 手机打开 `http://127.0.0.1:8765/?token=...`，V2 界面正常渲染 |
+| 连接 | `adb reverse tcp:8765 tcp:8765` → `http://127.0.0.1:8765/?token=...`，V2 界面正常渲染 |
 | 解析 | 抖音 `7698929587975146788`：封面、标题、时长 0:42、`douyin` 标签、画质档位均正常 |
 | 下载 | 1080P → job `完成`，5.34 MB（5,596,795 字节），SSE 实时出现在「进行中」 |
 | 预览 | 点 ▶ 在 WebView 内播放，画面正常 |
 | 取消 | 限速 256KB/s 后取消：`已取消` + 「用户取消」+ 进度冻结 35.1% |
 | 重试 | 点重试重新入队，从 `.part` 续传（35.1% → 37.6%），未从零重下 |
 | 错误 token | 顶栏变「未连接」，页面提示「缺少 token：请用启动时打印的 ?token=... 打开」 |
-| 电脑离线 | WebView 显示 Chromium 默认错误页（`ERR_EMPTY_RESPONSE`）；服务恢复后点「连接」即可恢复 |
-| 切前后台 | 回前台会重新加载页面（解析结果清空），任务列表由服务端恢复（12 条） |
+| 电脑离线 | 壳子自己的错误页（说明 + 错误码 + 重试），不再是 Chromium 默认页 |
+| 切前后台 | 回前台会重新加载页面（解析结果清空），任务列表由服务端恢复 |
 
-局域网路径本轮**未打通**（按用户要求没有加防火墙规则）：手机 Wi-Fi `30.29.200.41/24`、
+局域网路径本轮**未打通**（按要求没有加防火墙规则）：手机 Wi-Fi `30.29.200.41/24`、
 电脑以太网 `30.29.97.48/24` 不同网段，PC→手机可通、手机→PC 不通。真机验收走的是 USB 反向代理。
-
-已知待改进：长文案标题会撑满卡片（已加 3 行截断）、电脑离线时的错误页是浏览器默认样式、
-「缺少 token」没有区分「没带 token」与「token 无效」。
-
-### 二轮修复（同日）
-
-| 项 | 结果 |
-|---|---|
-| 地址栏 | 加载成功后自动收起，右下角留「地址」按钮（40dp）随时叫回；失败时自动展开 |
-| 电脑离线 | 换成壳子自己的错误页（说明 + 错误码 + **重试**按钮，走 JS bridge 重新 loadUrl），不再显示 Chromium 那句 `ERR_EMPTY_RESPONSE` |
-| token 无效 | 文案区分「未带 token」与「token 无效/过期（服务重启会换 token）」 |
-| 长文案 | 标题 3 行截断（`-webkit-line-clamp`），抖音整段文案不再撑满一屏 |
 
 ## 不做的部分
 
-- 不在手机上跑 ffmpeg / 解析引擎：那需要打包整套运行时，体积和权限都不合适；
-- 不做后台下载/通知：任务在电脑上跑，手机锁屏也不影响；
+- 不打包 ffmpeg、不在端上跑 yt-dlp（长尾站点仍归桌面端）；
+- 不用 Capacitor / AndroidX：壳子是零运行时框架的 WebView（Kotlin 只是语言插件）；
 - HarmonyOS NEXT（HAP）等拿到华为开发者账号再做。

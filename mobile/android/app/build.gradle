@@ -1,5 +1,8 @@
 plugins {
     id 'com.android.application'
+    // Kotlin 只是**语言插件**（编译期），不引入任何运行时框架：
+    // 仍然没有 AndroidX / OkHttp / Room，依赖清单还是空的。
+    id 'org.jetbrains.kotlin.android'
 }
 
 android {
@@ -8,7 +11,8 @@ android {
 
     defaultConfig {
         applicationId 'com.vdacc.app'
-        minSdk 24
+        // 26：前台服务与通知渠道的语义干净（设计稿 §13 决策，2026-10-27 拍板）
+        minSdk 26
         targetSdk 34
         versionCode 1
         versionName '1.0'
@@ -24,7 +28,12 @@ android {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
 }
 
-// 刻意不引第三方依赖：壳子只做 WebView 包装，体积与构建时间都压到最小
+// 仍然刻意不引第三方运行时依赖：壳子只做 WebView 包装 + 一条桥。
+// kotlin-stdlib 由 Kotlin 插件自动加入（它是语言运行库，不是业务框架）。
 dependencies {}
