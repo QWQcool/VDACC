@@ -38,6 +38,9 @@ dist/
 ts/node_modules/
 ts/dist/
 
+# 视觉回归截图（脚本 tools/ui_shots.cjs 生成，不入库）
+docs/design/ui/shots/
+
 # Android 壳构建产物（源码入库，产物不入库）
 mobile/android/.gradle/
 mobile/android/build/

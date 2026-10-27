@@ -69,38 +69,13 @@ createApp({
       jobs.value.filter((j) => j.status !== 'running' && j.status !== 'queued'));
     const orderedJobs = computed(() => [...activeJobs.value, ...finishedJobs.value]);
 
-    const size = (bytes) => {
-      if (!bytes) return '—';
-      return bytes >= 1048576
-        ? `${(bytes / 1048576).toFixed(2)} MB`
-        : `${(bytes / 1024).toFixed(0)} KB`;
-    };
-    const dur = (ms) => {
-      if (!ms) return '';
-      const total = Math.round(ms / 1000);
-      return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
-    };
+    const { size, dur, platformClass, jobName } = window.VDACC_FORMAT;
 
     const rateText = computed(() => {
       if (!limitRate.value) return t('unlimited');
       const mb = limitRate.value / 1048576;
       return mb >= 1 ? `${mb.toFixed(1)} MB/s` : `${Math.round(limitRate.value / 1024)} KB/s`;
     });
-
-    // 平台标签的语义色：B站粉、抖音蓝、音乐紫、嗅探/其它中性
-    const platformClass = (p) => ({
-      bilibili: 'accent', douyin: 'sky',
-      netease: 'purple', qq: 'purple', kuwo: 'purple', kugou: 'purple',
-      sniff: 'sky',
-    }[p] || 'neutral');
-
-    // 任务标题：优先用落盘文件名（去掉目录与扩展名），没有就退回清晰度/ID
-    const jobName = (j) => {
-      const p = j && j.path ? String(j.path) : '';
-      if (!p) return (j && (j.formatId || j.id)) || '';
-      const base = p.split(/[\\/]/).pop() || p;
-      return base.replace(/\.[a-z0-9]{2,5}$/i, '');
-    };
 
     function toggleAll() {
       if (!result.value) return;
@@ -121,14 +96,9 @@ createApp({
 
     async function api(path, opts = {}) {
       try {
-        const res = await fetch(path, {
-          method: opts.method || 'GET',
-          headers: Object.assign({ 'X-VDL-Token': token }, opts.headers || {}),
-          body: opts.body ? JSON.stringify(opts.body) : undefined,
-        });
-        if (res.status === 401) connected.value = false;
-        try { return await res.json(); }
-        catch { return { ok: false, error: { message: `HTTP ${res.status}` } }; }
+        const { status, data } = await window.VDACC_API.request(token, path, opts);
+        if (status === 401) connected.value = false;
+        return data;
       } catch {
         // 单次接口失败不等于 SSE 已断开；在线状态以持有的连接为准。
         if (!events || events.readyState !== EventSource.OPEN) connected.value = false;
@@ -305,13 +275,7 @@ createApp({
     }
 
     function upsert(job) {
-      if (!job) return;
-      const at = jobs.value.findIndex((j) => j.id === job.id);
-      // 快速完成的 SSE 可能先于提交响应到达；迟到的 queued/running 快照不能覆盖终态。
-      if (at >= 0 && ['done', 'failed', 'cancelled'].includes(jobs.value[at].status)
-          && ['queued', 'running'].includes(job.status)) return;
-      if (at >= 0) jobs.value[at] = job;
-      else jobs.value.unshift(job);
+      window.VDACC_JOBS.upsert(jobs.value, job);
     }
 
     async function cancel(id) {
@@ -448,36 +412,13 @@ createApp({
     }
     function closePreview() { previewUrl.value = ''; }
 
-    // 同一套浮层焦点规则用于设置和预览；背景 inert 防止 Tab 和读屏越过面板。
-    let returnFocus = null;
-    const activeDialog = () => document.querySelector(previewUrl.value ? '.preview-box' : '.slideover');
-    const closeOverlays = () => {
-      if (previewUrl.value) { previewUrl.value = ''; return; }
-      settingsOpen.value = false;
-    };
-    const onKeydown = (e) => {
-      if (!settingsOpen.value && !previewUrl.value) return;
-      if (e.key === 'Escape') { e.preventDefault(); closeOverlays(); }
-      if (e.key !== 'Tab') return;
-      const nodes = [...(activeDialog()?.querySelectorAll('button:not(:disabled), input:not(:disabled), select, a[href], video[controls]') || [])]
-        .filter((el) => el.getClientRects().length);
-      const first = nodes[0], last = nodes.at(-1);
-      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus(); }
-      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
-    };
-    watch([settingsOpen, previewUrl], async ([s, p], [wasSettings, wasPreview]) => {
-      const opened = s || p;
-      if (opened && !wasSettings && !wasPreview) returnFocus = document.activeElement;
-      document.body.style.overflow = opened ? 'hidden' : '';
-      document.querySelector('.app').inert = !!opened;
-      await nextTick();
-      if (s || p) activeDialog()?.querySelector('button')?.focus();
-      else if (returnFocus?.isConnected) returnFocus.focus();
+    // Esc / 焦点循环 / 背景 inert / 滚动锁都交给 overlays.js
+    const teardownOverlays = window.VDACC_OVERLAYS.install({
+      settingsOpen, previewUrl, watch, nextTick,
     });
 
     let events = null;
     onMounted(async () => {
-      window.addEventListener('keydown', onKeydown);
       document.documentElement.dataset.theme =
         localStorage.getItem('vdl-theme') || 'light';
       if (!token) {
@@ -518,8 +459,7 @@ createApp({
 
     onBeforeUnmount(() => {
       if (events) events.close();
-      window.removeEventListener('keydown', onKeydown);
-      document.body.style.overflow = '';
+      teardownOverlays();
     });
 
     return {
