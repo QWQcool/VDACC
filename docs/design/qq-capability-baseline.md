@@ -111,7 +111,7 @@ getQQ = scopedOperation(getQQImpl)          :334
 | 项 | 现状 | 建议 |
 |---|---|---|
 | 网易云 | ✅ 已搬（2026-10-27，`docs/design/netease-capability-baseline.md`） | — |
-| 酷我 / 酷狗 | 同样存在「未放行档直接丢弃」与「显式档位静默降级」 | 按 QQ 的做法逐个搬，先补合成响应测试 |
+| 酷我 / 酷狗 | ✅ 已搬（2026-10-27，`docs/design/kuwo-kugou-capability-baseline.md`）；注意两家**没有登录能力**，所以全档失败报 `filtered` 而非 `need_login` | — |
 | 网络错误分类 | ✅ 已修（2026-10-27）：`fail()` 把 fetch 失败/超时归成 `network`，普通错误仍是 `internal`；见 `ts/tests/errors.test.ts` | — |
 | 试听判定的精度 | 只能比「字节数 vs 接口声明」，无法直接读音频时长 | 若要更准，可用 ffprobe 读时长，但会引入子进程依赖 |
 

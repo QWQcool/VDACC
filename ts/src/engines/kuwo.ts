@@ -28,7 +28,8 @@ interface Candidate {
   id: string; url: string; format: string; bitrate: number; duration: number; source: string;
 }
 
-const urlCache = operationState(() => new Map<string, { url: string; ext: string }>());
+/** `expected` 是探测时 Range 拿到的总字节：下载完用它判断是否被截断。 */
+const urlCache = operationState(() => new Map<string, { url: string; ext: string; expected: number }>());
 const infoState = operationState(() => ({ lastInfo: null as { title: string; artist: string; album: string; cover: string; lrc: string } | null }));
 
 /** `kuwo.cn/play_detail/<rid>`、`?musicId=` / `?rid=`、`MUSIC_<digits>`。 */
@@ -253,10 +254,11 @@ async function probeKuwoImpl(input: string): Promise<ProbeResult> {
     const { label, clip } = labelOf(cand, probe.size, duration);
     // mobi 与 antiserver 常指向同一个文件：码率和总字节都一样就当一档，别在界面里列两遍
     if (formats.some((f) => f.bytes === probe.size && f.label === label)) continue;
-    if (clip) warnings.push(`「${info.title}」拿到的是试听片段而不是整首，正片可能需要会员`);
+    // 只描述证据（比特率低到像片段），不猜原因：是会员、地区还是平台策略，我们没有证据
+    if (clip) warnings.push(`「${info.title}」可下载的只有 ${label}，不像整首——正片可能受限`);
     const ext = cand.format.toLowerCase() === 'flac' ? 'flac'
       : cand.format.toLowerCase() === 'aac' ? 'm4a' : 'mp3';
-    urlCache().set(cand.id, { url: cand.url, ext });
+    urlCache().set(cand.id, { url: cand.url, ext, expected: probe.size });
     formats.push(format({
       id: cand.id,
       label,
@@ -268,8 +270,10 @@ async function probeKuwoImpl(input: string): Promise<ProbeResult> {
   }
 
   if (!formats.length) {
-    throw new VdlError('need_login', `「${info.title || rid}」没有公开可下载的音频地址`,
-      '酷我公开通道只给部分曲目 128kbps；无损/会员曲需要登录，本引擎不逆向签名');
+    // 本引擎没有登录能力，指路「去登录」是把用户送进死胡同；也不断言会员/地区/风控——
+    // 这三者从响应里区分不出来，只能如实说「公开通道没放行」。
+    throw new VdlError('filtered', `「${info.title || rid}」没有公开可下载的音频地址`,
+      '酷我公开通道只放行部分曲目；本引擎不支持登录，也不会逆向签名或伪造会员');
   }
   formats[0].recommended = true;
   infoState().lastInfo = { title: info.title, artist: info.artist, album: info.album, cover: info.pic, lrc: info.lrc };
@@ -289,8 +293,21 @@ async function probeKuwoImpl(input: string): Promise<ProbeResult> {
 
 async function getKuwoImpl(input: string, formatId: string | null, outDir: string) {
   const probe = await probeKuwo(input);
-  const fmt = probe.formats.find((f) => f.id === formatId) ||
-    probe.formats.find((f) => f.recommended) || probe.formats[0];
+  // 显式点名了档位就不能换：静默换档会让用户以为拿到的是自己选的那个
+  const wanted = (formatId || '').trim();
+  let fmt: Format | undefined;
+  if (wanted) {
+    fmt = probe.formats.find((f) => f.id === wanted);
+    if (!fmt || !fmt.available) {
+      const usable = probe.formats.filter((f) => f.available).map((f) => f.id).join('、') || '无';
+      throw new VdlError('no_stream', `档位不可用：${wanted}（${fmt?.reason || '该曲没有这个档位'}）`,
+        `可用档位：${usable}——不会自动换成别的档`);
+    }
+  } else {
+    fmt = probe.formats.find((f) => f.recommended && f.available) ||
+      probe.formats.find((f) => f.available);
+  }
+  if (!fmt) throw new VdlError('no_stream', '没有可用档位');
   const cached = urlCache().get(fmt.id);
   if (!cached) throw new VdlError('no_stream', '该档位没有可用地址');
   const info = infoState().lastInfo!;
@@ -304,10 +321,17 @@ async function getKuwoImpl(input: string, formatId: string | null, outDir: strin
   }
 
   const part = dest + '.part';
-  await streamToFile(cached.url, part, REFERER);
-  if (statSync(part).size < 100 * 1024) {
+  const actual = await streamToFile(cached.url, part, REFERER);
+  if (actual < 100 * 1024) {
     unlinkSync(part);
     throw new VdlError('bad_payload', '文件过小，多半是试听片段或错误页');
+  }
+  // 探测时 Range 已经知道总字节，下载只到了一部分就是截断（或被中途改档）。
+  // .part 保留：重试可以续传。
+  if (cached.expected > 0 && actual < cached.expected * 0.95) {
+    throw new VdlError('incomplete_media',
+      `只拿到 ${actual} 字节，探测到的整首约 ${cached.expected} 字节`,
+      '可能被截断：重试续传，或换一个候选地址再试');
   }
   renameSync(part, dest);
 

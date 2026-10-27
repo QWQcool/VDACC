@@ -79,7 +79,11 @@
 - 未做（不假装支持）：会员档位实测（当前账号 320K/FLAC 仍 104003）、歌单。
 - **酷我 / 酷狗已接入**：公开接口 probe + 下载（`.part` 续传 + 限速）+ ffmpeg 标签/封面，
   酷我另落 `.lrc`；已注册 `platformOf` / server / cli。实测：酷我《花海》128kbps 3,368,054 字节，
-  酷狗《恒星不忘》128kbps 4,631,150 字节（带 `mjpeg` 封面）。会员档（320K/FLAC）被拒时如实报试听档。
+  酷狗《恒星不忘》128kbps 4,631,150 字节（带 `mjpeg` 封面）。
+- **酷我/酷狗状态口径（2026-10-27，仅离线验证）**：两家都没有登录能力，全档不可用时报
+  `filtered`（不再让用户去登录）；显式档位不可用报 `no_stream`；下载字节 < 探测总字节 95% 报
+  `incomplete_media`；酷狗把「获取失败 / 搜索没命中 / 接口标记付费」分开说，不再称公开档为
+  「试听档」。见 `docs/design/kuwo-kugou-capability-baseline.md`。
 - **网易云状态口径（2026-10-27，仅离线验证）**：probe 返回无损/320K 两个档位，未放行的
   `available:false` 且 `reason` 带平台 `code`；详情查不到歌改报 `not_found`；显式档位不可用报
   `no_stream` 不换档；下载字节 < 接口声明 60% 报 `incomplete_media`。

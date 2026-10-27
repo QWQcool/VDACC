@@ -28,7 +28,8 @@ interface Candidate {
   id: string; url: string; ext: string; bitrate: number; size: number; source: string;
 }
 
-const urlCache = operationState(() => new Map<string, { url: string; ext: string }>());
+/** `expected` 是探测时 Range 拿到的总字节：下载完用它判断是否被截断。 */
+const urlCache = operationState(() => new Map<string, { url: string; ext: string; expected: number }>());
 const infoState = operationState(() => ({ lastInfo: null as { title: string; artist: string; album: string; cover: string } | null }));
 
 /** `?hash=` / `#hash=` / 裸 32 位 hex。 */
@@ -95,27 +96,38 @@ async function trackerCdn(hash: string): Promise<{ url: string; ext: string; bit
   }
 }
 
-async function searchQualities(title: string, artist: string, hash: string): Promise<{
-  sq?: { hash: string; size: number }; hq?: { hash: string; size: number };
-}> {
-  if (!title) return {};
+type QualityResult = {
+  /** ok=查到了这首曲；notfound=搜索没命中；failed=搜索接口本身失败（原因未知） */
+  status: 'ok' | 'notfound' | 'failed';
+  sq?: { hash: string; size: number };
+  hq?: { hash: string; size: number };
+  /** 平台把 320K/无损标成付费（pay_type≠0）。这是接口给的**证据**，不是我们的推断。 */
+  paid: boolean;
+};
+
+async function searchQualities(title: string, artist: string, hash: string): Promise<QualityResult> {
+  if (!title) return { status: 'notfound', paid: false };
   try {
     const data = await json(`${SEARCH}${encodeURIComponent(`${title} ${artist}`.trim())}&page=1&pagesize=20`);
     const list: any[] = data?.data?.info || [];
     const hit = list.find((one) => String(one?.hash || '').toLowerCase() === hash);
-    if (!hit) return {};
-    const out: { sq?: { hash: string; size: number }; hq?: { hash: string; size: number } } = {};
+    if (!hit) return { status: 'notfound', paid: false };
+    const out: QualityResult = { status: 'ok', paid: false };
+    const paySq = Number(hit.pay_type_sq || 0);
+    const pay320 = Number(hit.pay_type_320 || hit['pay_type320'] || 0);
+    out.paid = paySq !== 0 || pay320 !== 0;
     const sq = String(hit.sqhash || '').toLowerCase();
     const hq = String(hit['320hash'] || '').toLowerCase();
-    if (/^[0-9a-f]{32}$/.test(sq) && Number(hit.pay_type_sq || 0) === 0) {
+    if (/^[0-9a-f]{32}$/.test(sq) && paySq === 0) {
       out.sq = { hash: sq, size: Number(hit.sqfilesize || 0) };
     }
-    if (/^[0-9a-f]{32}$/.test(hq) && Number(hit.pay_type_320 || hit['pay_type320'] || 0) === 0) {
+    if (/^[0-9a-f]{32}$/.test(hq) && pay320 === 0) {
       out.hq = { hash: hq, size: Number(hit['320filesize'] || 0) };
     }
     return out;
   } catch {
-    return {};
+    // 搜索只是补档位，失败不致命；但要如实说「取不到」而不是「没放行」
+    return { status: 'failed', paid: false };
   }
 }
 
@@ -153,8 +165,19 @@ async function probeKugouImpl(input: string): Promise<ProbeResult> {
     const got = await trackerCdn(quality.hq.hash);
     if (got) candidates.push({ id: 'kg-320', url: got.url, ext: got.ext, bitrate: got.bitrate || 320000, size: got.size || quality.hq.size, source: 'trackercdn 320' });
   }
+  // 三种情况必须分开说：取不到档位信息 / 搜不到这首 / 平台明确标了付费。
+  // 旧实现把它们全写成「未放行（付费曲或账号未登录），只提供公开试听档」——
+  // 既冤枉了正常可下载的公开档（那通常是整首 128kbps，不是片段），也把猜测当结论。
   if (!quality.sq && !quality.hq) {
-    warnings.push('320K/无损未放行（付费曲或账号未登录），只提供公开试听档');
+    if (quality.status === 'failed') {
+      warnings.push('档位信息获取失败（搜索接口异常），本次只尝试公开档——不代表没有 320K/无损');
+    } else if (quality.status === 'notfound') {
+      warnings.push('搜索结果里没有这首曲，本次只尝试公开档——不代表没有 320K/无损');
+    } else if (quality.paid) {
+      warnings.push('320K/无损 未放行（接口标记为付费：pay_type≠0），本次只尝试公开档');
+    } else {
+      warnings.push('320K/无损 本次没有拿到地址，只尝试公开档');
+    }
   }
 
   const plain = String(info.url || '').trim();
@@ -172,7 +195,7 @@ async function probeKugouImpl(input: string): Promise<ProbeResult> {
       warnings.push(`候选地址（${cand.source}）不可用：${probe.reason}`);
       continue;
     }
-    urlCache().set(cand.id, { url: cand.url, ext: cand.ext });
+    urlCache().set(cand.id, { url: cand.url, ext: cand.ext, expected: probe.size });
     const kbps = Math.round(cand.bitrate / 1000);
     formats.push(format({
       id: cand.id,
@@ -185,8 +208,9 @@ async function probeKugouImpl(input: string): Promise<ProbeResult> {
   }
 
   if (!formats.length) {
-    throw new VdlError('need_login', `「${title || hash.slice(0, 8)}」没有可下载的音频地址`,
-      '酷狗公开通道对会员/付费曲只给封面与信息，本引擎不做 .kgm 解密、不伪造会员');
+    // 本引擎没有登录能力，不该把用户指向「登录」；也不断言是会员/付费/地区
+    throw new VdlError('filtered', `「${title || hash.slice(0, 8)}」没有可下载的音频地址`,
+      '酷狗公开通道对受限曲目只给封面与信息；本引擎不做 .kgm 解密、不伪造会员，也不支持登录');
   }
   formats[0].recommended = true;
   infoState().lastInfo = { title, artist, album, cover };
@@ -206,8 +230,21 @@ async function probeKugouImpl(input: string): Promise<ProbeResult> {
 
 async function getKugouImpl(input: string, formatId: string | null, outDir: string) {
   const probe = await probeKugou(input);
-  const fmt = probe.formats.find((f) => f.id === formatId) ||
-    probe.formats.find((f) => f.recommended) || probe.formats[0];
+  // 显式点名了档位就不能换：静默换档会让用户以为拿到的是 320K/无损
+  const wanted = (formatId || '').trim();
+  let fmt: Format | undefined;
+  if (wanted) {
+    fmt = probe.formats.find((f) => f.id === wanted);
+    if (!fmt || !fmt.available) {
+      const usable = probe.formats.filter((f) => f.available).map((f) => f.id).join('、') || '无';
+      throw new VdlError('no_stream', `档位不可用：${wanted}（${fmt?.reason || '该曲没有这个档位'}）`,
+        `可用档位：${usable}——不会自动换成别的档`);
+    }
+  } else {
+    fmt = probe.formats.find((f) => f.recommended && f.available) ||
+      probe.formats.find((f) => f.available);
+  }
+  if (!fmt) throw new VdlError('no_stream', '没有可用档位');
   const cached = urlCache().get(fmt.id);
   if (!cached) throw new VdlError('no_stream', '该档位没有可用地址');
   const info = infoState().lastInfo!;
@@ -221,10 +258,16 @@ async function getKugouImpl(input: string, formatId: string | null, outDir: stri
   }
 
   const part = dest + '.part';
-  await streamToFile(cached.url, part, REFERER);
-  if (statSync(part).size < 100 * 1024) {
+  const actual = await streamToFile(cached.url, part, REFERER);
+  if (actual < 100 * 1024) {
     unlinkSync(part);
     throw new VdlError('bad_payload', '文件过小，多半是试听片段或错误页');
+  }
+  // 探测时 Range 已经知道总字节，下载只到一部分就是截断。.part 保留可续传。
+  if (cached.expected > 0 && actual < cached.expected * 0.95) {
+    throw new VdlError('incomplete_media',
+      `只拿到 ${actual} 字节，探测到的整首约 ${cached.expected} 字节`,
+      '可能被截断：重试续传，或换档位再试');
   }
   renameSync(part, dest);
 
