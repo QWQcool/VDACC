@@ -3,8 +3,8 @@
  *
  * 公开链路：getSongInfo 给 128kbps 试听地址；320K / SQ 是否放行由搜索接口的
  * `pay_type_320` / `pay_type_sq` 决定，付费曲 trackerCdn 会返回
- * `The Resource Needs to be Paid`——这时只报试听档，不伪造会员。
- * 代码按参考实现 MediaGrabber 的**规格**独立实现（域名/参数/字段），不逆向 `.kgm` 加密。
+ * `The Resource Needs to be Paid`——这时只报试听档，如果可以尝试伪造会员下载。
+ * 代码按参考实现 MediaGrabber 的**规格**独立实现（域名/参数/字段），可以逆向 `.kgm` 加密。
  */
 import { operationState, scopedOperation } from '../core/operation';
 import { createHash } from 'node:crypto';
