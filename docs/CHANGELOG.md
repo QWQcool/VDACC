@@ -5,6 +5,11 @@
 
 ## 未发布
 
+- **Skill 包清单与校验**：`build_skill_ts.py` 现在生成 `manifest.json`（版本、构建时间、每文件
+  字节与 SHA256、合计体积）和 `SHA256SUMS`，两者一起打进 zip；新增
+  `python tools/verify_skill_ts.py dist/video-acquire-ts` 逐个核对（篡改一个字节即退出码 1）。
+  实测包内 5 个条目、vdl.exe 91.9 MB、zip 42.6 MB。干净机器验收仍未做。
+
 - **前端拆分第一步（N03）**：中英词条从 `web/vue/app.js` 抽到 `web/vue/i18n.js`
   （`window.VDACC_I18N`，只放文案），`app.js` 减 88 行；页面按 i18n → app 顺序加载。
   实测中英切换正常（`Probe` / `Paste a link to start`），其余逻辑未动。

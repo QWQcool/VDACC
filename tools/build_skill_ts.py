@@ -9,6 +9,9 @@
 """
 
 import argparse
+import datetime
+import hashlib
+import json
 import os
 import pathlib
 import shutil
@@ -65,6 +68,49 @@ def find_bun():
     raise SystemExit('找不到可执行的 bun.exe：设置 BUN 环境变量，或安装 Bun 后重开终端')
 
 
+def sha256_of(path):
+    digest = hashlib.sha256()
+    with open(path, 'rb') as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b''):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def write_manifest():
+    """产物清单 + 校验和：解压后先核对 SHA256，再谈「能不能跑」。"""
+    version = 'unknown'
+    try:
+        version = json.loads((ROOT / 'ts' / 'package.json').read_text(encoding='utf-8'))['version']
+    except Exception:
+        pass
+
+    files = []
+    for file in sorted(DIST.rglob('*')):
+        if not file.is_file():
+            continue
+        rel = file.relative_to(DIST).as_posix()
+        files.append({
+            'path': rel,
+            'bytes': file.stat().st_size,
+            'sha256': sha256_of(file),
+        })
+
+    manifest = {
+        'name': 'video-acquire-ts',
+        'version': version,
+        'built_at': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'),
+        'files': files,
+        'total_bytes': sum(item['bytes'] for item in files),
+    }
+    (DIST / 'manifest.json').write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    with open(DIST / 'SHA256SUMS', 'w', encoding='utf-8', newline='\n') as fh:
+        for item in files:
+            fh.write(f"{item['sha256']}  {item['path']}\n")
+    print(f'清单: {len(files)} 个文件，合计 {manifest["total_bytes"]/1024/1024:.1f} MB')
+    return manifest
+
+
 def build():
     # 清理范围只能是仓库内的构建目录，不能跟随被替换的目录链接。
     if DIST.resolve() != ROOT.resolve() / 'dist' / 'video-acquire-ts':
@@ -85,6 +131,7 @@ def build():
     size = exe.stat().st_size
     print(f'产物: {DIST}')
     print(f'  vdl.exe {size/1024/1024:.1f} MB')
+    write_manifest()
     return DIST
 
 

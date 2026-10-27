@@ -215,7 +215,9 @@ parity 稳定后再决定 Python 是否退化为 yt-dlp helper。
 
 **M3 · 分发与移动端（有前提）。**
 
-- **N05 · 分发门槛与 doctor**：🟡 部分完成（2026-10-26）——`bun ts/src/cli.ts doctor` 只读诊断
+- **N05 · 分发门槛与 doctor**：🟡 部分完成（2026-10-26）——`build_skill_ts.py` 产出
+  `manifest.json` + `SHA256SUMS`（已随 zip 打包），`verify_skill_ts.py` 可逐个核对（篡改即失败）；
+  `bun ts/src/cli.ts doctor` 只读诊断
   （Bun/ffmpeg/组件/配置/输出目录/三站凭据，fail 才退出码 1）；yt-dlp 安装改为先取官方
   `SHA2-256SUMS` 再校验、把 SHA256 记进配置，`/api/components` 依据记录报 `verified`。
   实测重装 17,880,111 字节、SHA256 `33121d19…`、doctor 显示「已校验」。

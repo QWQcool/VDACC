@@ -45,7 +45,8 @@
 ```bash
 bun test ts/tests                          # 75 项离线回归
 node tools/accept_regression_ui.cjs         # Edge + 临时用户目录 + 本地媒体
-python tools/build_skill_ts.py --zip        # Skill 编译与组装
+python tools/build_skill_ts.py --zip        # Skill 编译与组装（含 manifest.json / SHA256SUMS）
+python tools/verify_skill_ts.py dist/video-acquire-ts   # 解压后核对每个文件的 SHA256
 ```
 
 界面回归依赖 `cd ts && bun install` 和系统 Edge；不读取真实用户配置或凭据。
