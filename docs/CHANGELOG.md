@@ -11,6 +11,68 @@
   通道是「同步 post + 异步回投」。落盘分两段：私有 `staging/*.part` → `MediaStore` 的 `Download/VDACC`。
   真机（RMX5200 / Android 16）实测：自检 15/15、4 个 16KB 分块写出 53,131 字节、
   页面 md5 与设备 `md5sum` 一致、`.part` 已清理；局域网模式回归通过。minSdk 提到 26。
+- **发布收口（N05）与减少动态效果检查**：新增 `tools/release_baseline.cjs` + `docs/release-baseline.json`
+  记录 Skill 包体积基线（exe **91.95 MB** / zip **42.58 MB** / 3 个文件；两次构建漂移 0.0%），
+  漂移 ≥25% 直接失败，避免「这次发的包为什么大了一倍」靠记忆；**只记体积不记哈希**，
+  完整性仍由 `manifest.json` + `SHA256SUMS` 负责。新增 `docs/RELEASE.md` 检查清单
+  （版本号四处同步、必跑项、CI 手动触发、标签/Release、回滚），并如实标注**干净机器验收仍未做**。
+  界面侧新增 `tools/reduced_motion_check.cjs`：用真实 Edge 把 `prefers-reduced-motion: reduce`
+  下的**计算后样式**读出来（不是查 CSS 里有没有 @media 这种恒真断言），并用 `no-preference`
+  做对照防止误报；四个探针（`.btn`/`.input`/`.bar i`/`.slideover`）在 reduce 下全部 0s/无动画，
+  对照组有 0.15s/0.22s 过渡与 `slide-in` 动画。顺手补了 `scroll-behavior: auto !important` 兜底。
+- **酷我：接口没给元数据时，标题从音频文件自带的 ID3 里取**：酷我 `songinfoandlrc` 会偶发
+  `status=301 音乐查询失败`（连续请求更容易触发），此时文件名会变成
+  `474678847_kuwo-474678847_128kbps.mp3`。但 CDN 给的 mp3 自己带 ID3（实测
+  `TIT2=花海 / TPE1=周杰伦`），所以新增 `core/tags.ts`（纯 JS 解析 ID3v2.2/2.3/2.4 文本帧，
+  支持 latin1 / UTF-16 BOM / UTF-8，不依赖 ffprobe），下载完成后只读文件头 256KB，
+  用标签里的标题/歌手重命名；读不到就保持 rid 命名，不猜。
+  真实实测：`474678847_花海 (DJ 阿若版)_128kbps.mp3`，3,368,054 字节 / 210.4s / 128kbps，
+  ffprobe 标签正确。测试 147 → **154 pass**。
+- **网易云补上 128K / 96K 低档**（真实环境驱动）：原来只探「无损 / 320K」，**没有会员权益的账号
+  一首歌都下不了**，连平台对免费曲开放的 128K/96K 也拿不到。现在四档全探（999000/320000/128000/96000），
+  免费曲对未开通权益的账号至少能下 128K。另外按「字节相同」判重：实测 128K 与 96K 会返回不同 URL
+  但字节完全相同的文件，直接列两条会出现「128K 3.93MB / 96K 3.93MB」的自相矛盾列表，现在合并成一条
+  并说明原因（被判重的档位 id 仍可通过 `--format` 使用）。
+  真实实测：免费曲 id 2007983648 → 无损 14.62MB / 320K 9.82MB / 128K 3.93MB，`--format standard`
+  下载 4,179,995 字节（mp3 129,918 bps、257.4s、带封面）；会员专享曲（id 186016）四档仍全部 `code=404`
+  ——补档位不会让 VIP 曲变得可下。测试 145 → **147 pass**。
+- **B站：接口错误不再一律说成「下载失败」，无声视频与截断不再当成功**（ReversePlan 工作包 1–2，
+  **仅离线验证**）：`apiJson` 原来把所有接口码记成 `download_failed`——那时还没开始下载；
+  现在 HTTP 错误记 `http_<status>`、风控返回 HTML 记 `api_error`、`code=-404` 记 `not_found`、
+  其它业务码记为 `api_error` 并带 **`code=…` + 平台原话**（如「大会员专享限制」），不替用户解释。
+  `dash.audio` 为空时 probe 会明确提示「下载结果会是无声视频」（原来静默产出无声音文件且
+  `warnings` 恒空）；未登录也会提示清晰度以匿名放行为准。下载侧新增完整性校验：
+  每条轨实际字节 < Range 探测值 × 95% 报 `incomplete_media`，**判定在 ffmpeg 合并之前**。
+  新增 6 条合成响应测试，测试 139 → **145 pass**。线上行为未复测。
+- **酷我/酷狗：不再把用户指去「登录」，也不再误称「试听档」**（ReversePlan 工作包 1–2，
+  **仅离线验证**）：两家**都没有登录能力**，原来全档不可用时却报 `need_login`（用户被指进死胡同），
+  现在改报 `filtered` 并说明「公开通道只放行部分曲目」；显式 `--format` 不存在时改报 `no_stream`
+  （原来静默换成别的档）；下载字节 < 探测到的总字节 95% 时报 `incomplete_media`（原来只挡 <100KB）。
+  酷狗另修两处措辞：把公开档称作「试听档」是错的（实测通常是整首 128kbps），
+  以及把「搜索接口失败」说成「付费曲或账号未登录」——现在三态分开
+  （获取失败 / 搜索没命中 / 接口标记付费 `pay_type≠0`）。新增 11 条合成响应测试，
+  测试 128 → **139 pass**。线上行为未复测。
+- **网络错误不再说成「内部错误」**：各引擎直接用 `fetch`，断网/DNS 失败/超时抛的是
+  `TypeError`(`fetch failed`)/`AbortError`，原来统一被 `fail()` 记成 `internal`——用户看到
+  「内部错误」会往程序 bug 方向查。现在归成 `network` 并给出「检查网络或稍后重试」的下一步，
+  普通程序错误仍是 `internal`；网易云引擎早就是这个码，本次把其余引擎对齐（`ts/src/core/errors.ts`）。
+  另补 `/api/preview` 的作用域回归测试：核实后**预览不是缺陷**（整个请求包在 `runOperation` 里，
+  probe 与 preview 共用一个作用域），两条用例把该前提钉住。测试 120 → **128 pass**。
+- **网易云：档位与完整性如实报告**（ReversePlan 工作包 2，**仅离线验证**）：
+  `probe` 两个档位（无损/320K）全部返回，未放行的 `available:false` + `reason` 带平台 `code`
+  （如 `code=404`），`warnings` 不再恒为空；详情查不到歌改报 `not_found`（原来是 `filtered`）；
+  全档被拒的消息带上 code；显式指定档位不可用时报 `no_stream`，不再静默降到另一档；
+  下载字节 < 接口声明整曲大小的 60% 时报 `incomplete_media`（无损档的试听片段也能上百 KB，
+  原来只有 <100KB 才拦）。新增 9 条合成响应测试（`ts/tests/netease-probe.test.ts`），
+  测试 111 → **120 pass**。线上档位行为未重新验证。
+- **QQ 音乐：受限与未知不再伪装成可用**（ReversePlan 工作包 1–2，**仅离线验证**）：
+  `probe` 现在返回全部四个档位，未放行的档位 `available:false` + `reason` 带真实 `result` 代码
+  （如 `104003`），不再用「歌曲付费或账号无对应会员」这种没有证据的推断；有凭据且全档被拒报
+  `filtered`、无凭据才报 `need_login`；凭据过期单独提示；显式指定档位不可用时改报 `no_stream`
+  （原来会静默换成别的档，用户以为拿到 320K）；下载字节 < 接口声明整曲大小的 60% 时报
+  `incomplete_media`，不再把试听片段报成「完成」。CLI 打印不可用档位原因，界面档位按钮
+  `:disabled` 有可见样式并带 `title`。新增 10 条合成响应测试（`ts/tests/qq-probe.test.ts`），
+  测试 101 → **111 pass**。线上档位行为未重新验证。
 - **任务管理**：`DELETE /api/jobs/:id`（只允许已结束任务）、`POST /api/jobs/clear-finished`、
   `POST /api/jobs/retry-failed`；界面在任务卡加「删除」「打开文件夹」（复用 `/api/reveal`），
   列表头加「重试失败 (N)」「清空已结束」。删除通过 SSE `job-removed` 推给所有界面，无需刷新。

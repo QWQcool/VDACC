@@ -15,12 +15,21 @@ import { throttle } from '../core/rate';
 import { format, type Format, type ProbeResult } from '../core/types';
 
 const API = 'https://music.163.com';
+/**
+ * 四档都探。只探无损/320K 的时候，**没有会员的账号一首歌都下不了**——
+ * 免费曲本来允许 128K/96K，那是平台放行的范围，不是绕过会员。
+ */
 const LEVELS: Array<[number, string, string]> = [
   [999000, 'lossless', '无损 FLAC'],
   [320000, 'exhigh', '极高 320K'],
+  [128000, 'standard', '标准 128K'],
+  [96000, 'low', '较低 96K'],
 ];
 
-const formatUrls = operationState(() => new Map<string, string>());
+/** `declared` 是接口声明的**整曲**字节数：下载完拿实际字节跟它比，才能发现试听/降质。 */
+const formatUrls = operationState(
+  () => new Map<string, { url: string; declared: number; ext: string; label: string }>(),
+);
 const songState = operationState(() => ({ lastSong: null as any }));
 
 function cookieHeader(): string {
@@ -129,29 +138,85 @@ async function probeNeteaseImpl(url: string): Promise<ProbeResult> {
 
   const detail = await getJson(`/api/song/detail/?id=${sid}&ids=%5B${sid}%5D`, cookie);
   const song = (detail.songs || [])[0];
-  if (!song) throw new VdlError('filtered', `查不到这首歌（id=${sid}）`);
+  // 详情里没有这首歌 = 查不到；跟「有歌但没权益」是两回事，码不能混用
+  if (!song) throw new VdlError('not_found', `查不到这首歌（id=${sid}）`);
   songState().lastSong = song;
 
+  // 两个档位**全部**进 formats：放行的 available=true，没放行的 available=false + reason。
+  // 旧实现直接丢掉未放行档，界面看起来像「平台只有一档」。
   const formats: Format[] = [];
+  const denied: string[] = [];
+  const deniedCodes: number[] = [];
+  const warnings: string[] = [];
+
   for (const [br, level, label] of LEVELS) {
     const data = await getJson(
       `/api/song/enhance/player/url?ids=%5B${sid}%5D&br=${br}`, cookie);
     const item = (data.data || [])[0];
-    if (!item || Number(item.code) !== 200 || !item.url) continue;
-    const real = await headSize(item.url);
-    if (real) item.size = real;
+    const code = Number(item?.code ?? 0);
+    const url = String(item?.url || '');
+
+    if (!item || code !== 200 || !url) {
+      // 只报证据：平台的 code/空地址不能反推成「需要会员」
+      const reason = !item
+        ? '接口没有返回这个档位'
+        : code !== 200
+          ? `接口未放行（code=${item.code}）`
+          : '接口没有给出地址（url 为空）';
+      formats.push(format({
+        id: level, label, ext: 'mp3', acodec: 'mp3',
+        bitrate: br, available: false, reason,
+      }));
+      denied.push(`${label}${code && code !== 200 ? `(code=${code})` : ''}`);
+      if (code && code !== 200) deniedCodes.push(code);
+      continue;
+    }
+
+    const declared = Number(item.size || 0);
+    const real = await headSize(url);
     const ext = String(item.type || 'mp3').toLowerCase();
-    formats.push(format({
-      id: level, label, ext, acodec: ext,
-      bytes: Number(item.size || 0) || null,
-      bitrate: Number(item.br || 0) || null,
-    }));
-    formatUrls().set(level, item.url);
+    const size = real || declared || 0;
+    // 地址与档位信息都登记：即使下面因为「同一个文件」不单列，--format 用这个 id 仍能命中
+    formatUrls().set(level, { url, declared, ext, label });
+
+    // 不同 br 常常指向同一个文件：实测 128K 与 96K 会返回**不同 URL 但字节完全相同**的文件。
+    // 按「字节相同」判重而不是只比 URL，否则界面会出现「128K 3.93MB / 96K 3.93MB」这种自相矛盾的列表。
+    const sameFile = size > 0 && formats.some((f) => f.available && f.bytes === size);
+    if (sameFile) {
+      warnings.push(`${label} 接口返回的文件与已有档位字节相同，已合并为一条`);
+    } else {
+      formats.push(format({
+        id: level, label, ext, acodec: ext,
+        // HEAD 拿到的是「实际能下多少」，但也可能是试听片段的大小；
+        // 真正的完整性判定在 get（下载完成后的实际字节 vs declared）
+        bytes: size || null,
+        bitrate: Number(item.br || 0) || null,
+      }));
+      if (real > 0 && declared > 0 && real < declared * 0.6) {
+        const mb = (n: number) => `${(n / 1048576).toFixed(2)} MB`;
+        warnings.push(`${label} 实际可下载 ${mb(real)}，明显小于接口声明 ${mb(declared)}（可能是试听片段）`);
+      }
+    }
   }
-  if (!formats.length) {
-    throw new VdlError(cookie ? 'filtered' : 'need_login', '这首歌没有可播放地址');
+
+  const available = formats.filter((f) => f.available);
+  if (!available.length) {
+    const suffix = deniedCodes.length
+      ? `（code=${[...new Set(deniedCodes)].join('/')}）`
+      : '';
+    if (cookie) {
+      throw new VdlError('filtered', `所有档位都没有拿到地址${suffix}`,
+        '确认账号是否具备该曲权益；若已开通仍失败，请把上面的代码记下来反馈');
+    }
+    throw new VdlError('need_login', `没有匿名可用的地址${suffix}`,
+      '登录后重试：bun ts/src/cli.ts auth netease');
   }
-  formats[0].recommended = true;
+  available[0].recommended = true;
+
+  warnings.unshift(cookie
+    ? '已登录，档位以账号权益为准'
+    : '未登录，仅匿名可取的档位（无损/320K 通常需要对应权益）');
+  if (denied.length) warnings.push(`本次未放行：${denied.join('、')}`);
 
   const album = song.album || {};
   const artists = (song.artists || []).map((a: any) => a.name || '').filter(Boolean);
@@ -166,7 +231,7 @@ async function probeNeteaseImpl(url: string): Promise<ProbeResult> {
       source_url: `${API}/song?id=${sid}`,
       platform: 'netease', parts: [],
     },
-    formats, warnings: [], error: null,
+    formats, warnings, error: null,
   };
 }
 
@@ -205,10 +270,34 @@ async function streamTo(url: string, part: string): Promise<number> {
 
 async function getNeteaseImpl(input: string, formatId: string | null, outDir: string) {
   const probe = await probeNetease(input);
-  const fmt = probe.formats.find((f) => f.id === formatId) ||
-    probe.formats.find((f) => f.recommended) || probe.formats[0];
-  const url = formatUrls().get(fmt.id);
-  if (!url) throw new VdlError('no_stream', '该档位没有可用地址');
+  // 显式点名了档位就不能换：静默降级会让用户以为拿到的是无损，实际是 320K
+  const wanted = (formatId || '').trim();
+  let fmt: Format | undefined;
+  if (wanted) {
+    fmt = probe.formats.find((f) => f.id === wanted);
+    if (!fmt) {
+      // 与已列档位是同一个文件时不会单列，但地址仍登记着：按别名继续
+      const alias = formatUrls().get(wanted);
+      if (alias) {
+        fmt = format({
+          id: wanted, label: alias.label, ext: alias.ext,
+          bytes: alias.declared || null,
+        });
+      }
+    }
+    if (!fmt || !fmt.available) {
+      const usable = probe.formats.filter((f) => f.available).map((f) => f.id).join('、') || '无';
+      throw new VdlError('no_stream', `档位不可用：${wanted}（${fmt?.reason || '该曲没有这个档位'}）`,
+        `可用档位：${usable}——不会自动换成别的档`);
+    }
+  } else {
+    fmt = probe.formats.find((f) => f.recommended && f.available) ||
+      probe.formats.find((f) => f.available);
+  }
+  if (!fmt) throw new VdlError('no_stream', '没有可用档位');
+  const cached = formatUrls().get(fmt.id);
+  if (!cached) throw new VdlError('no_stream', '该档位没有可用地址');
+  const url = cached.url;
   const song = songState().lastSong || {};
 
   mkdirSync(outDir, { recursive: true });
@@ -221,10 +310,18 @@ async function getNeteaseImpl(input: string, formatId: string | null, outDir: st
   }
 
   const part = dest + '.part';
-  await streamTo(url, part);
-  if (statSync(part).size < 100 * 1024) {
+  const actual = await streamTo(url, part);
+  if (actual < 100 * 1024) {
     unlinkSync(part);
     throw new VdlError('bad_payload', '文件过小，多半是试听片段或错误页');
+  }
+  // 「能播放」不等于「拿到整曲」：无损档的试听片段也可能上百 KB，
+  // 所以拿实际字节跟接口声明的整曲大小比一次，偏差过大就不报完成。
+  // .part 保留：万一是网络截断，重试可以续传。
+  if (cached.declared > 0 && actual < cached.declared * 0.6) {
+    throw new VdlError('incomplete_media',
+      `只拿到 ${actual} 字节，接口声明整曲约 ${cached.declared} 字节`,
+      '可能是试听片段或下载被截断：确认账号权益后重试，或改用其它档位');
   }
 
   // 歌词单独落 .lrc（ID3 的 USLT 各播放器支持不一）
@@ -302,7 +399,7 @@ async function getNeteaseImpl(input: string, formatId: string | null, outDir: st
 }
 
 export function previewNetease(formatId: string): string {
-  return formatUrls().get(formatId) || "";
+  return formatUrls().get(formatId)?.url || "";
 }
 
 export const probeNetease = scopedOperation(probeNeteaseImpl);

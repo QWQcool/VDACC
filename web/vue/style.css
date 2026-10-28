@@ -271,6 +271,9 @@
   transition: background var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
 .q:hover { background: var(--accent-soft); }
+/* 引擎会返回「存在但不可用」的档位（如 QQ 的 320K/FLAC 被接口拒绝），必须一眼看出来不可点 */
+.q:disabled { cursor: not-allowed; opacity: .45; }
+.q:disabled:hover { background: transparent; }
 .q b { font-size: 13px; font-weight: 600; line-height: 18px; }
 .q span { font-family: var(--font-mono); font-size: 10px; color: var(--text-3); }
 .q.on {
@@ -493,5 +496,8 @@
   .title-row h3 { font-size: 17px; line-height: 24px; }
 }
 @media (prefers-reduced-motion: reduce) {
+  /* 系统开了「减少动态效果」：所有过渡/动画直接关掉（界面只有位移与淡入，丢掉不损失信息） */
   * { animation: none !important; transition: none !important; }
+  /* 兜底：以后若有人给容器加 scroll-behavior: smooth，这里统一压掉 */
+  html, body { scroll-behavior: auto !important; }
 }

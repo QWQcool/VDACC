@@ -58,7 +58,10 @@ function human(res: ProbeResult) {
   console.log(`  ${m.author || '未知作者'} · ${m.platform} / ${res.engine}`);
   for (const f of res.formats) {
     const size = f.bytes ? `${(f.bytes / 1048576).toFixed(2)} MB` : '未知';
-    console.log(`  ${f.id.padEnd(14)} ${f.label.padEnd(8)} ${size}${f.recommended ? '  推荐' : ''}`);
+    // 不可用档位也要打印：只说「没有这一档」用户不知道是被拒、没返回还是没地址
+    const tag = f.recommended ? '  推荐' : '';
+    const off = f.available ? '' : `  不可用：${f.reason || '未说明'}`;
+    console.log(`  ${f.id.padEnd(14)} ${f.label.padEnd(8)} ${size}${tag}${off}`);
   }
   // warnings 是「不假装支持」的落点（未登录、试听片段、会员档被拒），人读输出也必须看到
   for (const w of res.warnings || []) console.log(`  注意：${w}`);

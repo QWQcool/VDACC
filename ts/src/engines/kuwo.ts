@@ -7,7 +7,7 @@
  * 无损（br=2000kflac）没有放行，档位以接口实际返回为准。
  */
 import { operationState, scopedOperation } from '../core/operation';
-import { existsSync, mkdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { streamToFile, tagAudio } from '../core/audio';
@@ -15,6 +15,7 @@ import { releaseDest, reserveDest } from '../core/dest';
 import { VdlError } from '../core/errors';
 import { UA, request } from '../core/http';
 import { safeName } from '../core/naming';
+import { readId3v2 } from '../core/tags';
 import { format, type Format, type Media, type ProbeResult } from '../core/types';
 
 const SEARCH = 'http://search.kuwo.cn/r.s?ft=music&itemset=web_2013&client=kt&pn=0&rn=10&rformat=json&encoding=utf8&all=';
@@ -28,8 +29,15 @@ interface Candidate {
   id: string; url: string; format: string; bitrate: number; duration: number; source: string;
 }
 
-const urlCache = operationState(() => new Map<string, { url: string; ext: string }>());
-const infoState = operationState(() => ({ lastInfo: null as { title: string; artist: string; album: string; cover: string; lrc: string } | null }));
+/** `expected` 是探测时 Range 拿到的总字节：下载完用它判断是否被截断。 */
+const urlCache = operationState(() => new Map<string, { url: string; ext: string; expected: number }>());
+const infoState = operationState(() => ({
+  lastInfo: null as {
+    title: string; artist: string; album: string; cover: string; lrc: string;
+    /** 元数据是 rid 兜底的（接口没给），下载后要尝试用文件内嵌标签补全 */
+    degraded: boolean;
+  } | null,
+}));
 
 /** `kuwo.cn/play_detail/<rid>`、`?musicId=` / `?rid=`、`MUSIC_<digits>`。 */
 export function parseRid(input: string): string {
@@ -75,6 +83,8 @@ interface SongInfo {
   duration: number; lrc: string;
   /** 元数据降级时的说明（接口返回空），要一路带到 probe warnings 里 */
   warn?: string;
+  /** 标题是 rid 兜底的：下载后可以尝试用文件内嵌 ID3 补全 */
+  degraded: boolean;
 }
 
 /** 酷我搜索返回的是单引号伪 JSON，只能按字段抠。 */
@@ -101,6 +111,19 @@ async function searchMeta(title: string, rid: string): Promise<{ artist: string;
     // 搜索只是补字段，失败不致命
   }
   return null;
+}
+
+/** 只读文件头若干字节：ID3 文本帧在开头，没必要为解析标签把 15MB 整读进内存。 */
+function readHead(path: string, maxBytes = 256 * 1024): Uint8Array {
+  const fd = openSync(path, 'r');
+  try {
+    const len = Math.min(statSync(path).size, maxBytes);
+    const buf = Buffer.allocUnsafe(len);
+    const read = readSync(fd, buf, 0, len, 0);
+    return buf.subarray(0, read);
+  } finally {
+    closeSync(fd);
+  }
 }
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
@@ -156,7 +179,9 @@ async function songInfo(rid: string): Promise<SongInfo> {
   let degraded = '';
   if (!title) {
     title = `kuwo-${rid}`;
-    degraded = '未能获取歌曲信息（接口间歇性返回空），标题先用 rid 代替';
+    // songinfoandlrc 会偶发返回 status=301「音乐查询失败」（连续请求更容易触发），
+    // 这时标题只能先用 rid；下载时会读文件内嵌 ID3 补全。
+    degraded = '未能获取歌曲信息（接口返回空或 301 查询失败），标题先用 rid 代替；下载时会尝试读文件内嵌标签补全';
   }
   if (title && (!artist || !album || !pic)) {
     const extra = await searchMeta(title, rid);
@@ -174,6 +199,7 @@ async function songInfo(rid: string): Promise<SongInfo> {
     title, artist, album, pic: cover,
     duration: Number(info.duration || 0) || 0,
     lrc: rawLrc.length ? toLrc(rawLrc) : '',
+    degraded: !!degraded,
     ...(degraded ? { warn: degraded } : {}),
   };
 }
@@ -253,10 +279,11 @@ async function probeKuwoImpl(input: string): Promise<ProbeResult> {
     const { label, clip } = labelOf(cand, probe.size, duration);
     // mobi 与 antiserver 常指向同一个文件：码率和总字节都一样就当一档，别在界面里列两遍
     if (formats.some((f) => f.bytes === probe.size && f.label === label)) continue;
-    if (clip) warnings.push(`「${info.title}」拿到的是试听片段而不是整首，正片可能需要会员`);
+    // 只描述证据（比特率低到像片段），不猜原因：是会员、地区还是平台策略，我们没有证据
+    if (clip) warnings.push(`「${info.title}」可下载的只有 ${label}，不像整首——正片可能受限`);
     const ext = cand.format.toLowerCase() === 'flac' ? 'flac'
       : cand.format.toLowerCase() === 'aac' ? 'm4a' : 'mp3';
-    urlCache().set(cand.id, { url: cand.url, ext });
+    urlCache().set(cand.id, { url: cand.url, ext, expected: probe.size });
     formats.push(format({
       id: cand.id,
       label,
@@ -268,11 +295,16 @@ async function probeKuwoImpl(input: string): Promise<ProbeResult> {
   }
 
   if (!formats.length) {
-    throw new VdlError('need_login', `「${info.title || rid}」没有公开可下载的音频地址`,
-      '酷我公开通道只给部分曲目 128kbps；无损/会员曲需要登录，本引擎不逆向签名');
+    // 本引擎没有登录能力，指路「去登录」是把用户送进死胡同；也不断言会员/地区/风控——
+    // 这三者从响应里区分不出来，只能如实说「公开通道没放行」。
+    throw new VdlError('filtered', `「${info.title || rid}」没有公开可下载的音频地址`,
+      '酷我公开通道只放行部分曲目；本引擎不支持登录，也不会逆向签名或伪造会员');
   }
   formats[0].recommended = true;
-  infoState().lastInfo = { title: info.title, artist: info.artist, album: info.album, cover: info.pic, lrc: info.lrc };
+  infoState().lastInfo = {
+    title: info.title, artist: info.artist, album: info.album,
+    cover: info.pic, lrc: info.lrc, degraded: info.degraded,
+  };
 
   const media: Media = {
     id: rid,
@@ -289,29 +321,69 @@ async function probeKuwoImpl(input: string): Promise<ProbeResult> {
 
 async function getKuwoImpl(input: string, formatId: string | null, outDir: string) {
   const probe = await probeKuwo(input);
-  const fmt = probe.formats.find((f) => f.id === formatId) ||
-    probe.formats.find((f) => f.recommended) || probe.formats[0];
+  // 显式点名了档位就不能换：静默换档会让用户以为拿到的是自己选的那个
+  const wanted = (formatId || '').trim();
+  let fmt: Format | undefined;
+  if (wanted) {
+    fmt = probe.formats.find((f) => f.id === wanted);
+    if (!fmt || !fmt.available) {
+      const usable = probe.formats.filter((f) => f.available).map((f) => f.id).join('、') || '无';
+      throw new VdlError('no_stream', `档位不可用：${wanted}（${fmt?.reason || '该曲没有这个档位'}）`,
+        `可用档位：${usable}——不会自动换成别的档`);
+    }
+  } else {
+    fmt = probe.formats.find((f) => f.recommended && f.available) ||
+      probe.formats.find((f) => f.available);
+  }
+  if (!fmt) throw new VdlError('no_stream', '没有可用档位');
   const cached = urlCache().get(fmt.id);
   if (!cached) throw new VdlError('no_stream', '该档位没有可用地址');
   const info = infoState().lastInfo!;
 
   mkdirSync(outDir, { recursive: true });
-  const stem = `${probe.media!.id}_${safeName(info.title || probe.media!.id)}_${safeName(fmt.label, 16, fmt.id)}`;
-  const dest = reserveDest(outDir, `${stem}.${cached.ext}`);
+  let stem = `${probe.media!.id}_${safeName(info.title || probe.media!.id)}_${safeName(fmt.label, 16, fmt.id)}`;
+  let dest = reserveDest(outDir, `${stem}.${cached.ext}`);
+  const warnings: string[] = [];
   try {
   if (existsSync(dest)) {
     return { path: dest, bytes: statSync(dest).size, skipped: true, warnings: [] };
   }
 
   const part = dest + '.part';
-  await streamToFile(cached.url, part, REFERER);
-  if (statSync(part).size < 100 * 1024) {
+  const actual = await streamToFile(cached.url, part, REFERER);
+  if (actual < 100 * 1024) {
     unlinkSync(part);
     throw new VdlError('bad_payload', '文件过小，多半是试听片段或错误页');
   }
+  // 探测时 Range 已经知道总字节，下载只到了一部分就是截断（或被中途改档）。
+  // .part 保留：重试可以续传。
+  if (cached.expected > 0 && actual < cached.expected * 0.95) {
+    throw new VdlError('incomplete_media',
+      `只拿到 ${actual} 字节，探测到的整首约 ${cached.expected} 字节`,
+      '可能被截断：重试续传，或换一个候选地址再试');
+  }
+
+  // 元数据降级时，文件自带的 ID3 是**文件自己的声明**，比 rid 命名可靠得多。
+  // 实测酷我 CDN 的 mp3 带 TIT2/TPE1；读不出来就保持 rid 命名，不猜。
+  if (info.degraded) {
+    try {
+      const tags = readId3v2(readHead(part));
+      if (tags.title) {
+        info.title = tags.title;
+        info.artist = info.artist || tags.artist || '';
+        info.album = info.album || tags.album || '';
+        stem = `${probe.media!.id}_${safeName(info.title)}_${safeName(fmt.label, 16, fmt.id)}`;
+        const better = reserveDest(outDir, `${stem}.${cached.ext}`);
+        releaseDest(dest);
+        dest = better;
+        warnings.push(`接口没给元数据，标题/歌手取自文件内嵌标签：${info.title}`);
+      }
+    } catch {
+      // 标签读不出来就保持 rid 命名
+    }
+  }
   renameSync(part, dest);
 
-  const warnings: string[] = [];
   if (info.lrc) {
     try { writeFileSync(join(outDir, `${stem}.lrc`), info.lrc + '\n', 'utf8'); } catch { /* 歌词失败不影响音频 */ }
   }

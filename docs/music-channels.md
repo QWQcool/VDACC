@@ -72,8 +72,25 @@
 - **专辑批量已接**：`--album` 支持网易云 `/api/album/{id}` 与 QQ `fcg_v8_album_info_cp`，
   上限 20（`core/album.ts` 的 `planAlbum`），`--dry-run` 先看曲目；逐首下载，单首失败继续并在结尾汇总。
 - **歌词已落盘**：`fcg_query_lyric_new.fcg`（`nobase64=1`）→ 同名 `.lrc`，失败不影响音频。
+- **状态口径（2026-10-27，仅离线验证）**：probe 现在返回全部四个档位，不可用档 `available:false`
+  且 `reason` 带真实 `result` 代码（或「接口没有返回」），不再推断成会员/付费；
+  显式指定的档位不可用时报 `no_stream` 而不是静默换档；下载字节明显小于接口声明的整曲大小
+  （<60%）时报 `incomplete_media`，不把试听片段当完整下载。见 `docs/design/qq-capability-baseline.md`。
 - 未做（不假装支持）：会员档位实测（当前账号 320K/FLAC 仍 104003）、歌单。
 - **酷我 / 酷狗已接入**：公开接口 probe + 下载（`.part` 续传 + 限速）+ ffmpeg 标签/封面，
   酷我另落 `.lrc`；已注册 `platformOf` / server / cli。实测：酷我《花海》128kbps 3,368,054 字节，
-  酷狗《恒星不忘》128kbps 4,631,150 字节（带 `mjpeg` 封面）。会员档（320K/FLAC）被拒时如实报试听档。
+  酷狗《恒星不忘》128kbps 4,631,150 字节（带 `mjpeg` 封面）。
+- **酷我元数据降级（2026-10-27，含真实验证）**：`songinfoandlrc` 偶发 `status=301`，此时标题先用
+  rid，下载后从**文件自带 ID3** 补全（`core/tags.ts` 纯 JS 解析，不依赖 ffprobe）。
+  实测《花海》落盘名 `474678847_花海 (DJ 阿若版)_128kbps.mp3`，ffprobe 标签正确。
+- **酷我/酷狗状态口径（2026-10-27，仅离线验证）**：两家都没有登录能力，全档不可用时报
+  `filtered`（不再让用户去登录）；显式档位不可用报 `no_stream`；下载字节 < 探测总字节 95% 报
+  `incomplete_media`；酷狗把「获取失败 / 搜索没命中 / 接口标记付费」分开说，不再称公开档为
+  「试听档」。见 `docs/design/kuwo-kugou-capability-baseline.md`。
+- **网易云档位（2026-10-27，含真实环境实测）**：probe 现在探**四档**（无损/320K/128K/96K）；
+  免费曲对无会员权益的账号至少能下 128K（实测《雨爱(钢琴版)》128K 3.93MB），会员专享曲仍全部 `code=404`。
+  128K 与 96K 常返回字节相同的文件，已按字节判重并说明。未放行的
+  `available:false` 且 `reason` 带平台 `code`；详情查不到歌改报 `not_found`；显式档位不可用报
+  `no_stream` 不换档；下载字节 < 接口声明 60% 报 `incomplete_media`。
+  见 `docs/design/netease-capability-baseline.md`。
 - 服务端设置页后续加「音乐账号」页签（与 B站/网易云并列）。

@@ -12,6 +12,7 @@
 | 每个版本改了什么 | `docs/CHANGELOG.md` |
 | 不能违反的红线、已验证事实 | `AGENTS.md` |
 | 怎么用（安装、命令、界面） | `README.md` |
+| 怎么发版（检查清单、体积基线） | `docs/RELEASE.md`（基线数字在 `docs/release-baseline.json`） |
 | 给其它 Agent 的契约 | `ts/skill/SKILL.md`（legacy：`legacy/python/skill/SKILL.md`） |
 | UI 参考、视觉基线、概念图 | `docs/design/` |
 | 第三方来源与授权 | `NOTICE` / `THIRD_PARTY.md` |
@@ -222,7 +223,11 @@ parity 稳定后再决定 Python 是否退化为 yt-dlp helper。
   （Bun/ffmpeg/组件/配置/输出目录/三站凭据，fail 才退出码 1）；yt-dlp 安装改为先取官方
   `SHA2-256SUMS` 再校验、把 SHA256 记进配置，`/api/components` 依据记录报 `verified`。
   实测重装 17,880,111 字节、SHA256 `33121d19…`、doctor 显示「已校验」。
-  **仍未做**：干净机器验收、包清单/体积基线（exe 约 110MB）、CI/标签/Release 收口。
+  **2026-10-27 收口**：新增 `tools/release_baseline.cjs`（体积基线 `docs/release-baseline.json`，
+  exe **91.95 MB** / zip **42.58 MB** / 3 个文件，两次构建漂移 0.0%）与 `docs/RELEASE.md`
+  （版本号四处同步、必跑项、CI 手动触发、标签与 Release、回滚）。
+  **仍未做**：干净机器验收（需要一台没有 Bun/Python/ffmpeg 的 Windows，这是 N05 唯一缺的硬证据）；
+  自动 CI 仍因配额暂停。
 - **N06 · Android 真机**：✅ 2026-10-26 在 realme RMX5200 / Android 16 完成壳子验收（安装、连接、解析、下载、预览、取消/重试、错误 token、电脑离线、前后台）；局域网路径未打通（未加防火墙规则）。
 - **N07 · Android 独立端（C 路线）**：🟡 **M0 已完成（2026-10-27）**，见 `docs/design/android-standalone-plan.md` §13（决策）与 §2.1（实测）。
   方案：WebView 复用 Vue 界面 + TS 引擎打成 bundle + Kotlin 桥（fs / transfer / crypto）+ 前台下载服务 + Media3 合并。
@@ -235,6 +240,13 @@ parity 稳定后再决定 Python 是否退化为 yt-dlp helper。
 执行依赖：F01–F07 → N01/N02 → N03/N04；N05 可在稳定源码上独立推进；N06 依赖设备和稳定连接恢复。
 
 **付费限制与 DRM 研究（2026-10-27 决策更新）**：取消此前对付费绕过和 DRM 的项目禁令，允许将付费限制、会员凭证及 DRM 相关机制纳入研究。该方向目前仅为研究意向，尚无经验证的实现或支持承诺；工作步骤、证据与未验证项见 [ReversePlan.md](ReversePlan.md)。DRM、普通加密、付费限制和版权权限分别判断，不可混为一谈。
+**QQ 第一批（工作包 1–2）已完成，仅离线验证**：数据流与已知/未知清单见
+[`docs/design/qq-capability-baseline.md`](docs/design/qq-capability-baseline.md)；
+四档全部进 probe（不可用档带真实 `result` 代码）、全档被拒区分 `filtered`/`need_login`、
+显式档位不再静默降级、试听片段不再报完成；测试 101 → 111。线上档位未复测，会员账号未验证。
+**网易云第二批同日完成（同样仅离线验证）**：见
+[`docs/design/netease-capability-baseline.md`](docs/design/netease-capability-baseline.md)；
+两档全量呈现、详情缺失改 `not_found`、显式档位不降级、`incomplete_media`；测试 111 → 120。
 
 **持续边界**：schema=2 兼容；业务仍在 TS 引擎，对外字段集中定义；legacy 冻结。
 私密、直播、收藏夹抓取、站点广度竞赛不做。
