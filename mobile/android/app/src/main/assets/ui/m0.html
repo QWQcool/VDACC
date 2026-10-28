@@ -30,6 +30,11 @@
   }
   button.ghost { background: #fff; color: #171923; border: 1px solid rgba(15, 23, 42, .12); }
   button:disabled { opacity: .55; }
+  textarea {
+    width: 100%; min-height: 64px; padding: 10px; border-radius: 10px; resize: vertical;
+    border: 1px solid rgba(15, 23, 42, .12); background: #f6f7fb; color: #171923;
+    font: inherit; font-size: 12px; line-height: 1.5;
+  }
   ul.checks { list-style: none; margin: 0; padding: 0; }
   ul.checks li { display: flex; gap: 8px; font-size: 12px; padding: 4px 0; border-top: 1px dashed rgba(15,23,42,.07); }
   ul.checks li:first-child { border-top: 0; }
@@ -60,6 +65,19 @@
     <div class="row"><span class="k">结果</span><span class="v" id="summary">未运行</span></div>
     <ul class="checks" id="checks"></ul>
     <button id="run">运行自检</button>
+  </div>
+
+  <div class="card">
+    <h2>分享文案解析（抖音 probe，不下载）</h2>
+    <textarea id="share" spellcheck="false">7.43 复制打开抖音，看看【Venture元大胆AI的作品】AI运镜 https://www.douyin.com/video/7698929587975146788 复制此链接，打开抖音搜索</textarea>
+    <div class="row"><span class="k">标题</span><span class="v" id="pTitle">—</span></div>
+    <div class="row"><span class="k">作者</span><span class="v" id="pAuthor">—</span></div>
+    <div class="row"><span class="k">时长</span><span class="v" id="pDur">—</span></div>
+    <div class="row"><span class="k">封面</span><span class="v" id="pCover">—</span></div>
+    <div class="row"><span class="k">档位</span><span class="v" id="pFormats">—</span></div>
+    <div class="row"><span class="k">耗时</span><span class="v" id="pMs">—</span></div>
+    <ul class="checks" id="pWarn"></ul>
+    <button class="ghost" id="probeBtn">解析分享文案</button>
   </div>
 
   <div class="card">
@@ -163,6 +181,43 @@
     }
   });
 
+  $('probeBtn').addEventListener('click', async () => {
+    const btn = $('probeBtn');
+    if (!engine) return;
+    btn.disabled = true;
+    setText('pTitle', '解析中…');
+    setText('pFormats', '—');
+    $('pWarn').textContent = '';
+    try {
+      const res = await engine.probeShare($('share').value);
+      setText('pTitle', res.media && res.media.title ? res.media.title : '（空）', 'ok');
+      setText('pAuthor', res.media ? res.media.author : '—');
+      const dur = res.media && res.media.duration_ms ? (res.media.duration_ms / 1000).toFixed(1) + ' s' : '—';
+      setText('pDur', dur);
+      setText('pCover', res.media && res.media.thumbnail ? '有' : '无', res.media && res.media.thumbnail ? 'ok' : 'bad');
+      const list = (res.formats || []).map((f) => f.id + ' ' + f.label).join(' / ');
+      setText('pFormats', list || '（没有可用档位）', list ? 'ok' : 'bad');
+      setText('pMs', res.ms + ' ms');
+      for (const w of res.warnings || []) {
+        const li = document.createElement('li');
+        const mark = document.createElement('span');
+        mark.className = 'mark';
+        mark.textContent = '注意';
+        const body = document.createElement('div');
+        body.className = 'why';
+        body.textContent = w;
+        li.appendChild(mark);
+        li.appendChild(body);
+        $('pWarn').appendChild(li);
+      }
+    } catch (error) {
+      const code = error && error.code ? error.code + ' ' : '';
+      setText('pTitle', '失败：' + code + (error && error.message ? error.message : error), 'bad');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
   $('net').addEventListener('click', async () => {
     const btn = $('net');
     if (!engine) return;
@@ -196,6 +251,7 @@
     const probe = new URLSearchParams(location.search).get('probe');
     if (probe === '1') setTimeout(() => $('write').click(), 400);
     if (probe === 'net') setTimeout(() => $('net').click(), 400);
+    if (probe === 'douyin') setTimeout(() => $('probeBtn').click(), 400);
   })();
 </script>
 </body>

@@ -23,6 +23,10 @@ const NODE_SHIMS = {
   'node:path': 'shims/path.ts',
   'node:path/posix': 'shims/path.ts',
   'node:crypto': 'shims/crypto.ts',
+  'node:async_hooks': 'shims/async-hooks.ts',
+  // fs 在端上是「明确报错」的占位：同步 API 无法桥接，写盘走 transfer.*
+  'node:fs': 'shims/fs.ts',
+  'node:fs/promises': 'shims/fs-promises.ts',
 };
 
 const nodeShimPlugin = {

@@ -14,6 +14,7 @@ import { firstUrl, platformOf } from '../../../../ts/src/core/platform';
 import { currentLimitBytesPerSec, parseLimit, setLimitBytesPerSec } from '../../../../ts/src/core/rate';
 import { activeDestCount, releaseDest, reserveDest } from '../../../../ts/src/core/dest';
 import { CookieJar, request } from '../../../../ts/src/core/http';
+import { probeDouyin } from '../../../../ts/src/engines/douyin';
 import { bytesToBase64, createHash, randomBytes } from '../shims/crypto';
 import { md5Hex, toBytes, toHex } from '../shims/md5';
 import { BridgeError, call, pendingBridgeCalls, setBridgeTransport } from '../shims/bridge';
@@ -256,12 +257,26 @@ export async function netProbe(): Promise<NetProbeResult> {
 
 declare const BUILD_STAMP: string | undefined;
 
+/**
+ * M1-b 验收：把**整段分享文案**喂给抖音引擎，拿回标题/封面/档位。
+ *
+ * 这一步只证明「引擎在端上跑得起来、网络桥够用」——不下载、不落盘。
+ * 返回的就是桌面端同一份 `ProbeResult`，不做裁剪：字段少一个，界面就会少一个信息，
+ * 而且两端契约一旦分叉，后面 M1-d 接 Vue 时还要再对一次。
+ */
+export async function probeShare(text: string) {
+  const started = Date.now();
+  const result = await probeDouyin(text);
+  return { ...result, ms: Date.now() - started };
+}
+
 const api = {
   engineInfo,
   selfTest,
   paths,
   writeProbe,
   netProbe,
+  probeShare,
   setBridgeTransport,
   pendingBridgeCalls,
   // 纯函数面，M1 的 local-api.js 会直接调这些
