@@ -56,7 +56,8 @@ public class MainActivity extends Activity {
     private Bridge bridge;
 
     private boolean localMode = true;
-    private boolean autoProbe = false;
+    /** 验收脚本用：`-e probe 1` 跑落盘探针，`-e probe net` 跑网络探针。 */
+    private String autoProbe = null;
     private boolean barVisible = true;
     private boolean errorShown = false;
     private String failedUrl = "";
@@ -181,13 +182,14 @@ public class MainActivity extends Activity {
         // 带 url 启动参数 => 老用法（连电脑）；否则进本地引擎模式
         localMode = launch == null || launch.trim().isEmpty();
         // 验收脚本用：`am start ... -e probe 1` 让页面自动跑一次落盘探针，省掉「滚动 + 手点」
-        autoProbe = getIntent() != null && getIntent().getStringExtra("probe") != null;
+        autoProbe = getIntent() == null ? null : getIntent().getStringExtra("probe");
         applyMode();
     }
 
     /** 本地页面地址；带 `-e probe 1` 启动时让页面自动跑一次落盘探针（验收脚本用）。 */
     private String localUrl() {
-        return autoProbe ? LOCAL_URL + "?probe=1" : LOCAL_URL;
+        return autoProbe == null ? LOCAL_URL
+            : LOCAL_URL + "?probe=" + android.net.Uri.encode(autoProbe);
     }
 
     /** 把当前模式刷到界面上：本地模式不显示地址栏（它在那儿没有意义）。 */

@@ -49,8 +49,9 @@ set ADB=%LOCALAPPDATA%\vdacc-tools\android-sdk\platform-tools\adb.exe
 rem 安装（realme/OPPO 上直接 install -r 可能报 Failure [-99]，用下面这条更稳）
 %ADB% install -r mobile\android\app\build\outputs\apk\debug\app-debug.apk
 
-rem 打开 App（默认就是本地引擎模式）；带 -e probe 1 会让页面自动跑一次落盘探针
+rem 打开 App（默认就是本地引擎模式）；-e probe 1 自动跑落盘探针，-e probe net 自动跑网络探针
 %ADB% shell am start -n com.vdacc.app/.MainActivity -e probe 1
+%ADB% shell am start -n com.vdacc.app/.MainActivity -e probe net
 
 rem 看结果
 %ADB% shell ls -l /sdcard/Download/VDACC/
@@ -69,6 +70,10 @@ rem 看结果
 | 暂存清理 | publish 成功后 `.part` 已删除（`files/staging/` 为空） |
 | 局域网模式 | 回归通过：`adb reverse` + `-e url http://127.0.0.1:8765/?token=...`，桌面界面正常、可切回本地 |
 
+2026-10-28 M1-a 实测（同机同版本）：网络探针 `-e probe net` → HTTP **200**、`ttwid 已拿到`、
+响应 69 字节、**190 ms（走桥）**——一次覆盖 POST + JSON body + 多值 `Set-Cookie` 解析；
+落盘探针回归仍是 4 分块 / 53,132 字节，页面 md5 与设备 `md5sum` 一致。
+
 ## 三、桥与目录（M0 已实现的部分）
 
 ```
@@ -81,9 +86,16 @@ app/src/main/java/com/vdacc/app/
    └─ BridgeException.kt      带错误码的异常
 ```
 
-已实现的桥方法：`paths`、`crypto.md5Hex`、`fs.openWrite`、`fs.writeChunk`、`fs.closeWrite`、
-`fs.publish`、`fs.stat`、`fs.mkdirp`。通道与字段形状见
+已实现的桥方法：`paths`、`crypto.md5Hex`、`http.request`、`fs.openWrite`、`fs.writeChunk`、
+`fs.closeWrite`、`fs.publish`、`fs.stat`、`fs.mkdirp`。通道与字段形状见
 `docs/design/android-standalone-plan.md` §5。
+
+`http.request` 是 M1-a 加的：页面在 `file:///android_asset/` 下是不透明来源，
+直接 `fetch('https://www.douyin.com/...')` 会被 CORS 拒（对方不会给我们
+`Access-Control-Allow-Origin`）。所以端上把全局 `fetch` 换成走桥的实现
+（`engine/shims/fetch.ts`），引擎源码一行不用改。返回字段：
+`{status, url, headers, setCookie[], bodyBase64, bytes}`；`setCookie` 单独给数组，
+否则多条 cookie 会被合成一条、只解析到第一条。上限 24MB —— **媒体必须走 `transfer.*` 流式写盘**。
 
 两条硬约束（写新方法前必须知道）：
 

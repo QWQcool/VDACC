@@ -37,8 +37,18 @@ class Bridge(private val ctx: Context, private val web: WebView) {
 
     private val paths = Paths(ctx)
     private val fs = Fs(ctx, paths)
+    private val http = Http()
     private val worker: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "vdacc-bridge")
+    }
+
+    /**
+     * 网络调用单独一个池：`http.request` 动辄几秒，放在单线程 worker 上会把
+     * fs 写块、进度回投全部堵在后面（下载流程里两者是交替的）。fs 必须保序，
+     * http 不需要，所以拆开。
+     */
+    private val httpPool: ExecutorService = Executors.newCachedThreadPool { runnable ->
+        Thread(runnable, "vdacc-http")
     }
     private val main = Handler(Looper.getMainLooper())
 
@@ -64,7 +74,7 @@ class Bridge(private val ctx: Context, private val web: WebView) {
                 deliver(reqId, errorEnvelope("untrusted_page", "当前页面不是本地 asset 页面（${url ?: "未知"}），桥已拒绝调用"))
                 return@post
             }
-            worker.execute {
+            val task = Runnable {
                 val envelope = try {
                     val payload = if (payloadJson.isBlank()) JSONObject() else JSONObject(payloadJson)
                     JSONObject().put("ok", true).put("data", dispatch(method, payload))
@@ -76,6 +86,8 @@ class Bridge(private val ctx: Context, private val web: WebView) {
                 }
                 deliver(reqId, envelope)
             }
+            // fs 必须保序（单线程）；http 是耗时调用，不跟着排队
+            if (method.startsWith("http.")) httpPool.execute(task) else worker.execute(task)
         }
     }
 
@@ -85,6 +97,8 @@ class Bridge(private val ctx: Context, private val web: WebView) {
             .put("outKind", paths.outKind)
             .put("staging", paths.staging.absolutePath)
             .put("cache", paths.cache.absolutePath)
+
+        "http.request" -> http.request(payload)
 
         "crypto.md5Hex" -> md5Hex(payload.optString("text"))
 
@@ -133,5 +147,6 @@ class Bridge(private val ctx: Context, private val web: WebView) {
             Log.w(TAG, "关闭文件句柄失败：${error.message}")
         }
         worker.shutdownNow()
+        httpPool.shutdownNow()
     }
 }

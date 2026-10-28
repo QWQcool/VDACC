@@ -13,9 +13,18 @@ import { safeName } from '../../../../ts/src/core/naming';
 import { firstUrl, platformOf } from '../../../../ts/src/core/platform';
 import { currentLimitBytesPerSec, parseLimit, setLimitBytesPerSec } from '../../../../ts/src/core/rate';
 import { activeDestCount, releaseDest, reserveDest } from '../../../../ts/src/core/dest';
+import { CookieJar, request } from '../../../../ts/src/core/http';
 import { bytesToBase64, createHash, randomBytes } from '../shims/crypto';
 import { md5Hex, toBytes, toHex } from '../shims/md5';
 import { BridgeError, call, pendingBridgeCalls, setBridgeTransport } from '../shims/bridge';
+import { bridgeFetchInstalled, installBridgeFetch } from '../shims/fetch';
+
+/**
+ * 页面一加载就把 `fetch` 换成走原生的实现。
+ * 必须在任何引擎代码发起请求之前执行——放在模块顶层最稳（入口只会被加载一次）。
+ * 桥不存在时（例如 `bun selftest.mjs`）这里是空操作，不影响纯函数自检。
+ */
+const FETCH_BRIDGED = installBridgeFetch();
 
 export { setBridgeTransport, pendingBridgeCalls, BridgeError };
 export { safeName, firstUrl, platformOf, parseLimit, currentLimitBytesPerSec, setLimitBytesPerSec };
@@ -197,10 +206,51 @@ export async function writeProbe(text?: string): Promise<ProbeResult> {
 /** 引擎自述：页面上直接显示，防止「看起来在跑其实是旧包」。 */
 export function engineInfo() {
   return {
-    version: '0.1.0-m0',
+    version: '0.1.0-m1a',
     builtAt: typeof BUILD_STAMP === 'string' ? BUILD_STAMP : 'unknown',
     randomProbe: toHex(randomBytes(4)),
     md5Available: typeof createHash === 'function',
+    fetchBridged: bridgeFetchInstalled(),
+  };
+}
+
+export type NetProbeResult = {
+  /** 抖音 ttwid 注册接口的 HTTP 状态码。 */
+  status: number;
+  /** 有没有从 Set-Cookie 里真的拿到 ttwid——这一步同时验证了 CookieJar 与多值 Set-Cookie。 */
+  ttwid: boolean;
+  bytes: number;
+  ms: number;
+  bridged: boolean;
+};
+
+/**
+ * M1-a 的验收探针：用**引擎自己的 `core/http.request`**（不是手写 fetch）请求抖音，
+ * 走完整链路：JS → 桥 → HttpURLConnection → 抖音 → Set-Cookie 回收到 CookieJar。
+ *
+ * 为什么选 ttwid：抖音的详情接口必须先有这个 cookie，拿不到它后面全免谈；
+ * 而且它是 POST + JSON body + Set-Cookie，一次覆盖三种能力。
+ */
+export async function netProbe(): Promise<NetProbeResult> {
+  const jar = new CookieJar();
+  const started = Date.now();
+  const res = await request('https://www.douyin.com/ttwid/register', {
+    method: 'POST',
+    jar,
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json, text/plain, */*',
+    },
+    body: JSON.stringify({ aid: 6383, service: 'www.douyin.com' }),
+    timeoutMs: 15000,
+  });
+  const text = await res.text();
+  return {
+    status: res.status,
+    ttwid: !!jar.get('ttwid'),
+    bytes: text.length,
+    ms: Date.now() - started,
+    bridged: bridgeFetchInstalled(),
   };
 }
 
@@ -211,6 +261,7 @@ const api = {
   selfTest,
   paths,
   writeProbe,
+  netProbe,
   setBridgeTransport,
   pendingBridgeCalls,
   // 纯函数面，M1 的 local-api.js 会直接调这些

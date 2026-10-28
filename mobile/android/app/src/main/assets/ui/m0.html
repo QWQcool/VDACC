@@ -63,6 +63,15 @@
   </div>
 
   <div class="card">
+    <h2>网络探针（真实请求 douyin.com）</h2>
+    <div class="row"><span class="k">HTTP 状态</span><span class="v" id="netStatus">—</span></div>
+    <div class="row"><span class="k">ttwid</span><span class="v" id="ttwid">—</span></div>
+    <div class="row"><span class="k">响应长度</span><span class="v" id="netBytes">—</span></div>
+    <div class="row"><span class="k">耗时</span><span class="v" id="netMs">—</span></div>
+    <button class="ghost" id="net">请求抖音</button>
+  </div>
+
+  <div class="card">
     <h2>落盘探针（分块写入 Download/VDACC）</h2>
     <div class="row"><span class="k">文件</span><span class="v" id="file">—</span></div>
     <div class="row"><span class="k">字节</span><span class="v" id="bytes">—</span></div>
@@ -154,6 +163,24 @@
     }
   });
 
+  $('net').addEventListener('click', async () => {
+    const btn = $('net');
+    if (!engine) return;
+    btn.disabled = true;
+    setText('netStatus', '请求中…');
+    try {
+      const res = await engine.netProbe();
+      setText('netStatus', String(res.status), res.status >= 200 && res.status < 400 ? 'ok' : 'bad');
+      setText('ttwid', res.ttwid ? '已拿到' : '没有（Set-Cookie 未解析）', res.ttwid ? 'ok' : 'bad');
+      setText('netBytes', String(res.bytes));
+      setText('netMs', res.ms + ' ms' + (res.bridged ? '（走桥）' : '（未走桥）'));
+    } catch (error) {
+      setText('netStatus', '失败：' + (error && error.message ? error.message : error), 'bad');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
   // 进入页面就把能拿的信息都拿一遍：路径与自检都不该需要用户点两下才知道环境
   (async () => {
     if (!engine) return;
@@ -165,10 +192,10 @@
       setText('out', '取不到：' + (error && error.message ? error.message : error), 'bad');
     }
     $('run').click();
-    // `am start ... -e probe 1` 会带 ?probe=1：让验收脚本不用「滚动 + 手点」
-    if (new URLSearchParams(location.search).get('probe') === '1') {
-      setTimeout(() => $('write').click(), 400);
-    }
+    // 验收脚本用：`?probe=1` 跑落盘探针，`?probe=net` 跑网络探针（不用「滚动 + 手点」）
+    const probe = new URLSearchParams(location.search).get('probe');
+    if (probe === '1') setTimeout(() => $('write').click(), 400);
+    if (probe === 'net') setTimeout(() => $('net').click(), 400);
   })();
 </script>
 </body>
