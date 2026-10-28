@@ -75,6 +75,13 @@ public class MainActivity extends Activity {
         super.onCreate(state);
         prefs = getSharedPreferences(PREF, MODE_PRIVATE);
 
+        // API 33+ 通知要用户授权：没授权前台服务照样跑，只是通知栏看不到进度。
+        // 不阻塞界面，拒绝了也不报错（M1 的验收靠通知栏，所以这里主动要一次）。
+        if (Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 1001);
+        }
+
         FrameLayout root = new FrameLayout(this);
         LinearLayout column = new LinearLayout(this);
         column.setOrientation(LinearLayout.VERTICAL);

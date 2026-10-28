@@ -355,7 +355,7 @@ export async function cancelTransfer(jobId: string): Promise<boolean> {
  * 手点/脚本都撞不准时机——用大文件才能稳定证明「取消真的停住了，且已写部分保留」。
  */
 export async function cancelProbe(
-  url = 'https://speed.cloudflare.com/__down?bytes=52428800',
+  url = 'https://proof.ovh.net/files/100Mb.dat',
   afterMs = 800,
 ): Promise<{ cancelled: boolean; outcome: string; bytes: number; total: number; ms: number }> {
   const started = Date.now();
@@ -380,6 +380,34 @@ export async function cancelProbe(
   return { cancelled, outcome, bytes: atCancel, total, ms: Date.now() - started };
 }
 
+/**
+ * 前台服务/锁屏的验证用：下一个**大文件**（默认 500MB 测速端点）。
+ * 为什么需要它：抖音视频 5.6MB 在本机两秒就完了，根本撑不到「锁屏 30 秒」。
+ * 500MB 约 20 秒，足够在下载途中熄屏、等半分钟再亮屏看结果。
+ */
+export type TransferProbeOptions = DownloadHooks & {
+  url?: string;
+  name?: string;
+  /** 字节/秒；限速能让一个 100MB 文件撑到足够长，便于测「锁屏 30 秒」 */
+  limitBytesPerSec?: number;
+};
+
+export async function transferProbe(options: TransferProbeOptions = {}): Promise<DownloadResult> {
+  const started = Date.now();
+  const url = options.url ?? 'https://proof.ovh.net/files/100Mb.dat';
+  const name = options.name ?? 'speed-probe.bin';
+  const handle = await startTransfer({
+    url,
+    name,
+    referer: '',
+    limitBytesPerSec: options.limitBytesPerSec ?? 0,
+    onProgress: options.onProgress,
+  });
+  options.onReady?.(handle.jobId, handle.resumeFrom);
+  const out = await handle.done;
+  return { ...out, label: name, resumeFrom: handle.resumeFrom, ms: Date.now() - started };
+}
+
 const api = {
   engineInfo,
   selfTest,
@@ -390,6 +418,7 @@ const api = {
   downloadShare,
   cancelTransfer,
   cancelProbe,
+  transferProbe,
   setBridgeTransport,
   pendingBridgeCalls,
   // 纯函数面，M1 的 local-api.js 会直接调这些

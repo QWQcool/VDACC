@@ -1,6 +1,8 @@
 package com.vdacc.app.bridge
 
 import android.content.Context
+import android.os.PowerManager
+import com.vdacc.app.service.DownloadService
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
@@ -30,6 +32,17 @@ class Transfer(private val ctx: Context, private val paths: Paths, private val f
     companion object {
         private const val BUFFER = 64 * 1024
         private const val PROGRESS_GAP_MS = 200L
+        private const val WAKE_TIMEOUT_MS = 30 * 60 * 1000L
+
+        /**
+         * 当前下载的快照，给 [DownloadService] 轮询用。
+         * 为什么是静态快照而不是回调：服务与传输线程的生命周期互相独立，
+         * 静态值只读不写，进程被回收也不会留下「服务以为在下载」的假象。
+         */
+        @Volatile
+        private var active: JSONObject? = null
+
+        fun current(): JSONObject? = active
     }
 
     private class Job(
@@ -38,6 +51,8 @@ class Transfer(private val ctx: Context, private val paths: Paths, private val f
         val url: String,
         val referer: String,
         val userAgent: String,
+        /** 字节/秒，0 = 不限速。设计稿 §9：限速从 JS 的 throttle 移到原生读速。 */
+        val limitBytesPerSec: Long,
     ) {
         @Volatile var cancelled = false
         @Volatile var connection: HttpURLConnection? = null
@@ -71,12 +86,19 @@ class Transfer(private val ctx: Context, private val paths: Paths, private val f
             "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Mobile Safari/537.36"
         }
 
+        val limit = payload.optLong("limitBytesPerSec", 0L).coerceAtLeast(0L)
+
         val job = synchronized(this) {
             seq += 1
-            Job("t$seq", name, url, referer, userAgent)
+            Job("t$seq", name, url, referer, userAgent, limit)
         }
         jobs[job.id] = job
         val resumeFrom = stagingFile(name).length()
+
+        // 前台服务 + 唤醒锁：锁屏后系统会冻结后台进程并限制网络，
+        // 没有这两样「锁屏 30 秒进度仍在走」就是空话
+        acquireWake()
+        DownloadService.start(ctx)
 
         pool.execute { run(job) }
         return JSONObject()
@@ -126,6 +148,7 @@ class Transfer(private val ctx: Context, private val paths: Paths, private val f
             job.total = if (length > 0) length + (if (resumed) written else 0L) else 0L
             job.bytes = written
 
+            publishState(job, written, job.total)
             emit(job.id, JSONObject()
                 .put("status", "start")
                 .put("bytes", written)
@@ -136,16 +159,26 @@ class Transfer(private val ctx: Context, private val paths: Paths, private val f
                 conn.inputStream.use { input ->
                     val buffer = ByteArray(BUFFER)
                     var lastEmit = 0L
+                    var runBytes = 0L
+                    val pacingStart = System.currentTimeMillis()
                     while (true) {
                         if (job.cancelled) throw Cancelled()
                         val read = input.read(buffer)
                         if (read < 0) break
                         out.write(buffer, 0, read)
                         written += read
+                        runBytes += read
                         job.bytes = written
+                        if (job.limitBytesPerSec > 0) {
+                            // 按「本次已读字节 / 限速」算出应到的时刻，超前的部分睡回去
+                            val due = pacingStart + runBytes * 1000L / job.limitBytesPerSec
+                            val waitMs = due - System.currentTimeMillis()
+                            if (waitMs > 0) Thread.sleep(minOf(waitMs, 400L))
+                        }
                         val now = System.currentTimeMillis()
                         if (now - lastEmit >= PROGRESS_GAP_MS) {
                             lastEmit = now
+                            publishState(job, written, job.total)
                             emit(job.id, JSONObject()
                                 .put("status", "progress")
                                 .put("bytes", written)
@@ -192,7 +225,48 @@ class Transfer(private val ctx: Context, private val paths: Paths, private val f
             } catch (_: Exception) {
                 // 忽略
             }
+            if (jobs.isEmpty()) {
+                active = null
+                releaseWake()
+                DownloadService.stop(ctx)
+            }
         }
+    }
+
+    /* ───────────────────────── 前台服务 / 唤醒锁 ───────────────────────── */
+
+    private var wakeLock: PowerManager.WakeLock? = null
+
+    private fun acquireWake() {
+        if (wakeLock?.isHeld == true) return
+        try {
+            val power = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
+            wakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "vdacc:transfer").apply {
+                setReferenceCounted(false)
+                acquire(WAKE_TIMEOUT_MS)
+            }
+        } catch (error: Exception) {
+            // 拿不到锁不致命：前台服务仍然生效，只是锁屏时可能被降频
+            android.util.Log.w("VDACC-Transfer", "获取唤醒锁失败：${error.message}")
+        }
+    }
+
+    private fun releaseWake() {
+        try {
+            wakeLock?.takeIf { it.isHeld }?.release()
+        } catch (_: Exception) {
+            // 忽略
+        }
+        wakeLock = null
+    }
+
+    /** 更新给服务轮询的快照（字节数/总量/文件名）。 */
+    private fun publishState(job: Job, bytes: Long, total: Long) {
+        active = JSONObject()
+            .put("jobId", job.id)
+            .put("name", job.name)
+            .put("bytes", bytes)
+            .put("total", total)
     }
 
     fun closeAll() {

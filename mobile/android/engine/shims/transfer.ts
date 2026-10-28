@@ -78,6 +78,8 @@ export type StartOptions = {
   name: string;
   referer?: string;
   userAgent?: string;
+  /** 字节/秒，0 或省略 = 不限速（限速在原生侧做，按实际读速计） */
+  limitBytesPerSec?: number;
   onProgress?: (bytes: number, total: number) => void;
 };
 
@@ -89,6 +91,7 @@ export async function startTransfer(options: StartOptions): Promise<TransferHand
       name: options.name,
       referer: options.referer ?? '',
       userAgent: options.userAgent ?? '',
+      limitBytesPerSec: options.limitBytesPerSec ?? 0,
     },
   );
 

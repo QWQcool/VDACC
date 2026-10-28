@@ -97,6 +97,7 @@
     <div class="row"><span class="k">结束时事件</span><span class="v" id="cxOutcome">—</span></div>
     <div class="row"><span class="k">已写字节</span><span class="v" id="cxBytes">—</span></div>
     <button class="ghost" id="cxBtn">跑取消探针</button>
+    <button id="slowBtn">下 100MB（限速 1MB/s，锁屏测试）</button>
   </div>
 
   <div class="card">
@@ -305,6 +306,31 @@
     }
   });
 
+  $('slowBtn').addEventListener('click', async () => {
+    const btn = $('slowBtn');
+    if (!engine) return;
+    btn.disabled = true;
+    setText('cxState', '下载中…（中途可以熄屏）');
+    setText('cxOutcome', '下载中');
+    setText('cxBytes', '0 MB');
+    try {
+      // 100MB、限速 1MB/s ≈ 100 秒：足够熄屏 30 秒再回来看进度是否还在走
+      const res = await engine.transferProbe({
+        limitBytesPerSec: 1048576,
+        onProgress: (bytes, total) => setText('cxBytes', mb(bytes) + (total ? ' / ' + mb(total) : '')),
+      });
+      setText('cxState', '完成', 'ok');
+      setText('cxOutcome', 'done（' + res.ms + ' ms）');
+      setText('cxBytes', mb(res.bytes) + ' · ' + res.path);
+    } catch (error) {
+      const code = error && error.code ? error.code + ' ' : '';
+      setText('cxState', '失败：' + code + (error && error.message ? error.message : error), 'bad');
+      setText('cxOutcome', 'failed');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
   $('net').addEventListener('click', async () => {
     const btn = $('net');
     if (!engine) return;
@@ -341,6 +367,7 @@
     if (probe === 'douyin') setTimeout(() => $('probeBtn').click(), 400);
     if (probe === 'download') setTimeout(() => $('dlBtn').click(), 400);
     if (probe === 'cancel') setTimeout(() => $('cxBtn').click(), 400);
+    if (probe === 'slow') setTimeout(() => $('slowBtn').click(), 400);
   })();
 </script>
 </body>

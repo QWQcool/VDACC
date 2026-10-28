@@ -12,6 +12,15 @@
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
 
+    <!-- 下载期间的前台服务：锁屏后系统会冻结后台进程，没有它进度会停 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- API 34+ 要求声明具体类型；dataSync 就是「在传数据」这一类 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- 锁屏时保持 CPU 不睡（前台服务保证网络，唤醒锁保证不降频） -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- API 33+ 通知要用户授权；没授权服务仍能跑，只是看不见进度 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <!-- usesCleartextTraffic：服务端是 http://<局域网IP>:端口，没有 TLS；壳子只连自己的电脑 -->
     <application
         android:label="@string/app_name"
@@ -28,5 +37,10 @@
             </intent-filter>
 
         </activity>
+
+        <service
+            android:name=".service.DownloadService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
     </application>
 </manifest>
