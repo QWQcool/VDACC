@@ -1,3 +1,4 @@
 # 构建产物按字节原样保存：行尾若被 CRLF 转换，
-# 每次重新 bun build 都会因为「内容其实没变」而出现假 diff。
-mobile/android/app/src/main/assets/engine/engine.bundle.js -text
+# 每次重新 bun build / bun build-ui 都会因为「内容其实没变」而出现假 diff。
+# assets 下的东西全部由脚本生成（engine bundle + 搬过来的 Vue 界面），一律不做行尾转换。
+mobile/android/app/src/main/assets/** -text
