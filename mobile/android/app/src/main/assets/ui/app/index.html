@@ -1,0 +1,495 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VDACC</title>
+  <link rel="icon" href="icon-192.png">
+  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./vue/style.css">
+</head>
+<body>
+  <div id="app" v-cloak>
+    <div class="app">
+
+      <!-- ── 侧栏 ───────────────────────────── -->
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="mark">V</span>
+          <div><b>VDACC</b><small>MEDIA STUDIO</small></div>
+        </div>
+
+        <div class="nav-group">
+          <div class="nav-label">Workspace</div>
+          <a class="nav-item on" href="#probe">
+            <span class="ico">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>
+              </svg>
+            </span>
+            <span class="txt">{{ t('probe') }}</span>
+          </a>
+          <a class="nav-item" href="#jobs">
+            <span class="ico">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path d="M4 6h16M4 12h16M4 18h10"/>
+              </svg>
+            </span>
+            <span class="txt">{{ t('jobs') }}</span>
+            <span class="count" v-if="jobs.length">{{ jobs.length }}</span>
+          </a>
+        </div>
+
+        <div class="nav-group">
+          <div class="nav-label">System</div>
+          <button class="nav-item" @click="openSettings">
+            <span class="ico">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M19 12a7 7 0 0 0-.1-1.1l2-1.5-2-3.4-2.3 1a7 7 0 0 0-1.9-1.1L14.3 3h-4.6l-.4 2.9a7 7 0 0 0-1.9 1.1l-2.3-1-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .4 0 .7.1 1.1l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 1.9 1.1l.4 2.9h4.6l.4-2.9a7 7 0 0 0 1.9-1.1l2.3 1 2-3.4-2-1.5c.1-.4.1-.7.1-1.1Z"/>
+              </svg>
+            </span>
+            <span class="txt">{{ t('settings') }}</span>
+          </button>
+        </div>
+
+        <div class="spacer"></div>
+
+        <div class="sys-card">
+          <div class="rowline">
+            {{ t('version') }}
+            <span class="ver">{{ version ? 'v' + version : '—' }}</span>
+          </div>
+          <div class="path" v-if="outDir" :title="outDir">{{ outDir }}</div>
+        </div>
+      </aside>
+
+      <!-- ── 主区 ───────────────────────────── -->
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <h1>{{ t('probe') }}</h1>
+            <div class="en">MEDIA PROBE</div>
+          </div>
+          <span class="spacer"></span>
+          <span class="pill" v-if="connected"><span class="dot"></span>{{ t('connected') }}</span>
+          <span class="badge neutral" v-else role="status">{{ t(reconnecting ? 'reconnecting' : 'offline') }}</span>
+          <button class="icon-btn" @click="toggleLang" :title="t('lang')">{{ lang === 'zh' ? 'EN' : '中' }}</button>
+          <button class="icon-btn" @click="toggleTheme" :title="t('theme')">◐</button>
+          <button class="icon-btn" @click="openSettings" :title="t('settings')">⚙</button>
+        </header>
+
+        <div class="content">
+          <div class="col">
+
+            <!-- 输入 -->
+            <section class="card" id="probe">
+              <div class="card-head">
+                <h2>{{ t('sources') }}</h2>
+                <span class="en">SOURCE</span>
+                <span class="spacer"></span>
+                <span class="section-label">{{ t('platformCount') }}</span>
+              </div>
+
+              <div class="probe-row">
+                <input class="input" data-testid="source-input" v-model="url" :placeholder="t('placeholder')" @keyup.enter="probe">
+                <button class="btn primary" data-testid="probe" :disabled="busy || submitting || !url.trim()" @click="probe">
+                  {{ busy ? t('probing') : t('probe') }}
+                </button>
+              </div>
+
+              <div class="platform-row">
+                <span class="plat bili"><i></i>B站</span>
+                <span class="plat"><i></i>抖音</span>
+                <span class="plat music"><i></i>QQ 音乐</span>
+                <span class="plat music"><i></i>网易云</span>
+                <span class="plat music"><i></i>酷我 / 酷狗</span>
+                <span class="plat"><i></i>m3u8 / 直链</span>
+              </div>
+
+              <p class="section-label" style="margin:12px 0 0;letter-spacing:0">{{ t('hint') }}</p>
+            </section>
+
+            <!-- 空状态 -->
+            <section class="card empty-state" v-if="!result && !album">
+              <div class="ico">◎</div>
+              <div>
+                <h2>{{ t('emptyTitle') }}</h2>
+                <p>{{ t('emptyBody') }}</p>
+              </div>
+            </section>
+
+            <!-- 专辑 -->
+            <section class="card" id="album" v-if="album">
+              <div class="card-head">
+                <h2>{{ album.title }}</h2>
+                <span class="en">ALBUM</span>
+                <span class="spacer"></span>
+                <span class="badge purple">{{ albumTracks.length }} / {{ album.total }} {{ t('tracks') }}</span>
+              </div>
+
+              <div class="alert" v-if="album.dropped">
+                <b>!</b>
+                <div>{{ t('albumDropped') }} <b>{{ album.dropped }}</b> {{ t('tracks') }}</div>
+              </div>
+
+              <div class="batch-head" style="margin-top:12px">
+                <label class="switch">
+                  <input type="checkbox" :checked="allTracks" @change="toggleAllTracks">
+                  <span class="track"></span>
+                  {{ t('selectAll') }}
+                </label>
+                <span class="num">{{ checkedTracks.length }} / {{ albumTracks.length }}</span>
+              </div>
+
+              <div class="list">
+                <label v-for="tr in albumTracks" :key="tr.id" class="list-row">
+                  <input type="checkbox" :checked="checkedTracks.includes(tr.id)"
+                         @change="toggleTrack(tr.id)">
+                  <span class="name">{{ tr.title }}</span>
+                  <span class="sub">{{ tr.author }}</span>
+                </label>
+              </div>
+
+              <div style="display:flex;align-items:center;gap:10px;margin-top:16px;flex-wrap:wrap">
+                <span class="section-label" v-if="album.dropped">
+                  {{ t('loadedCount') }} {{ albumTracks.length }} / {{ album.total }}
+                </span>
+                <button class="btn ghost sm" v-if="album.hasMore" :disabled="loadingMore"
+                        @click="loadMoreTracks">
+                  {{ loadingMore ? t('loadingMore') : t('loadMore') }}
+                </button>
+                <span style="flex:1"></span>
+                <button class="btn primary" data-testid="download" :disabled="!checkedTracks.length || busy || submitting" @click="download">
+                  {{ t('download') }} ({{ checkedTracks.length }})
+                </button>
+              </div>
+            </section>
+
+            <!-- 结果 -->
+            <section class="card" id="result" v-if="result">
+              <div class="media">
+                <div class="thumb">
+                  <!-- B站图床按 Referer 防盗链，本机页面带 referer 会 403，所以显式 no-referrer -->
+                  <img v-if="result.media.thumbnail" :src="result.media.thumbnail" alt=""
+                       referrerpolicy="no-referrer" @error="$event.target.style.display='none'">
+                  <span v-else>{{ t('cover') }}</span>
+                  <span class="dur" v-if="result.media.duration_ms">{{ dur(result.media.duration_ms) }}</span>
+                </div>
+
+                <div class="media-main">
+                  <div class="title-row">
+                    <h3>{{ result.media.title }}</h3>
+                    <span class="badge" :class="platformClass(result.platform)">{{ result.platform }}</span>
+                  </div>
+                  <div class="meta">
+                    <span v-if="result.media.author">{{ t('author') }} <b>{{ result.media.author }}</b></span>
+                    <span v-if="result.media.parts.length">{{ t('parts') }} <b class="mono">{{ result.media.parts.length }}</b></span>
+                    <span class="mono">{{ result.engine }}</span>
+                  </div>
+                  <div class="src" v-if="result.media.source_url">{{ result.media.source_url }}</div>
+                </div>
+              </div>
+
+              <!-- 分P -->
+              <div v-if="result.media.parts.length > 1" style="margin-top:18px">
+                <div class="batch-head">
+                  <label class="switch">
+                    <input type="checkbox" :checked="allChecked" :indeterminate.prop="someChecked"
+                           @change="toggleAll">
+                    <span class="track"></span>
+                    {{ t('selectAll') }}
+                  </label>
+                  <span class="num">{{ checkedParts.length }} / {{ result.media.parts.length }}</span>
+                  <span class="num" v-if="estimated" style="margin-left:auto">{{ t('estimated') }} {{ size(estimated) }}</span>
+                </div>
+                <p class="batch-limit" v-if="result.media.parts.length > 20">{{ t('limitHint') }}</p>
+                <div class="list">
+                  <label v-for="p in result.media.parts" :key="p.index" class="list-row">
+                    <input type="checkbox" :checked="checkedParts.includes(p.index)"
+                           @change="togglePart(p.index)">
+                    <span class="idx">P{{ p.index }}</span>
+                    <span class="name">{{ p.title }}</span>
+                    <span class="sub mono">{{ dur(p.duration_ms) }}</span>
+                  </label>
+                </div>
+              </div>
+
+              <div class="divider"></div>
+
+              <!-- 画质 -->
+              <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+                <span class="section-label">{{ t('quality') }}</span>
+                <div class="quality-tray">
+                  <button v-for="f in result.formats" :key="f.id"
+                          :data-format-id="f.id" :aria-pressed="selected.includes(f.id)" :disabled="!f.available"
+                          :title="f.reason || ''"
+                          :class="['q', { on: selected.includes(f.id) }]"
+                          @click="toggleFormat(f.id)">
+                    <b>{{ f.label }}</b>
+                    <span>{{ size(f.bytes) }}</span>
+                  </button>
+                </div>
+                <button class="btn ghost sm" style="margin-left:auto" :disabled="!selected.length"
+                        @click="previewSelected">{{ t('preview') }}</button>
+              </div>
+
+              <div class="divider"></div>
+
+              <!-- 附属开关 -->
+              <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap">
+                <span class="section-label">{{ t('sidecars') }}</span>
+                <label class="switch" v-if="result.media.thumbnail && ['douyin', 'bilibili'].includes(result.platform)">
+                  <input type="checkbox" v-model="withCover">
+                  <span class="track"></span>{{ t('cover') }}
+                </label>
+                <label class="switch" v-if="result.platform === 'bilibili'">
+                  <input type="checkbox" v-model="withSubs" @change="persistSidecars">
+                  <span class="track"></span>{{ t('subs') }}
+                </label>
+                <label class="switch" v-if="result.platform === 'bilibili'">
+                  <input type="checkbox" v-model="withDanmaku" @change="persistSidecars">
+                  <span class="track"></span>{{ t('danmaku') }}
+                </label>
+                <span class="section-label" style="letter-spacing:0"
+                      v-if="result.platform === 'bilibili' && (withSubs || withDanmaku)">
+                  {{ t('sidecarHint') }}
+                </span>
+              </div>
+
+              <!-- 警告（未登录/会员档被拒/试听） -->
+              <div style="margin-top:14px" v-if="result.warnings && result.warnings.length">
+                <div class="alert" v-for="(w, i) in result.warnings" :key="i">
+                  <b>!</b><div>{{ w }}</div>
+                </div>
+              </div>
+
+              <div style="display:flex;justify-content:flex-end;margin-top:16px">
+                <button class="btn primary" data-testid="download"
+                        :disabled="!selected.length || busy || submitting || (isBatch && !checkedParts.length)"
+                        @click="download">
+                  {{ t('download') }} ({{ isBatch ? checkedParts.length : selected.length }})
+                </button>
+              </div>
+            </section>
+
+            <!-- 任务 -->
+            <section class="card" id="jobs" v-if="jobs.length">
+              <div class="card-head">
+                <h2>{{ t('jobs') }}</h2>
+                <span class="en">QUEUE</span>
+                <span class="spacer"></span>
+                <button class="btn ghost sm" v-if="failedJobs.length" @click="retryFailed">
+                  {{ t('retryFailed') }} ({{ failedJobs.length }})
+                </button>
+                <button class="btn ghost sm" v-if="finishedJobs.length" @click="clearFinished">
+                  {{ t('clearFinished') }}
+                </button>
+                <span class="section-label">{{ jobs.length }}</span>
+              </div>
+
+              <template v-for="(j, i) in orderedJobs" :key="j.id">
+              <div class="group-label" v-if="i === 0">
+                {{ activeJobs.length ? t('activeJobs') : t('finishedJobs') }}
+                · {{ activeJobs.length || finishedJobs.length }}
+              </div>
+              <div class="group-label" v-if="activeJobs.length && i === activeJobs.length">
+                {{ t('finishedJobs') }} · {{ finishedJobs.length }}
+              </div>
+              <div class="job" :data-job-id="j.id" :data-status="j.status">
+                <div class="job-top">
+                  <span class="name">{{ jobName(j) }}</span>
+                  <span :class="['state', j.status]">{{ statusLabel(j.status) }}</span>
+                </div>
+                <div class="job-meta">
+                  <span>{{ j.formatId || '—' }}</span>
+                  <span>{{ size(j.bytes) }}<template v-if="j.total"> / {{ size(j.total) }}</template></span>
+                  <span>{{ j.percent }}%</span>
+                  <span v-if="j.srtCount || j.danmakuCount">{{ t('sidecar') }} {{ j.srtCount || 0 }}/{{ j.danmakuCount || 0 }}</span>
+                </div>
+                <div class="alert" v-if="j.error" role="status"><div>{{ j.error.message }}<br v-if="j.error.next_action">{{ j.error.next_action || '' }}</div></div>
+                <div class="alert" v-for="warning in (j.warnings || [])" :key="warning" role="status"><div>{{ warning }}</div></div>
+                <div class="bar" :class="{ done: j.status === 'done', fail: j.status === 'failed' }">
+                  <i :style="{ width: (j.status === 'done' ? 100 : (j.percent || 0)) + '%' }"></i>
+                </div>
+                <div class="job-actions" v-if="j.status === 'running' || j.status === 'queued'">
+                  <button class="btn ghost sm" @click="cancel(j.id)">{{ t('cancel') }}</button>
+                </div>
+                <div class="job-actions" v-else-if="j.status === 'failed' || j.status === 'cancelled'">
+                  <button class="btn ghost sm" @click="retry(j.id)">{{ t('retry') }}</button>
+                  <button class="btn ghost sm" @click="removeJob(j)">{{ t('remove') }}</button>
+                </div>
+                <div class="job-actions" v-else-if="j.status === 'done'">
+                  <button class="btn ghost sm" v-if="isBiliJob(j)" @click="refetchJobSidecars(j)">
+                    {{ t('refetchSidecars') }}
+                  </button>
+                  <button class="btn ghost sm" v-if="j.path" @click="revealJob(j)">{{ t('reveal') }}</button>
+                  <button class="btn ghost sm" @click="previewJob(j)">▶ {{ t('preview') }}</button>
+                  <button class="btn ghost sm" @click="removeJob(j)">{{ t('remove') }}</button>
+                </div>
+              </div>
+              </template>
+            </section>
+
+            <p v-if="message" class="msg">{{ message }}</p>
+          </div>
+
+          <!-- 右栏 -->
+          <aside class="rail">
+            <section class="card">
+              <div class="card-head"><h2>{{ t('runtime') }}</h2><span class="en">RUNTIME</span></div>
+              <div class="kv"><span class="k">{{ t('outDir') }}</span><span class="v">{{ outDir || '—' }}</span></div>
+              <div class="kv"><span class="k">{{ t('limit') }}</span><span class="v">{{ rateText }}</span></div>
+              <div class="kv"><span class="k">{{ t('version') }}</span><span class="v">{{ version ? 'v' + version : '—' }}</span></div>
+              <div class="kv"><span class="k">{{ t('engine') }}</span><span class="v">ts · bun</span></div>
+            </section>
+
+            <section class="card">
+              <div class="card-head"><h2>{{ t('notice') }}</h2><span class="en">NOTICE</span></div>
+              <div v-if="result && result.warnings && result.warnings.length">
+                <div class="kv" v-for="(w, i) in result.warnings" :key="i">
+                  <span class="v" style="color:var(--warn);white-space:normal">{{ w }}</span>
+                </div>
+              </div>
+              <div class="kv" v-else>
+                <span class="v" style="color:var(--text-3)">{{ t('none') }}</span>
+              </div>
+            </section>
+
+            <section class="card">
+              <div class="card-head"><h2>{{ t('component') }}</h2><span class="en">ADD-ON</span></div>
+              <div class="comp-row">
+                <span class="name">yt-dlp</span>
+                <span class="badge" :class="compStatus && compStatus.indexOf(t('installed')) === 0 ? 'ok' : 'neutral'">
+                  {{ compStatus || t('notInstalled') }}
+                </span>
+              </div>
+              <div style="display:flex;justify-content:flex-end;margin-top:10px">
+                <button class="btn ghost sm" :disabled="compBusy" @click="installComponent">
+                  {{ compBusy ? t('downloading') : t('install') }}
+                </button>
+              </div>
+            </section>
+          </aside>
+        </div>
+      </main>
+    </div>
+
+    <!-- 设置：右侧 Slide-over -->
+    <div v-if="settingsOpen" class="scrim" @click.self="settingsOpen = false">
+      <div class="slideover" role="dialog" aria-modal="true" :aria-label="t('settings')">
+        <div class="so-head">
+          <div><h2>{{ t('settings') }}</h2><div class="en">PREFERENCES</div></div>
+          <span style="flex:1"></span>
+          <button class="icon-btn" :aria-label="t('close')" @click="settingsOpen = false">✕</button>
+        </div>
+
+        <div class="so-body">
+          <p v-if="settingsError" class="alert" role="alert">{{ settingsError }}</p>
+          <div class="field">
+            <label>{{ t('outDir') }}</label>
+            <input class="input" v-model="sOutDir" :placeholder="t('defaultHint')">
+            <span class="help">{{ t('outDirHelp') }}</span>
+          </div>
+
+          <div class="field">
+            <label>{{ t('limitRate') }}</label>
+            <input class="input" v-model="sLimitRateMB" inputmode="decimal"
+                   placeholder="例如 2；留空不限速">
+            <span class="help">{{ t('limitRateHelp') }}</span>
+          </div>
+
+          <div class="field">
+            <label>{{ t('theme') }}</label>
+            <select class="input" v-model="sTheme">
+              <option value="light">{{ t('light') }}</option>
+              <option value="dark">{{ t('dark') }}</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label>{{ t('concurrency') }}</label>
+            <select class="input" v-model.number="sConcurrency">
+              <option v-for="n in [1, 2, 3, 4]" :key="n" :value="n">{{ n }}</option>
+            </select>
+            <span class="help">{{ t('concurrencyHelp') }}</span>
+          </div>
+
+          <div class="field">
+            <label>{{ t('component') }}</label>
+            <div class="comp-row">
+              <span class="name">yt-dlp（ytdlp-generic）</span>
+              <span class="badge ok" v-if="compStatus && compStatus.indexOf(t('installed')) === 0">{{ t('installed') }}</span>
+              <span class="badge neutral" v-else>{{ t('notInstalled') }}</span>
+              <button class="btn ghost sm" :disabled="compBusy" @click="installComponent">
+                {{ compBusy ? t('downloading') : t('install') }}
+              </button>
+            </div>
+            <span class="help">{{ t('genericHelp') }}</span>
+          </div>
+
+          <div class="field">
+            <label>{{ t('accounts') }}</label>
+            <div class="comp-row" v-for="a in authRows" :key="a.site">
+              <span class="name">{{ a.label }}</span>
+              <span class="badge" :class="authBadge(a)">{{ authText(a) }}</span>
+              <button class="btn ghost sm" :disabled="authBusy" @click="loginSite(a.site)">
+                {{ a.loggedIn ? t('relogin') : t('login') }}
+              </button>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span class="help">{{ authBusy ? t('authChecking') : t('accountsHelp') }}</span>
+              <span style="flex:1"></span>
+              <button class="btn ghost sm" :disabled="authBusy" @click="loadAuth">{{ t('refresh') }}</button>
+            </div>
+          </div>
+
+          <div class="field">
+            <label>{{ t('diagnostics') }}</label>
+            <div class="comp-row" v-for="c in diagRows" :key="c.id" style="flex-wrap:wrap">
+              <span class="name">{{ c.label }}</span>
+              <span class="badge" :class="c.level === 'ok' ? 'ok' : c.level === 'warn' ? 'warn' : 'fail'">{{ c.detail }}</span>
+              <span class="help" v-if="c.action" style="flex-basis:100%">{{ c.action }}</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span class="help">{{ diagBusy ? t('diagRunning') : t('diagnosticsHelp') }}</span>
+              <span style="flex:1"></span>
+              <button class="btn ghost sm" :disabled="diagBusy" @click="runDiagnostics">{{ t('runDiagnostics') }}</button>
+            </div>
+          </div>
+
+          <label class="switch">
+            <input type="checkbox" v-model="sGeneric">
+            <span class="track"></span>{{ t('generic') }}
+          </label>
+        </div>
+
+        <div class="so-foot">
+          <button class="btn ghost" @click="settingsOpen = false">{{ t('cancel') }}</button>
+          <button class="btn primary" @click="saveSettings">{{ t('save') }}</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 预览 -->
+    <div v-if="previewUrl" class="preview-scrim" @click.self="closePreview">
+      <div class="preview-box" role="dialog" aria-modal="true" :aria-label="t('preview')">
+        <div class="phead">
+          <span>{{ t('preview') }}</span>
+          <button class="icon-btn" :aria-label="t('close')" @click="closePreview">✕</button>
+        </div>
+        <video :src="previewUrl" controls autoplay></video>
+      </div>
+    </div>
+  </div>
+
+  <script src="./vendor/vue.global.prod.js"></script>
+  <script src="./vue/i18n.js"></script>
+  <script src="../../engine/engine.bundle.js"></script>
+<script src="./local-api.js"></script>
+  <script src="./vue/format.js"></script>
+  <script src="./vue/jobs.js"></script>
+  <script src="./vue/overlays.js"></script>
+  <script src="./vue/app.js"></script>
+</body>
+</html>

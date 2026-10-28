@@ -209,7 +209,7 @@ export async function writeProbe(text?: string): Promise<ProbeResult> {
 /** 引擎自述：页面上直接显示，防止「看起来在跑其实是旧包」。 */
 export function engineInfo() {
   return {
-    version: '0.1.0-m1a',
+    version: '0.1.0-m1d',
     builtAt: typeof BUILD_STAMP === 'string' ? BUILD_STAMP : 'unknown',
     randomProbe: toHex(randomBytes(4)),
     md5Available: typeof createHash === 'function',

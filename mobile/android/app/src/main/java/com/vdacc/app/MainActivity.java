@@ -42,7 +42,10 @@ import com.vdacc.app.bridge.Bridge;
  *    （Android 的 @JavascriptInterface 没有来源白名单参数，只能自己做）。
  */
 public class MainActivity extends Activity {
-    private static final String LOCAL_URL = "file:///android_asset/ui/m0.html";
+    /** 产品界面（web/vue 的产物，API 层已换成 ui/local-api.js）。 */
+    private static final String LOCAL_APP = "file:///android_asset/ui/app/index.html?token=local";
+    /** M0/M1 的验证页：`-e probe xxx` 时加载，脚本化验收用。 */
+    private static final String LOCAL_VERIFY = "file:///android_asset/ui/m0.html";
     private static final String DEFAULT_URL = "http://192.168.1.100:8765/";
     private static final String PREF = "vdacc";
     private static final int REQ_STORAGE = 1001;
@@ -195,8 +198,11 @@ public class MainActivity extends Activity {
 
     /** 本地页面地址；带 `-e probe 1` 启动时让页面自动跑一次落盘探针（验收脚本用）。 */
     private String localUrl() {
-        return autoProbe == null ? LOCAL_URL
-            : LOCAL_URL + "?probe=" + android.net.Uri.encode(autoProbe);
+        // 验收脚本（-e probe xxx）走 m0 验证页；正常启动直接进产品界面（token 由 local-api 忽略）
+        if (autoProbe != null) {
+            return LOCAL_VERIFY + "?probe=" + android.net.Uri.encode(autoProbe);
+        }
+        return LOCAL_APP;
     }
 
     /** 把当前模式刷到界面上：本地模式不显示地址栏（它在那儿没有意义）。 */

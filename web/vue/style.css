@@ -274,7 +274,13 @@
 /* 引擎会返回「存在但不可用」的档位（如 QQ 的 320K/FLAC 被接口拒绝），必须一眼看出来不可点 */
 .q:disabled { cursor: not-allowed; opacity: .45; }
 .q:disabled:hover { background: transparent; }
-.q b { font-size: 13px; font-weight: 600; line-height: 18px; }
+/* 抖音的 adapt_lowest_* 档位标签很长，窄屏上会压到下一个 chip 上；
+   min-width:0 + ellipsis 让它在自己的格子里截断，而不是溢出去 */
+.q { min-width: 0; }
+.q b {
+  font-size: 13px; font-weight: 600; line-height: 18px; max-width: 100%;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .q span { font-family: var(--font-mono); font-size: 10px; color: var(--text-3); }
 .q.on {
   background: var(--surface); color: var(--text);
@@ -492,7 +498,8 @@
   .probe-row .input { flex-basis: 100%; }
   .probe-row .btn { width: 100%; }
   .quality-tray { width: 100%; }
-  .q { flex: 1; min-width: 0; }
+  /* 别把 5 个档位挤成一行（会只剩「10…」）；给个下限让它换行 */
+  .q { flex: 1 1 96px; min-width: 96px; }
   .title-row h3 { font-size: 17px; line-height: 24px; }
 }
 @media (prefers-reduced-motion: reduce) {
