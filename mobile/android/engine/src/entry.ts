@@ -14,11 +14,13 @@ import { firstUrl, platformOf } from '../../../../ts/src/core/platform';
 import { currentLimitBytesPerSec, parseLimit, setLimitBytesPerSec } from '../../../../ts/src/core/rate';
 import { activeDestCount, releaseDest, reserveDest } from '../../../../ts/src/core/dest';
 import { CookieJar, request } from '../../../../ts/src/core/http';
-import { probeDouyin } from '../../../../ts/src/engines/douyin';
+import { runOperation } from '../../../../ts/src/core/operation';
+import { previewDouyin, probeDouyin } from '../../../../ts/src/engines/douyin';
 import { bytesToBase64, createHash, randomBytes } from '../shims/crypto';
 import { md5Hex, toBytes, toHex } from '../shims/md5';
 import { BridgeError, call, pendingBridgeCalls, setBridgeTransport } from '../shims/bridge';
 import { bridgeFetchInstalled, installBridgeFetch } from '../shims/fetch';
+import { cancelTransferById, startTransfer } from '../shims/transfer';
 
 /**
  * 页面一加载就把 `fetch` 换成走原生的实现。
@@ -270,6 +272,114 @@ export async function probeShare(text: string) {
   return { ...result, ms: Date.now() - started };
 }
 
+export type DownloadResult = {
+  path: string;
+  bytes: number;
+  name: string;
+  label: string;
+  resumeFrom: number;
+  ms: number;
+};
+
+export type DownloadHooks = {
+  onProgress?: (bytes: number, total: number) => void;
+  onReady?: (jobId: string, resumeFrom: number) => void;
+};
+
+function codedError(code: string, message: string): Error {
+  const error = new Error(`${code}: ${message}`) as Error & { code?: string };
+  error.code = code;
+  return error;
+}
+
+/**
+ * M1-c 的下载：probe → 取直链 → 原生流式下载 → publish 到 Download/VDACC。
+ *
+ * 两个必须知道的点：
+ * 1. **直链与 probe 必须在同一个 operation 作用域里取**。抖音的播放地址带 vkey，
+ *    引擎把它缓存在 `operationState` 里；`probeDouyin` 是 scopedOperation，单独调用
+ *    结束后缓存就没了，`previewDouyin` 会拿到空串。
+ * 2. **文件名沿用桌面规则**：`<id>_<safeName(title)>_<safeName(label)>.mp4`，
+ *    这样同一链接在两端落盘名一致（M1-d 接界面时不用再对一次）。
+ */
+export async function downloadShare(
+  text: string,
+  formatId: string | null = null,
+  hooks: DownloadHooks = {},
+): Promise<DownloadResult> {
+  const started = Date.now();
+  let direct = '';
+  let name = '';
+  let label = '';
+
+  await runOperation(async () => {
+    const probe = await probeDouyin(text);
+    // 显式点名了档位就必须命中：静默换档会让用户以为下到了 1080P（与桌面端同一条规矩）
+    let picked = probe.formats.find((f) => f.recommended) || probe.formats[0];
+    if (formatId) {
+      picked = probe.formats.find((f) => f.id === formatId);
+      if (!picked) {
+        const usable = probe.formats.map((f) => f.id).join('、') || '无';
+        throw codedError('no_stream', `这个视频没有 ${formatId} 档（可用：${usable}）`);
+      }
+    }
+    if (!picked) throw codedError('no_stream', '这个视频没有可用档位');
+    label = picked.label;
+    direct = previewDouyin(picked.id);
+    name = `${probe.media!.id}_${safeName(probe.media!.title)}`
+      + `_${safeName(picked.label, 16, picked.id)}.mp4`;
+  });
+
+  if (!direct) throw codedError('no_stream', `档位 ${label} 没有拿到直链（可能已过期，重试一次）`);
+
+  const handle = await startTransfer({
+    url: direct,
+    name,
+    referer: 'https://www.douyin.com/',
+    onProgress: hooks.onProgress,
+  });
+  hooks.onReady?.(handle.jobId, handle.resumeFrom);
+
+  const out = await handle.done;
+  return { ...out, label, resumeFrom: handle.resumeFrom, ms: Date.now() - started };
+}
+
+/** 取消正在进行的下载；`.part` 会保留，下次同一个文件名就是续传。 */
+export async function cancelTransfer(jobId: string): Promise<boolean> {
+  return cancelTransferById(jobId);
+}
+
+/**
+ * 取消能力的确定性验证：拿一个**大文件**（默认 50MB 测速端点）下 800ms 然后取消。
+ * 为什么不用抖音视频来验：5.6MB 的片子在本机 wifi 下 1 秒内就完了，
+ * 手点/脚本都撞不准时机——用大文件才能稳定证明「取消真的停住了，且已写部分保留」。
+ */
+export async function cancelProbe(
+  url = 'https://speed.cloudflare.com/__down?bytes=52428800',
+  afterMs = 800,
+): Promise<{ cancelled: boolean; outcome: string; bytes: number; total: number; ms: number }> {
+  const started = Date.now();
+  let bytes = 0;
+  let total = 0;
+  const handle = await startTransfer({
+    url,
+    name: 'cancel-probe.bin',
+    referer: '',
+    onProgress: (now, all) => { bytes = now; total = all; },
+  });
+  await new Promise((resolve) => setTimeout(resolve, afterMs));
+  const atCancel = bytes;
+  const cancelled = await handle.cancel();
+  let outcome = 'unknown';
+  try {
+    await handle.done;
+    outcome = 'done（没停住！）';
+  } catch (error) {
+    outcome = (error as { code?: string })?.code || 'error';
+  }
+  return { cancelled, outcome, bytes: atCancel, total, ms: Date.now() - started };
+}
+
 const api = {
   engineInfo,
   selfTest,
@@ -277,6 +387,9 @@ const api = {
   writeProbe,
   netProbe,
   probeShare,
+  downloadShare,
+  cancelTransfer,
+  cancelProbe,
   setBridgeTransport,
   pendingBridgeCalls,
   // 纯函数面，M1 的 local-api.js 会直接调这些

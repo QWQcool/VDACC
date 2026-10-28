@@ -38,6 +38,10 @@ class Bridge(private val ctx: Context, private val web: WebView) {
     private val paths = Paths(ctx)
     private val fs = Fs(ctx, paths)
     private val http = Http()
+    private val transfer = Transfer(ctx, paths, fs).also { engine ->
+        // 进度/完成是被推的，不走 reqId 信封：一次下载可能有上百条进度
+        engine.emit = { jobId, payload -> emitEvent("transfer", jobId, payload) }
+    }
     private val worker: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "vdacc-bridge")
     }
@@ -100,6 +104,9 @@ class Bridge(private val ctx: Context, private val web: WebView) {
 
         "http.request" -> http.request(payload)
 
+        "transfer.start" -> transfer.start(payload)
+        "transfer.cancel" -> transfer.cancel(payload)
+
         "crypto.md5Hex" -> md5Hex(payload.optString("text"))
 
         "fs.openWrite" -> fs.openWrite(payload.optString("name"))
@@ -139,12 +146,33 @@ class Bridge(private val ctx: Context, private val web: WebView) {
         }
     }
 
+    /**
+     * 事件回投（进度/完成），与 [deliver] 的区别：这是**推**，没有 reqId，
+     * 页面按 jobId 订阅。名字与 shims/transfer.ts 里的全局函数必须一致。
+     */
+    private fun emitEvent(name: String, id: String, payload: JSONObject) {
+        val args = "${JSONObject.quote(name)},${JSONObject.quote(id)},${JSONObject.quote(payload.toString())}"
+        val script = "window.__VDACC_EVENT__&&window.__VDACC_EVENT__($args)"
+        main.post {
+            try {
+                web.evaluateJavascript(script, null)
+            } catch (error: Exception) {
+                Log.w(TAG, "事件回投失败 $name/$id：${error.message}")
+            }
+        }
+    }
+
     /** 页面退出时清理：关掉还开着的输出流并停掉桥线程。 */
     fun close() {
         try {
             fs.closeAll()
         } catch (error: Exception) {
             Log.w(TAG, "关闭文件句柄失败：${error.message}")
+        }
+        try {
+            transfer.closeAll()
+        } catch (error: Exception) {
+            Log.w(TAG, "关闭传输线程失败：${error.message}")
         }
         worker.shutdownNow()
         httpPool.shutdownNow()

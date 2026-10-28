@@ -81,6 +81,25 @@
   </div>
 
   <div class="card">
+    <h2>下载 1080P（原生流式 → Download/VDACC）</h2>
+    <div class="row"><span class="k">状态</span><span class="v" id="dlState">—</span></div>
+    <div class="row"><span class="k">进度</span><span class="v" id="dlProgress">—</span></div>
+    <div class="row"><span class="k">续传起点</span><span class="v" id="dlResume">—</span></div>
+    <div class="row"><span class="k">文件</span><span class="v" id="dlPath">—</span></div>
+    <div class="row"><span class="k">耗时</span><span class="v" id="dlMs">—</span></div>
+    <button id="dlBtn">下载 1080P</button>
+    <button class="ghost" id="dlCancel" disabled>取消</button>
+  </div>
+
+  <div class="card">
+    <h2>取消探针（50MB 测速文件，下 0.8s 后取消）</h2>
+    <div class="row"><span class="k">取消结果</span><span class="v" id="cxState">—</span></div>
+    <div class="row"><span class="k">结束时事件</span><span class="v" id="cxOutcome">—</span></div>
+    <div class="row"><span class="k">已写字节</span><span class="v" id="cxBytes">—</span></div>
+    <button class="ghost" id="cxBtn">跑取消探针</button>
+  </div>
+
+  <div class="card">
     <h2>网络探针（真实请求 douyin.com）</h2>
     <div class="row"><span class="k">HTTP 状态</span><span class="v" id="netStatus">—</span></div>
     <div class="row"><span class="k">ttwid</span><span class="v" id="ttwid">—</span></div>
@@ -218,6 +237,74 @@
     }
   });
 
+  let dlJobId = null;
+  const mb = (n) => (n / 1048576).toFixed(2) + ' MB';
+
+  $('dlBtn').addEventListener('click', async () => {
+    const btn = $('dlBtn');
+    if (!engine) return;
+    btn.disabled = true;
+    $('dlCancel').disabled = true;
+    setText('dlState', '解析中…');
+    setText('dlProgress', '—');
+    setText('dlResume', '—');
+    setText('dlPath', '—');
+    setText('dlMs', '—');
+    try {
+      const res = await engine.downloadShare($('share').value, 'normal_1080_0', {
+        onProgress: (bytes, total) => {
+          const pct = total ? Math.round((bytes * 100) / total) + '%' : '';
+          setText('dlProgress', mb(bytes) + (total ? ' / ' + mb(total) + '（' + pct + '）' : ''));
+        },
+        onReady: (jobId, resumeFrom) => {
+          dlJobId = jobId;
+          $('dlCancel').disabled = false;
+          setText('dlResume', resumeFrom > 0 ? mb(resumeFrom) + '（续传）' : '0（从头下）', resumeFrom > 0 ? 'ok' : '');
+          setText('dlState', resumeFrom > 0 ? '续传中…' : '下载中…');
+        },
+      });
+      setText('dlState', '完成（' + res.label + '）', 'ok');
+      setText('dlPath', res.path, 'ok');
+      setText('dlMs', res.ms + ' ms');
+    } catch (error) {
+      const code = error && error.code ? error.code + ' ' : '';
+      setText('dlState', '失败：' + code + (error && error.message ? error.message : error), 'bad');
+    } finally {
+      dlJobId = null;
+      btn.disabled = false;
+      $('dlCancel').disabled = true;
+    }
+  });
+
+  $('dlCancel').addEventListener('click', async () => {
+    if (!engine || !dlJobId) return;
+    $('dlCancel').disabled = true;
+    setText('dlState', '取消中…');
+    try {
+      await engine.cancelTransfer(dlJobId);
+    } catch (error) {
+      setText('dlState', '取消失败：' + (error && error.message ? error.message : error), 'bad');
+    }
+  });
+
+  $('cxBtn').addEventListener('click', async () => {
+    const btn = $('cxBtn');
+    if (!engine) return;
+    btn.disabled = true;
+    setText('cxState', '下载 0.8s 后取消…');
+    try {
+      const res = await engine.cancelProbe();
+      const ok = res.cancelled && res.outcome === 'cancelled';
+      setText('cxState', (ok ? '已取消' : '异常：' + res.outcome), ok ? 'ok' : 'bad');
+      setText('cxOutcome', res.outcome + '（' + res.ms + ' ms）');
+      setText('cxBytes', mb(res.bytes) + (res.total ? ' / ' + mb(res.total) : ''));
+    } catch (error) {
+      setText('cxState', '失败：' + (error && error.message ? error.message : error), 'bad');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
   $('net').addEventListener('click', async () => {
     const btn = $('net');
     if (!engine) return;
@@ -252,6 +339,8 @@
     if (probe === '1') setTimeout(() => $('write').click(), 400);
     if (probe === 'net') setTimeout(() => $('net').click(), 400);
     if (probe === 'douyin') setTimeout(() => $('probeBtn').click(), 400);
+    if (probe === 'download') setTimeout(() => $('dlBtn').click(), 400);
+    if (probe === 'cancel') setTimeout(() => $('cxBtn').click(), 400);
   })();
 </script>
 </body>

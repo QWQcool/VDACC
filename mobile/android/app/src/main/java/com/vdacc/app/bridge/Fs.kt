@@ -36,7 +36,7 @@ class Fs(private val ctx: Context, private val paths: Paths) {
      * 只接受**纯文件名**。桥里任何一处接受带分隔符的路径，就等于把整个私有目录
      * （以及将来的 SAF 目录）交给页面，页面又是可被引擎/模板影响的，所以这里从严。
      */
-    private fun safeName(raw: String): String {
+    internal fun safeName(raw: String): String {
         val name = raw.trim()
         if (name.isEmpty()) throw BridgeException("EINVAL", "文件名不能为空")
         if (name == "." || name == ".." || name.contains('/') || name.contains('\\')) {
