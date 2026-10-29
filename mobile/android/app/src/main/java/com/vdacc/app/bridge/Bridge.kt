@@ -114,6 +114,8 @@ class Bridge(private val ctx: Context, private val web: WebView) {
         "fs.closeWrite" -> fs.closeWrite(payload.optString("handle"))
         "fs.publish" -> fs.publish(payload.optString("name"))
         "fs.stat" -> fs.stat(payload.optString("name"))
+        "fs.readHead" -> fs.readHead(payload.optString("name"), payload.optInt("bytes", 65536))
+        "fs.rewrite" -> fs.rewrite(payload.optString("name"), payload.optString("base64"), payload.optLong("skip", 0))
         "fs.mkdirp" -> fs.mkdirp(payload.optString("path"))
 
         else -> throw BridgeException("unsupported_method", "端上还没有实现 $method")

@@ -53,6 +53,14 @@ class Transfer(private val ctx: Context, private val paths: Paths, private val f
         val userAgent: String,
         /** 字节/秒，0 = 不限速。设计稿 §9：限速从 JS 的 throttle 移到原生读速。 */
         val limitBytesPerSec: Long,
+        /**
+         * 下载完成后是否直接 publish 到 Download/VDACC。
+         *
+         * false 时停在 staging 的 `.part` 并把绝对路径回投，由上层补完再 publish——
+         * 网易云要写 ID3/Vorbis 标签与封面（端上没有 ffmpeg，只能在文件落公共目录前改），
+         * M2 的 B站 音视频合并同理。默认 true，保持既有调用方行为不变。
+         */
+        val publishOnDone: Boolean,
     ) {
         @Volatile var cancelled = false
         @Volatile var connection: HttpURLConnection? = null
@@ -87,10 +95,12 @@ class Transfer(private val ctx: Context, private val paths: Paths, private val f
         }
 
         val limit = payload.optLong("limitBytesPerSec", 0L).coerceAtLeast(0L)
+        // 缺省 true：老调用方（抖音/M0 探针）不需要知道这个参数
+        val publishOnDone = payload.optBoolean("publish", true)
 
         val job = synchronized(this) {
             seq += 1
-            Job("t$seq", name, url, referer, userAgent, limit)
+            Job("t$seq", name, url, referer, userAgent, limit, publishOnDone)
         }
         jobs[job.id] = job
         val resumeFrom = stagingFile(name).length()
@@ -190,6 +200,18 @@ class Transfer(private val ctx: Context, private val paths: Paths, private val f
             }
 
             if (job.cancelled) throw Cancelled()
+
+            if (!job.publishOnDone) {
+                // 停在 staging：上层补标签/合并后再自己 publish，失败时这里什么都不删（可续传）
+                emit(job.id, JSONObject()
+                    .put("status", "done")
+                    .put("bytes", file.length())
+                    .put("path", file.absolutePath)
+                    .put("name", job.name)
+                    .put("outKind", "staging")
+                    .put("staged", true))
+                return
+            }
 
             // 完成：publish 到 Download/VDACC（.part 由 Fs 负责删除）
             val published = fs.publish(job.name)

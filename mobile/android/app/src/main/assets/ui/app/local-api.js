@@ -86,7 +86,8 @@
     job.startedAt = Date.now();
     upsert(job);
     try {
-      const result = await engine().downloadShare(job.url, job.formatId, {
+      // downloadAny：抖音与网易云的差异由引擎按平台路由，界面不需要知道
+      const result = await engine().downloadAny(job.url, job.formatId, {
         onProgress: (bytes, total) => {
           job.bytes = bytes;
           job.total = total;
@@ -105,7 +106,8 @@
       job.bytes = result.bytes;
       job.total = result.bytes;
       job.finishedAt = Date.now();
-      job.warnings = [];
+      // 引擎的 warning 要透出来（标签写失败、封面跳过…），不能一律清空
+      job.warnings = result.warnings || [];
     } catch (error) {
       const code = (error && error.code) || 'error';
       if (code === 'cancelled') {
@@ -186,7 +188,8 @@
       const target = String(body.url || '').trim();
       if (!target) return { status: 400, data: { ok: false, error: { code: 'bad_input', message: '缺少 url' } } };
       try {
-        const result = await engine().probeShare(target);
+        // probeAny：平台识别在 core/platform.ts，界面不重复判断（否则会出现两边认成不同平台）
+        const result = await engine().probeAny(target);
         return { status: 200, data: result };
       } catch (error) {
         return {

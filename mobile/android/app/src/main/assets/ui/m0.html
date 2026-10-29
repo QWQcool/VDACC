@@ -81,6 +81,31 @@
   </div>
 
   <div class="card">
+    <h2>网易云（端上 probe + 写标签，M1-e）</h2>
+    <textarea id="song" spellcheck="false">https://music.163.com/song?id=2007983648</textarea>
+    <div class="row"><span class="k">标题</span><span class="v" id="nsTitle">—</span></div>
+    <div class="row"><span class="k">歌手</span><span class="v" id="nsAuthor">—</span></div>
+    <div class="row"><span class="k">档位</span><span class="v" id="nsFormats">—</span></div>
+    <div class="row"><span class="k">下载</span><span class="v" id="nsState">—</span></div>
+    <div class="row"><span class="k">字节</span><span class="v" id="nsBytes">—</span></div>
+    <div class="row"><span class="k">文件</span><span class="v" id="nsPath">—</span></div>
+    <ul class="checks" id="nsWarn"></ul>
+    <button class="ghost" id="nsProbe">解析歌曲</button>
+    <button id="nsDlMp3">下载 128K（验 ID3）</button>
+    <button class="ghost" id="nsDlFlac">下载无损（验 FLAC）</button>
+  </div>
+
+  <div class="card">
+    <h2>FLAC 标签端到端探针（先 adb reverse tcp:8899）</h2>
+    <div class="sub" style="margin:0 0 8px">匿名网易云只给 mp3，所以 flac 分支用电脑上的真实样本验证：
+      <code style="font-size:11px">adb reverse tcp:8899 tcp:8899</code> + 本地静态服务。</div>
+    <div class="row"><span class="k">状态</span><span class="v" id="tfState">—</span></div>
+    <div class="row"><span class="k">字节</span><span class="v" id="tfBytes">—</span></div>
+    <div class="row"><span class="k">文件</span><span class="v" id="tfPath">—</span></div>
+    <button class="ghost" id="tfBtn">下载 FLAC 并写标签</button>
+  </div>
+
+  <div class="card">
     <h2>下载 1080P（原生流式 → Download/VDACC）</h2>
     <div class="row"><span class="k">状态</span><span class="v" id="dlState">—</span></div>
     <div class="row"><span class="k">进度</span><span class="v" id="dlProgress">—</span></div>
@@ -241,6 +266,107 @@
   let dlJobId = null;
   const mb = (n) => (n / 1048576).toFixed(2) + ' MB';
 
+  function nsWarnings(list) {
+    $('nsWarn').textContent = '';
+    for (const w of list || []) {
+      const li = document.createElement('li');
+      const mark = document.createElement('span');
+      mark.className = 'mark';
+      mark.textContent = '注意';
+      const body = document.createElement('div');
+      body.className = 'why';
+      body.textContent = w;
+      li.appendChild(mark);
+      li.appendChild(body);
+      $('nsWarn').appendChild(li);
+    }
+  }
+
+  $('nsProbe').addEventListener('click', async () => {
+    const btn = $('nsProbe');
+    if (!engine) return;
+    btn.disabled = true;
+    setText('nsTitle', '解析中…');
+    setText('nsFormats', '—');
+    nsWarnings([]);
+    try {
+      // 走 probeAny：这一步同时验证「界面给一段文本 → 引擎自己按平台路由」
+      const res = await engine.probeAny($('song').value);
+      setText('nsTitle', (res.media && res.media.title) || '（空）', 'ok');
+      setText('nsAuthor', (res.media && res.media.author) || '—');
+      const list = (res.formats || [])
+        .map((f) => f.id + (f.available ? ' ' + f.label + (f.bytes ? ' ' + mb(f.bytes) : '') : ' 不可用'))
+        .join(' / ');
+      setText('nsFormats', list || '（无档位）', list ? 'ok' : 'bad');
+      nsWarnings(res.warnings);
+    } catch (error) {
+      const code = error && error.code ? error.code + ' ' : '';
+      setText('nsTitle', '失败：' + code + (error && error.message ? error.message : error), 'bad');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  async function nsDownload(formatId, btnId) {
+    const btn = $(btnId);
+    if (!engine) return;
+    btn.disabled = true;
+    setText('nsState', '下载中…');
+    setText('nsBytes', '0 B');
+    setText('nsPath', '—');
+    try {
+      const res = await engine.downloadAny($('song').value, formatId, {
+        onProgress: (bytes, total) => {
+          const pct = total ? Math.round((bytes * 100) / total) + '%' : '';
+          setText('nsBytes', mb(bytes) + (total ? ' / ' + mb(total) + '（' + pct + '）' : ''));
+        },
+      });
+      setText('nsState', '完成（' + res.label + '，' + res.ms + ' ms）', 'ok');
+      setText('nsBytes', String(res.bytes) + ' 字节');
+      setText('nsPath', res.path, 'ok');
+      nsWarnings(res.warnings);
+    } catch (error) {
+      const code = error && error.code ? error.code + ' ' : '';
+      setText('nsState', '失败：' + code + (error && error.message ? error.message : error), 'bad');
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  $('nsDlMp3').addEventListener('click', () => nsDownload('standard', 'nsDlMp3'));
+  $('nsDlFlac').addEventListener('click', () => nsDownload('lossless', 'nsDlFlac'));
+
+  $('tfBtn').addEventListener('click', async () => {
+    const btn = $('tfBtn');
+    if (!engine) return;
+    btn.disabled = true;
+    setText('tfState', '下载中…');
+    setText('tfBytes', '—');
+    setText('tfPath', '—');
+    try {
+      // 封面地址不能写死：从当前歌曲的 probe 结果里取（写死一张图迟早 404）
+      let coverUrl = '';
+      try {
+        const probe = await engine.probeAny($('song').value);
+        coverUrl = (probe.media && probe.media.thumbnail) || '';
+      } catch { /* 取不到封面就不带封面，标签仍要写成功 */ }
+      const res = await engine.tagFileProbe(
+        'http://127.0.0.1:8899/song.flac',
+        'probe-flac.flac',
+        { title: '花海 (DJ 阿若版)', artist: '周杰伦', album: '魔杰座', year: '2008' },
+        coverUrl ? coverUrl + (coverUrl.includes('?') ? '&' : '?') + 'param=600y600' : '',
+      );
+      setText('tfState', '完成（' + res.format + ' · 前缀 ' + res.bytes + ' 字节 · 跳过 ' + res.skip + '）', 'ok');
+      setText('tfBytes', res.stagedBytes + ' → ' + res.after + ' 字节');
+      setText('tfPath', res.path, 'ok');
+    } catch (error) {
+      const code = error && error.code ? error.code + ' ' : '';
+      setText('tfState', '失败：' + code + (error && error.message ? error.message : error), 'bad');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
   $('dlBtn').addEventListener('click', async () => {
     const btn = $('dlBtn');
     if (!engine) return;
@@ -368,6 +494,10 @@
     if (probe === 'download') setTimeout(() => $('dlBtn').click(), 400);
     if (probe === 'cancel') setTimeout(() => $('cxBtn').click(), 400);
     if (probe === 'slow') setTimeout(() => $('slowBtn').click(), 400);
+    if (probe === 'netease') setTimeout(() => $('nsProbe').click(), 400);
+    if (probe === 'music') setTimeout(() => $('nsDlMp3').click(), 400);
+    if (probe === 'flac') setTimeout(() => $('nsDlFlac').click(), 400);
+    if (probe === 'tagflac') setTimeout(() => $('tfBtn').click(), 400);
   })();
 </script>
 </body>

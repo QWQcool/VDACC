@@ -18,9 +18,27 @@ const ROOT = path.resolve(HERE, '../../..');
 const WEB = path.join(ROOT, 'web');
 const OUT = path.join(ROOT, 'mobile/android/app/src/main/assets/ui/app');
 
+/**
+ * 一律按 LF 写入 assets。
+ *
+ * `.gitattributes` 把 `mobile/android/app/src/main/assets/**` 标成 `-text`（按字节比对），
+ * 而本机 `core.autocrlf=true` 会把 `web/vue/*` 检出成 CRLF。直接 copyFileSync 的结果是
+ * 「内容一行没变，diff 却几百行」——正是 2026-10-28 那次 byte-stable 提交想解决的问题。
+ * 在生成侧统一成 LF，产物就与本地 git 的 autocrlf 设置无关。
+ */
+function normalize(text) {
+  return text.replace(/\r\n/g, '\n');
+}
+
 function copy(from, to) {
   mkdirSync(path.dirname(to), { recursive: true });
-  copyFileSync(from, to);
+  const raw = readFileSync(from);
+  // 二进制（图标之类）不做处理：这里只有文本资源会走到 copy()
+  if (raw.includes(0)) {
+    writeFileSync(to, raw);
+    return;
+  }
+  writeFileSync(to, normalize(raw.toString('utf8')), 'utf8');
 }
 
 rmSync(OUT, { recursive: true, force: true });
@@ -54,6 +72,7 @@ if (!rewritten.includes('../engine/engine.bundle.js')) {
   console.error('[ui] 没能注入引擎 bundle：api.js 的 script 标签形状变了');
   process.exit(1);
 }
-writeFileSync(path.join(OUT, 'index.html'), rewritten, 'utf8');
+// 同样按 LF 落盘：源文件在本机是 CRLF（autocrlf 检出），assets 是 -text 按字节比对
+writeFileSync(path.join(OUT, 'index.html'), normalize(rewritten), 'utf8');
 
 console.log(`[ui] 产物 ${path.relative(ROOT, OUT)}（index.html + ${7} 个脚本/样式）`);

@@ -234,7 +234,10 @@ parity 稳定后再决定 Python 是否退化为 yt-dlp helper。
   M0 实测：引擎 bundle 8.5KB（gzip 4.6KB）、APK 846KB；桥 `paths`/`crypto.md5Hex`/`fs`（16KB 分块 + staging→publish）
   在真机（RMX5200 / Android 16）跑通，落盘 md5 与设备 `md5sum` 一致；局域网模式回归通过。
   已定：minSdk 26、输出 `Download/VDACC`（MediaStore + staging `.part`）、桥用 Kotlin、UI 复用 Vue。
-  **下一步 M1**（抖音单文件 + 网易云 + 前台下载 + 取消/续传）。
+  **M1 已完成（2026-10-29）**：抖音单文件、Vue 产品界面直上端、前台下载/取消/限速/锁屏、
+  网易云（端上自写 ID3v2.3 与 FLAC Vorbis comment + 封面，因为端上没有 ffmpeg），全链路有真机证据；
+  仍在分支 `feat/android-standalone`（未合并 main）。**下一步 M2**：B站（分P/字幕/弹幕）+ Media3 合并 + 超限拆轨。
+  遗留：进程被杀后的自动续传（手动「重试」已能从 `.part` 续传）、专辑批量、端上登录（会员曲报 `need_login`）。
 - **HarmonyOS NEXT**：仍等待华为开发者账号与 DevEco 签名；独立端方案可复用同一份 JS 引擎 bundle 与桥接口设计。
 
 执行依赖：F01–F07 → N01/N02 → N03/N04；N05 可在稳定源码上独立推进；N06 依赖设备和稳定连接恢复。

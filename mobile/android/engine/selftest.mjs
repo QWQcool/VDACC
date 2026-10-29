@@ -76,6 +76,24 @@ function fakeBridge(method, payload) {
       if (!all) return { ok: true, data: { exists: false, size: 0, path: '', staging: false } };
       return { ok: true, data: { exists: true, size: all.length, path: `Download/VDACC/${payload.name}`, staging: false } };
     }
+    case 'fs.readHead': {
+      const all = staging.get(payload.name);
+      if (!all) return { ok: false, error: { code: 'ENOENT', message: `暂存文件不存在：${payload.name}` } };
+      const want = Math.min(payload.bytes ?? 65536, all.length);
+      return {
+        ok: true,
+        data: { size: all.length, bytes: want, base64: all.subarray(0, want).toString('base64'), truncated: all.length > want },
+      };
+    }
+    case 'fs.rewrite': {
+      const all = staging.get(payload.name);
+      if (!all) return { ok: false, error: { code: 'ENOENT', message: `暂存文件不存在：${payload.name}` } };
+      const skip = payload.skip ?? 0;
+      const prefix = Buffer.from(payload.base64 ?? '', 'base64');
+      const next = Buffer.concat([prefix, all.subarray(skip)]);
+      staging.set(payload.name, next);
+      return { ok: true, data: { bytes: next.length, prefixBytes: prefix.length, skip } };
+    }
     case 'paths':
       return {
         ok: true,
@@ -126,6 +144,42 @@ const probeChecks = [
 
 console.log('[selftest] 落盘探针（假 fs）');
 for (const [name, actual, expected] of probeChecks) {
+  const ok = JSON.stringify(actual) === JSON.stringify(expected);
+  console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}${ok ? '' : `  期望=${JSON.stringify(expected)} 实际=${JSON.stringify(actual)}`}`);
+  if (!ok) report.ok = false;
+}
+
+/* ─────────────── 4. 标签写入探针（假 fs，验字段名与偏移） ─────────────── */
+
+// 造一个「没有标签」的 mp3：写标签不需要解析音频帧，只要头部不是 ID3/fLaC 即可
+const rawMp3 = Buffer.concat([Buffer.from([0xff, 0xfb, 0x90, 0x00]), Buffer.alloc(4096, 0x11)]);
+staging.set('tag-probe.mp3', rawMp3);
+const tagged = await engine.tagProbe('tag-probe.mp3', {
+  title: '花海 (DJ 阿若版)', artist: '周杰伦', album: '魔杰座', year: '2008',
+});
+const tagBytes = staging.get('tag-probe.mp3');
+
+// 再造一个「已有旧 ID3v2.3 标签（body 64 字节）」的文件：必须跳过旧标签而不是叠加
+const oldTag = Buffer.alloc(74);
+oldTag.set([0x49, 0x44, 0x33, 3, 0, 0, 0, 0, 0, 64]);
+const withOld = Buffer.concat([oldTag, rawMp3]);
+staging.set('tag-probe-old.mp3', withOld);
+const retagged = await engine.tagProbe('tag-probe-old.mp3', { title: '只改标题' });
+const retagBytes = staging.get('tag-probe-old.mp3');
+
+const tagProbeChecks = [
+  ['tagProbe 识别格式 mp3', tagged.format, 'mp3'],
+  ['tagProbe 无旧标签时 skip=0', tagged.skip, 0],
+  ['tagProbe 报告的新增字节与实际一致', tagBytes.length - rawMp3.length, tagged.bytes],
+  ['tagProbe 音频字节原样保留', tagBytes.subarray(tagBytes.length - rawMp3.length).equals(rawMp3), true],
+  ['tagProbe 前缀是 ID3v2.3', tagBytes.subarray(0, 5).toString('latin1'), 'ID3\u0003\u0000'],
+  ['tagProbe 旧标签被跳过（skip=74）', retagged.skip, 74],
+  ['tagProbe 跳过旧标签后音频仍完整', retagBytes.subarray(retagBytes.length - rawMp3.length).equals(rawMp3), true],
+  ['tagProbe 旧标签内容没被保留（文件变短）', retagBytes.length < withOld.length, true],
+];
+
+console.log('[selftest] 标签写入探针（假 fs）');
+for (const [name, actual, expected] of tagProbeChecks) {
   const ok = JSON.stringify(actual) === JSON.stringify(expected);
   console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}${ok ? '' : `  期望=${JSON.stringify(expected)} 实际=${JSON.stringify(actual)}`}`);
   if (!ok) report.ok = false;

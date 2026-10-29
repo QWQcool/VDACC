@@ -15,12 +15,18 @@ import { currentLimitBytesPerSec, parseLimit, setLimitBytesPerSec } from '../../
 import { activeDestCount, releaseDest, reserveDest } from '../../../../ts/src/core/dest';
 import { CookieJar, request } from '../../../../ts/src/core/http';
 import { runOperation } from '../../../../ts/src/core/operation';
+import { readId3v2 } from '../../../../ts/src/core/tags';
 import { previewDouyin, probeDouyin } from '../../../../ts/src/engines/douyin';
 import { bytesToBase64, createHash, randomBytes } from '../shims/crypto';
 import { md5Hex, toBytes, toHex } from '../shims/md5';
 import { BridgeError, call, pendingBridgeCalls, setBridgeTransport } from '../shims/bridge';
 import { bridgeFetchInstalled, installBridgeFetch } from '../shims/fetch';
 import { cancelTransferById, startTransfer } from '../shims/transfer';
+import {
+  buildAudioTag, buildFlacTag, buildMp3Tag, existingId3Size, imageSize, parseFlacChain,
+} from './audiometa';
+import { downloadNetease, probeNetease } from './netease';
+import { readHead, rewriteStaged } from './staging';
 
 /**
  * 页面一加载就把 `fetch` 换成走原生的实现。
@@ -59,6 +65,89 @@ const GOLDEN = {
   md5Vdacc: '6a6195763bd4605b39fe3f7606165d9b',
   md5Chinese: '653438b29823075c5a903c8c84853f8a',
 };
+
+/**
+ * 标签写入的自检（纯函数，连设备都不需要）。
+ *
+ * 为什么值得占几条断言：端上没有 ffmpeg，标签是**我们自己拼字节**。
+ * 拼错了在手机上只是「播放器显示不出来」，很难归因；这里用桌面端的
+ * `readId3v2`（另一个独立解析器）把 mp3 标签反解回来对拍，
+ * flac 则检查块链结构（STREAMINFO 必须在首位、音频起点 = 前缀长度）。
+ */
+function tagChecks(): Check[] {
+  const checks: Check[] = [];
+  const join = (...parts: Uint8Array[]) => {
+    let size = 0;
+    for (const part of parts) size += part.length;
+    const out = new Uint8Array(size);
+    let at = 0;
+    for (const part of parts) { out.set(part, at); at += part.length; }
+    return out;
+  };
+  const ascii = (text: string) => Uint8Array.from(text, (c) => c.charCodeAt(0));
+
+  checks.push(check('existingId3Size 无标签返回 0', existingId3Size(new Uint8Array(32)), 0));
+
+  // v2.3 空标签：header + 100 字节 body，占用 110 字节
+  const oldTag = new Uint8Array(110);
+  oldTag.set([0x49, 0x44, 0x33, 3, 0, 0, 0, 0, 0, 100]);
+  checks.push(check('existingId3Size 认出旧 ID3v2.3', existingId3Size(oldTag), 110));
+
+  const cover = {
+    mime: 'image/jpeg',
+    data: Uint8Array.of(0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4, 0xff, 0xd9),
+    width: 600, height: 600, depth: 24,
+  };
+  const mp3 = buildMp3Tag(new Uint8Array(0), {
+    title: '花海 (DJ 阿若版)', artist: '周杰伦', album: '魔杰座', year: '2008', cover,
+  });
+  const back = readId3v2(mp3.prefix);
+  checks.push(check(
+    'mp3 标签被桌面端解析器读回（含中文）',
+    `${back.title}|${back.artist}|${back.album}`,
+    '花海 (DJ 阿若版)|周杰伦|魔杰座',
+  ));
+  const declared = ((mp3.prefix[6] & 0x7f) << 21) | ((mp3.prefix[7] & 0x7f) << 14)
+    | ((mp3.prefix[8] & 0x7f) << 7) | (mp3.prefix[9] & 0x7f);
+  checks.push(check('mp3 标签长度与 syncsafe 头一致', declared + 10, mp3.prefix.length));
+  checks.push(check('mp3 封面字节原样进 APIC', mp3.prefix.length > cover.data.length, true));
+  checks.push(check('mp3 旧标签会被跳过而不是叠加', buildMp3Tag(oldTag, { title: 'x' }).skip, 110));
+
+  // 假 flac：fLaC + STREAMINFO(34) + VORBIS_COMMENT(8) + 4 字节「音频」
+  const flacHead = join(
+    ascii('fLaC'),
+    Uint8Array.of(0x00, 0, 0, 34), new Uint8Array(34),
+    Uint8Array.of(0x84, 0, 0, 8), new Uint8Array(8),
+    ascii('AUDI'),
+  );
+  const flac = buildFlacTag(flacHead, { title: '花海', artist: '周杰伦', album: '魔杰座', year: '2008', cover });
+  const chain = parseFlacChain(flac.prefix);
+  checks.push(check('flac 重建后块链可解析', chain !== null, true));
+  checks.push(check('flac 首个块仍是 STREAMINFO', chain?.blocks[0]?.type ?? -1, 0));
+  checks.push(check('flac 写入 VORBIS_COMMENT 块', chain ? chain.blocks.some((b) => b.type === 4) : false, true));
+  checks.push(check('flac 写入 PICTURE 块', chain ? chain.blocks.some((b) => b.type === 6) : false, true));
+  checks.push(check('flac 跳过原元数据链的长度', flac.skip, 4 + 4 + 34 + 4 + 8));
+  checks.push(check('flac 新前缀正好接上音频帧', chain?.audioStart ?? -1, flac.prefix.length));
+  const vorbis = chain?.blocks.find((b) => b.type === 4);
+  const vorbisText = vorbis ? new TextDecoder('utf-8').decode(vorbis.data) : '';
+  checks.push(check('flac 标签是 UTF-8 的 TITLE=', vorbisText.includes('TITLE=花海'), true));
+  const picture = chain?.blocks.find((b) => b.type === 6);
+  const pictureTail = picture ? [...picture.data.subarray(picture.data.length - 4)] : [];
+  checks.push(check('flac 封面字节在 PICTURE 块尾部', pictureTail.join(','), [...cover.data.subarray(cover.data.length - 4)].join(',')));
+
+  // PNG 头：签名 + IHDR，宽 600 / 高 800
+  const png = new Uint8Array(26);
+  png.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
+  png.set([0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52], 8);
+  png.set([0, 0, 0x02, 0x58, 0, 0, 0x03, 0x20], 16);
+  const pngSize = imageSize(png);
+  checks.push(check('imageSize 读出 PNG 宽高', `${pngSize.mime} ${pngSize.width}x${pngSize.height}`, 'image/png 600x800'));
+
+  checks.push(check('buildAudioTag 按魔数选 flac', buildAudioTag(flacHead, { title: 'x' }).format, 'flac'));
+  checks.push(check('buildAudioTag 非 flac 走 mp3', buildAudioTag(new Uint8Array(0), { title: 'x' }).format, 'mp3'));
+
+  return checks;
+}
 
 function check(name: string, actual: unknown, expected: unknown, note?: string): Check {
   const a = stringify(actual);
@@ -101,6 +190,9 @@ export async function selfTest(): Promise<SelfTestReport> {
 
   checks.push(check('md5 纯 JS（ASCII）', md5Hex('vdacc'), GOLDEN.md5Vdacc));
   checks.push(check('md5 纯 JS（UTF-8 中文）', md5Hex('你好，VDACC'), GOLDEN.md5Chinese));
+
+  // 标签写入（M1-e 网易云的前置）：端上没有 ffmpeg，字节是我们自己拼的
+  checks.push(...tagChecks());
 
   // 桥交叉校验：JS 侧 md5 与原生 MessageDigest 必须一致，否则签名类引擎在端上必错
   let bridgeOk = true;
@@ -209,7 +301,7 @@ export async function writeProbe(text?: string): Promise<ProbeResult> {
 /** 引擎自述：页面上直接显示，防止「看起来在跑其实是旧包」。 */
 export function engineInfo() {
   return {
-    version: '0.1.0-m1d',
+    version: '0.1.0-m1e',
     builtAt: typeof BUILD_STAMP === 'string' ? BUILD_STAMP : 'unknown',
     randomProbe: toHex(randomBytes(4)),
     md5Available: typeof createHash === 'function',
@@ -279,6 +371,8 @@ export type DownloadResult = {
   label: string;
   resumeFrom: number;
   ms: number;
+  /** 非致命问题（标签写失败、封面跳过…）：界面要显示出来，不能吞掉。 */
+  warnings?: string[];
 };
 
 export type DownloadHooks = {
@@ -342,6 +436,88 @@ export async function downloadShare(
 
   const out = await handle.done;
   return { ...out, label, resumeFrom: handle.resumeFrom, ms: Date.now() - started };
+}
+
+/**
+ * 按平台分发 probe：界面只给一段文本，由引擎自己决定走哪个引擎。
+ *
+ * 为什么不在 `local-api.js` 里判断平台：识别规则在 `core/platform.ts`，
+ * 端上再抄一份就会出现「界面认成抖音、引擎认成网易云」的漂移——
+ * 这种错在真机上表现为「解析出来的字段莫名其妙」，很难归因。
+ */
+export async function probeAny(text: string) {
+  const target = firstUrl(text) || (text || '').trim();
+  const platform = platformOf(target);
+  if (platform === 'netease') {
+    const started = Date.now();
+    const result = await probeNetease(target);
+    return { ...result, ms: Date.now() - started };
+  }
+  if (platform === 'douyin') return probeShare(text);
+  throw codedError('unsupported', `手机端暂不支持这个平台（识别为 ${platform}）：目前支持抖音与网易云`);
+}
+
+/** 下载也按平台分发；两个引擎的返回形状一致，界面不需要知道差异。 */
+export async function downloadAny(
+  text: string,
+  formatId: string | null = null,
+  hooks: DownloadHooks = {},
+): Promise<DownloadResult> {
+  const target = firstUrl(text) || (text || '').trim();
+  const platform = platformOf(target);
+  if (platform === 'netease') return downloadNetease(target, formatId, hooks);
+  if (platform === 'douyin') return downloadShare(text, formatId, hooks);
+  throw codedError('unsupported', `手机端暂不支持这个平台（识别为 ${platform}）：目前支持抖音与网易云`);
+}
+
+/**
+ * 标签写入的端到端探针：读暂存文件头 → 生成标签 → 重写文件。
+ *
+ * 为什么单独开门：`fs.readHead` / `fs.rewrite` 的**字段名与偏移**一旦和原生约定不一致，
+ * 在真机上只表现为「标签没写进去」或「文件坏了」，从日志看不出是哪一边的问题。
+ * 这条探针在 selftest 里跑一遍假桥（验字段形状），在真机上跑一遍真文件（验字节）。
+ */
+export async function tagProbe(name: string, meta: Parameters<typeof buildAudioTag>[1]) {
+  const head = await readHead(name, 512 * 1024);
+  const plan = buildAudioTag(head.bytes, meta);
+  if (plan.note || !plan.prefix.length) {
+    return { before: head.size, after: head.size, format: plan.format, skip: plan.skip, bytes: 0, note: plan.note || '没有可写的标签字段' };
+  }
+  const written = await rewriteStaged(name, plan.prefix, plan.skip);
+  return { before: head.size, after: written.bytes, format: plan.format, skip: plan.skip, bytes: plan.prefix.length };
+}
+
+/**
+ * 端到端标签探针：下载一个**已知格式**的文件（真机验证用 127.0.0.1 + `adb reverse`），
+ * 写标签后 publish。
+ *
+ * 为什么需要它：匿名网易云只给 mp3（实测热歌榜整批 br=320000），所以「端上写 FLAC」在
+ * 产品流程里暂时走不到；但 `audiometa` 的 flac 分支与桥的 `fs.rewrite` 必须被真机跑过一次，
+ * 否则「桌面脚本验过」就成了唯一证据，而桥的偏移/字段名恰恰是桌面脚本验不到的部分。
+ */
+export async function tagFileProbe(
+  url: string,
+  name: string,
+  meta: Parameters<typeof buildAudioTag>[1] = {},
+  coverUrl = '',
+) {
+  const handle = await startTransfer({ url, name, publish: false });
+  const staged = await handle.done;
+
+  // 封面走真实网络（PICTURE 块的宽度/高度要靠真图解析，不能手填）
+  let fullMeta = meta;
+  if (coverUrl) {
+    const res = await request(coverUrl, { headers: { Referer: 'https://music.163.com/' }, timeoutMs: 15000 });
+    const data = new Uint8Array(await res.arrayBuffer());
+    const size = imageSize(data);
+    fullMeta = { ...meta, cover: { mime: size.mime, data, width: size.width, height: size.height, depth: 24 } };
+  }
+
+  const tag = await tagProbe(name, fullMeta);
+  const published = await call<{ path: string; name: string; bytes: number }>(
+    'fs.publish', { name }, { timeoutMs: 120_000 },
+  );
+  return { stagedBytes: staged.bytes, staged: staged.staged === true, ...tag, path: published.path };
 }
 
 /** 取消正在进行的下载；`.part` 会保留，下次同一个文件名就是续传。 */
@@ -416,6 +592,12 @@ const api = {
   netProbe,
   probeShare,
   downloadShare,
+  probeAny,
+  downloadAny,
+  probeNetease,
+  downloadNetease,
+  tagProbe,
+  tagFileProbe,
   cancelTransfer,
   cancelProbe,
   transferProbe,

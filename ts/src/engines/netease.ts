@@ -176,17 +176,27 @@ async function probeNeteaseImpl(url: string): Promise<ProbeResult> {
     const real = await headSize(url);
     const ext = String(item.type || 'mp3').toLowerCase();
     const size = real || declared || 0;
+    // 接口会「请求无损给 320K」而不报错：实测免费曲 2007983648 的 999000 档返回
+    // br=320000 / type=mp3 / 10.3MB。照抄请求档位当标签就是撒谎——文件名会写着
+    // 「无损 FLAC」而文件是 320K mp3。这里按**接口给的实际码率**标注并留 warning。
+    const actualBr = Number(item.br || 0) || 0;
+    const downgraded = actualBr > 0 && actualBr < br * 0.95;
+    const shownLabel = downgraded ? `${Math.round(actualBr / 1000)}K` : label;
+    if (downgraded) {
+      warnings.push(`请求${label}档，接口实际返回 ${Math.round(actualBr / 1000)}K（br=${actualBr}、type=${ext}）`
+        + '，可能没有该档权益');
+    }
     // 地址与档位信息都登记：即使下面因为「同一个文件」不单列，--format 用这个 id 仍能命中
-    formatUrls().set(level, { url, declared, ext, label });
+    formatUrls().set(level, { url, declared, ext, label: shownLabel });
 
     // 不同 br 常常指向同一个文件：实测 128K 与 96K 会返回**不同 URL 但字节完全相同**的文件。
     // 按「字节相同」判重而不是只比 URL，否则界面会出现「128K 3.93MB / 96K 3.93MB」这种自相矛盾的列表。
     const sameFile = size > 0 && formats.some((f) => f.available && f.bytes === size);
     if (sameFile) {
-      warnings.push(`${label} 接口返回的文件与已有档位字节相同，已合并为一条`);
+      warnings.push(`${shownLabel} 接口返回的文件与已有档位字节相同，已合并为一条`);
     } else {
       formats.push(format({
-        id: level, label, ext, acodec: ext,
+        id: level, label: shownLabel, ext, acodec: ext,
         // HEAD 拿到的是「实际能下多少」，但也可能是试听片段的大小；
         // 真正的完整性判定在 get（下载完成后的实际字节 vs declared）
         bytes: size || null,

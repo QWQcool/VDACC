@@ -7,7 +7,8 @@
 | **本地引擎**（默认，M0 起） | 加载 `file:///android_asset/ui/*.html`，TS 引擎打成 bundle 跑在 WebView 里，文件直接落手机 | 手机本地 |
 | **连电脑** | 加载电脑上的 `http://<IP>:8765/?token=...`，解析与下载都在 PC 上跑 | 电脑 |
 
-本地引擎模式是 M0 的技术验证页（自检 + 落盘探针），产品界面从 M1 开始接。
+本地引擎模式默认进产品界面（`web/vue` 产物 + `local-api.js` 顶掉 `api.js`）；
+带 `-e probe xxx` 启动时进 M0/M1 验证页（自检 + 各条探针）。
 连电脑模式的用法与验收记录见文末，两者互不影响。
 
 ## 一、构建
@@ -19,7 +20,7 @@
 rem 1) 引擎 bundle（Bun 自带 bundler，无第三方依赖）
 cd mobile\android\engine
 bun build.mjs
-bun selftest.mjs          rem 无设备自检：15 条纯函数/桥断言 + 8 条落盘探针断言
+bun selftest.mjs          rem 无设备自检：32 条纯函数/桥断言 + 8 条落盘 + 8 条标签写入
 
 rem 2) APK
 set JAVA_HOME=%LOCALAPPDATA%\vdacc-tools\jdk17
@@ -121,8 +122,42 @@ rem 看结果
 顺带修了共享样式：抖音的 `adapt_lowest_*` 档位标签在窄屏会互相压字，
 改为「档位 chip 给 96px 下限 + 换行 + 文本省略」（桌面 12 组布局回归仍全过）。
 
-**仍未做**：进程被杀后的**断点续传**（现在只是标「上次中断」，不自动接上）、
-网易云（M1 清单里还有它）、专辑批量。
+2026-10-29 M1-e 实测（网易云 + 端上写标签，引擎 `0.1.0-m1e`）：
+
+| 项 | 结果 |
+|---|---|
+| 解析（m0 页） | `?probe=netease`：雨爱(钢琴版) / Ben George / `lossless 9.82 MB` + `standard 3.93 MB` |
+| 解析（产品界面） | 粘 `https://music.163.com/song?id=2007983648` → 封面 / 标题 / 作者 / `netease` 徽章 / 4:17 / 两档 chips |
+| 下载（产品界面） | 「下载选中 (1)」→ 任务卡 `2007983648_雨爱(钢琴版)_320K` 完成 9.85 MB / 9.85 MB 100% |
+| **mp3 标签** | `ffprobe`：`title/artist/album` 正确 + `mjpeg 600x600` 封面，257.39 s / 129 kbps，`ffmpeg -f null` 解码通过 |
+| **flac 标签** | 真机端到端探针（下面说明）：`ffprobe` 读出 `TITLE/ARTIST/ALBUM/DATE` + `mjpeg 600x600`，`fLaC` 仍可解码 |
+| 歌词 sidecar | 该曲 `lyric` 为空（纯音乐），因此**没有** `.lrc` —— 这是正确行为，不是失败 |
+| 引擎体积 | 21.1 KB → **38.6 KB（gzip 17.3 KB）**，自检 32/32 |
+
+端上没有 ffmpeg，标签是**自己拼字节**：新增 `engine/src/audiometa.ts`（mp3 → ID3v2.3，
+纯 ASCII 用 latin1、中文用 UTF-16；flac → 重建 metadata 块链，保留 STREAMINFO、
+写入 VORBIS_COMMENT + PICTURE）。桥为此补了三个原语：
+
+- `transfer.start` 新增 `publish:false`：下完先停在 staging，**补完标签再 publish**
+  （否则用户会看到「先出现无标签文件、再被替换」，而 publish 会删掉 `.part`）；
+- `fs.readHead`：读暂存文件头（上限 4 MB），mp3 要靠它认出旧 ID3 标签的长度以免叠加、
+  flac 要靠它遍历块链算出音频帧起点；
+- `fs.rewrite`：用「新前缀 + 原文件 [skip, EOF)」原子替换（临时文件 + rename，
+  不会出现半截文件）。
+
+**FLAC 分支怎么验的**：匿名网易云只给 mp3（实测热歌榜整批 `br=320000`），所以
+产品流程暂时走不到 flac。用 `adb reverse tcp:8899 tcp:8899` + 电脑上的静态服务
+提供真实样本，`?probe=tagflac` 走「下载 → 写标签 → publish」全链路，
+拉回来 `ffprobe` 验标签与封面（`probe-flac.flac` 104,484 字节）。
+
+**顺带修了一处「文件名撒谎」**（桌面端同源问题一起修）：网易云请求 `999000`（无损）档时，
+接口可能返回 `br=320000 / type=mp3` 而**不报错**（实测免费曲 2007983648），
+原实现照抄请求档位当标签，文件名会写着「无损 FLAC」而文件是 320K mp3。
+现在按接口给的实际码率标注（`320K`）并给 warning「请求无损 FLAC 档，接口实际返回 320K」；
+档位 id 仍是 `lossless`，显式指定它的调用不受影响。桌面端加了对应用例（测试 154 → 155）。
+
+**仍未做**：进程被杀后的**自动**续传（现在标「上次中断」，手动「重试」会从 `.part` 续传）、
+专辑批量、端上登录（所以会员曲只能报 `need_login`）。
 
 ## 三、桥与目录（M0 已实现的部分）
 

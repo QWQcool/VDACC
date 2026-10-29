@@ -5,6 +5,23 @@
 
 ## 未发布
 
+- **Android 端 M1-e：网易云上机 + 端上自己写标签（没有 ffmpeg）**：新增 `engine/src/netease.ts`
+  （四档全探、`available:false` 带真实 code、按字节判重、显式档位不静默降级、`incomplete_media`；
+  端上不移植登录，会员曲如实报 `need_login`）与 `engine/src/audiometa.ts`
+  （mp3 → ID3v2.3：ASCII 用 latin1、中文用 UTF-16；flac → 重建 metadata 块链，保留 STREAMINFO、
+  写 VORBIS_COMMENT + PICTURE）。桥补三个原语：`transfer.start` 的 `publish:false`（下完停在 staging，
+  补完标签再落公共目录）、`fs.readHead`（读文件头，认旧 ID3 长度 / 遍历 flac 块链）、
+  `fs.rewrite`（新前缀 + 原文件 [skip,EOF) 原子替换）。真机实测（RMX5200 / Android 16）：
+  产品界面粘 `https://music.163.com/song?id=2007983648` → 解析出封面/标题/两档 → 「下载选中 (1)」→
+  任务卡 100%；拉回文件 `ffprobe` 读到 `title/artist/album` + `mjpeg 600x600` 封面、257.39 s / 129 kbps、
+  `ffmpeg -f null` 解码通过；flac 用 `adb reverse` + 本地真实样本走 `?probe=tagflac` 全链路，
+  `ffprobe` 读出 `TITLE/ARTIST/ALBUM/DATE` + `mjpeg 600x600`。引擎 21.1 KB → 38.6 KB（gzip 17.3 KB），
+  自检 32/32，无设备自检另加 8 条标签写入断言（用桌面端 `readId3v2` 反解对拍）。
+- **网易云「请求无损却给 320K」不再写成无损**（桌面端与 Android 同修）：接口对
+  `br=999000` 可能返回 `br=320000 / type=mp3` 且 `code=200`（实测免费曲 2007983648），
+  原实现照抄请求档位，文件名会写着「无损 FLAC」而内容是 320K mp3。现在按接口给的实际码率标注
+  （`320K`）并给出 warning「请求无损 FLAC 档，接口实际返回 320K（br=320000、type=mp3）」，
+  档位 id 仍是 `lossless`（显式 `--format lossless` 不受影响）。新增离线用例 N0b，测试 154 → **155 pass**。
 - **Android 端 M0（技术验证）**：`mobile/android/` 从「只当屏幕」变成「本机跑引擎」。
   引擎由 Bun 打成单个 IIFE（8.5KB / gzip 4.6KB），`node:path`/`node:crypto` 映射到自带 shim；
   Kotlin 桥提供 `paths` / `crypto.md5Hex` / `fs.{openWrite,writeChunk,closeWrite,publish,stat,mkdirp}`，

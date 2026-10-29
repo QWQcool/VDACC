@@ -29,6 +29,8 @@ export type TransferResult = {
   bytes: number;
   name: string;
   outKind: string;
+  /** `publish:false` 时为 true：文件还在 staging 的 `.part`，等上层处理完再 publish。 */
+  staged?: boolean;
 };
 
 export type TransferHandle = {
@@ -80,6 +82,11 @@ export type StartOptions = {
   userAgent?: string;
   /** 字节/秒，0 或省略 = 不限速（限速在原生侧做，按实际读速计） */
   limitBytesPerSec?: number;
+  /**
+   * 完成后是否直接 publish 到 Download/VDACC，默认 true。
+   * false 时停在 staging，用于「先补标签/封面再落公共目录」（网易云）与后续的音视频合并。
+   */
+  publish?: boolean;
   onProgress?: (bytes: number, total: number) => void;
 };
 
@@ -92,6 +99,8 @@ export async function startTransfer(options: StartOptions): Promise<TransferHand
       referer: options.referer ?? '',
       userAgent: options.userAgent ?? '',
       limitBytesPerSec: options.limitBytesPerSec ?? 0,
+      // 缺省 true（不传就等于老行为）；显式传 false 才停在 staging
+      publish: options.publish !== false,
     },
   );
 
@@ -118,6 +127,8 @@ export async function startTransfer(options: StartOptions): Promise<TransferHand
         bytes,
         name: event.name ?? started.name,
         outKind: event.outKind ?? '',
+        // 原生在 publish:false 时会多给一个 staged 标记，缺省视为已落公共目录
+        staged: (event as { staged?: boolean }).staged === true,
       });
       return;
     }

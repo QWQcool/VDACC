@@ -167,6 +167,22 @@ describe('网易云 probe：档位呈现', () => {
     expect(probe.media?.title).toBe('测试曲');
   });
 
+  test('N0b 请求无损但接口只给 320K：按实际码率标注，不写成「无损」', async () => {
+    stubDetail();
+    stubUrls({
+      // 实测形状（免费曲 2007983648，2026-10-29）：br 参数 999000，返回 br=320000 / type=mp3
+      999000: urlBody([{ br: 320000, size: 10_298_558, type: 'mp3' }]),
+    });
+    stubHead({ '320000': 10_298_558 });
+
+    const probe = await probeNetease(SID);
+    const lossless = probe.formats.find((f) => f.id === 'lossless');
+    // id 仍是 lossless（显式 --format lossless 还能命中），但 label 必须说实际码率
+    expect(lossless?.label).toBe('320K');
+    expect(lossless?.ext).toBe('mp3');
+    expect(probe.warnings.some((w) => w.includes('实际返回 320K'))).toBe(true);
+  });
+
   test('N1 未放行档位也要出现：available=false 且 reason 带真实 code', async () => {
     stubDetail();
     stubUrls({

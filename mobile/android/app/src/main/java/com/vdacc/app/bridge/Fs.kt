@@ -8,7 +8,9 @@ import android.os.Build
 import android.provider.MediaStore
 import org.json.JSONObject
 import java.io.File
+import java.io.FileOutputStream
 import java.io.OutputStream
+import java.io.RandomAccessFile
 
 /**
  * 文件能力：**先写私有 staging 的 `.part`，完成后 publish 到 Download/VDACC**。
@@ -22,6 +24,11 @@ import java.io.OutputStream
  * 用线程池并发写同一个文件会静默写坏内容（不是丢一块，是整段错位）。
  */
 class Fs(private val ctx: Context, private val paths: Paths) {
+
+    companion object {
+        /** readHead 的硬上限：见 {@link #readHead} 的说明。 */
+        private const val MAX_READ_HEAD = 4 * 1024 * 1024
+    }
 
     private class Handle(val name: String, val file: File, val out: OutputStream) {
         var bytes: Long = 0
@@ -223,6 +230,94 @@ class Fs(private val ctx: Context, private val paths: Paths) {
             .put("name", name)
             .put("outKind", "file")
             .put("size", target.length())
+    }
+
+    /* ───────────────────────── 读头 / 重写（M1-e 写标签用） ───────────────────────── */
+
+    /**
+     * 读暂存文件开头的若干字节（base64 回投）。
+     *
+     * 为什么需要：端上没有 ffmpeg，网易云要给 mp3 写 ID3v2、给 flac 写 Vorbis comment，
+     * 两者都需要**先看见文件头**——mp3 要知道有没有旧 ID3 标签（否则会在旧标签前面再塞一个，
+     * 播放器读到的是旧的那个），flac 要遍历 metadata block 链找到音频帧的起始偏移。
+     *
+     * 上限 4MB：flac 的块链（含内嵌封面）正常几十 KB，超过这个量说明不是我们认识的形状，
+     * 宁可让调用方按「读不全」处理（跳过写标签、保留音频），也不要为极端文件把 JS 堆撑爆。
+     */
+    fun readHead(nameRaw: String, bytes: Int): JSONObject {
+        val name = safeName(nameRaw)
+        val file = stagingFile(name)
+        if (!file.exists()) throw BridgeException("ENOENT", "暂存文件不存在：${file.absolutePath}")
+        val total = file.length()
+        val want = minOf(bytes.coerceIn(0, MAX_READ_HEAD).toLong(), total).toInt()
+        val buf = ByteArray(want)
+        var read = 0
+        file.inputStream().use { input ->
+            while (read < want) {
+                val got = input.read(buf, read, want - read)
+                if (got < 0) break
+                read += got
+            }
+        }
+        return JSONObject()
+            .put("size", total)
+            .put("bytes", read)
+            .put("base64", android.util.Base64.encodeToString(
+                if (read == want) buf else buf.copyOf(read), android.util.Base64.NO_WRAP))
+            .put("truncated", total > read)
+    }
+
+    /**
+     * 用「新前缀 + 原文件 [skip, EOF)」替换暂存文件内容。
+     *
+     * 为什么是这个形状而不是「改中间某一段」：mp3 的 ID3v2 与 flac 的 metadata 都在**文件开头**，
+     * 写标签等价于「换掉开头那一段、后面的音频字节原样保留」。skip 由 JS 侧算出来
+     * （mp3 = 旧 ID3 标签长度，flac = 原 metadata 链长度），原生只负责按偏移拷字节。
+     *
+     * 为什么要临时文件：`RandomAccessFile` 原地重写会在 prefix 比 skip 长的时候覆盖还没读的音频数据；
+     * 写临时文件 + 同目录 rename 才能保证**要么是旧文件、要么是完整新文件**，不会留下半截。
+     */
+    fun rewrite(nameRaw: String, prefixBase64: String, skip: Long): JSONObject {
+        val name = safeName(nameRaw)
+        val source = stagingFile(name)
+        if (!source.exists()) throw BridgeException("ENOENT", "暂存文件不存在：${source.absolutePath}")
+        val prefix = try {
+            android.util.Base64.decode(prefixBase64, android.util.Base64.DEFAULT)
+        } catch (error: IllegalArgumentException) {
+            throw BridgeException("EINVAL", "prefix 不是合法 base64：${error.message}", error)
+        }
+        val temp = File(source.parentFile, "${source.name}.rewrite")
+        try {
+            RandomAccessFile(source, "r").use { input ->
+                if (skip < 0 || skip > input.length()) {
+                    throw BridgeException("EINVAL", "skip=$skip 超出文件大小 ${input.length()}")
+                }
+                input.seek(skip)
+                FileOutputStream(temp).use { out ->
+                    out.write(prefix)
+                    val buffer = ByteArray(64 * 1024)
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        out.write(buffer, 0, read)
+                    }
+                    out.flush()
+                }
+            }
+        } catch (error: Exception) {
+            temp.delete()
+            throw if (error is BridgeException) error
+            else BridgeException("EIO", "重写暂存文件失败：${error.message}", error)
+        }
+        // 同目录 rename 是原子的；先删旧文件再改名，失败时把临时文件清掉，不留两份
+        if (!source.delete() || !temp.renameTo(source)) {
+            temp.delete()
+            throw BridgeException("EIO", "替换暂存文件失败（${source.absolutePath}）")
+        }
+        return JSONObject()
+            .put("bytes", source.length())
+            .put("prefixBytes", prefix.size)
+            .put("skip", skip)
     }
 
     /* ───────────────────────────── stat / mkdirp ───────────────────────────── */
