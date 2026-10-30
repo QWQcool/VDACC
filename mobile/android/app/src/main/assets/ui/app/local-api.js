@@ -314,6 +314,29 @@
       return ok({ removed: 1 });
     }
 
+    if (path === '/api/auth' && method === 'GET') {
+      // 账号区：只报「有没有 / 在线是否有效」，cookie 不出原生
+      try {
+        const res = await engine().authStatus();
+        return ok({ sites: res.sites || [], loggingIn: [] });
+      } catch (error) {
+        return { status: 200, data: { ok: false, error: { code: (error && error.code) || 'error',
+          message: String((error && error.message) || error) } } };
+      }
+    }
+
+    const authLogin = /^\/api\/auth\/([^/]+)\/login$/.exec(path);
+    if (authLogin && method === 'POST') {
+      try {
+        const res = await engine().authLogin(authLogin[1]);
+        return ok({ started: !!res.started, site: res.site,
+          message: '已打开登录页；登录完成后点「刷新」看状态' });
+      } catch (error) {
+        return { status: 200, data: { ok: false, error: { code: (error && error.code) || 'error',
+          message: String((error && error.message) || error) } } };
+      }
+    }
+
     if (path === '/api/components') {
       return ok({ components: { ytdlp: { installed: false, bytes: 0 } } });
     }

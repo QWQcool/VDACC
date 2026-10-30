@@ -75,4 +75,24 @@ if (!rewritten.includes('../engine/engine.bundle.js')) {
 // 同样按 LF 落盘：源文件在本机是 CRLF（autocrlf 检出），assets 是 -text 按字节比对
 writeFileSync(path.join(OUT, 'index.html'), normalize(rewritten), 'utf8');
 
+/*
+ * 账号说明文案：桌面端写的是「登录在电脑上完成（独立 Edge）」，端上现在真的在手机上登录，
+ * 照抄就是一句假话。定向改这两条，匹配不上就报错退出——文案搬家了要有人来改这个脚本，
+ * 而不是悄悄留一句错的（与 import 那条「必须被改写」同一个思路）。
+ */
+const i18nPath = path.join(OUT, 'vue', 'i18n.js');
+let i18n = readFileSync(i18nPath, 'utf8');
+const zhHelp = "accountsHelp: '登录在手机上完成（独立 WebView，不注入任何桥）；"
+  + "cookie 只留在本机原生侧，请求时由原生按域名自动携带。'";
+const enHelp = "accountsHelp: 'Login happens on this phone in a dedicated WebView without the bridge; "
+  + "cookies stay in native code and are attached per request.'";
+// 按出现顺序填（zh 在前、en 在后）。不能连着两次 replace：第二次会命中刚写进去的第一条。
+let helpIndex = 0;
+i18n = i18n.replace(/accountsHelp: '[^']*'/g, () => (helpIndex++ === 0 ? zhHelp : enHelp));
+if (helpIndex !== 2 || i18n.includes('登录在电脑上完成') || i18n.includes('the phone only shows status')) {
+  console.error('[ui] accountsHelp 文案没按预期改写：桌面/端上的登录方式说明会不一致');
+  process.exit(1);
+}
+writeFileSync(i18nPath, normalize(i18n), 'utf8');
+
 console.log(`[ui] 产物 ${path.relative(ROOT, OUT)}（index.html + ${7} 个脚本/样式）`);

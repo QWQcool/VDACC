@@ -53,6 +53,12 @@
             </intent-filter>
         </activity>
 
+        <!-- 登录页：独立 Activity + 独立 WebView，**不注入桥**（远端页面不该拿到 fs/网络能力） -->
+        <activity
+            android:name=".LoginActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden" />
+
         <service
             android:name=".service.DownloadService"
             android:exported="false"

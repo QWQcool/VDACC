@@ -250,8 +250,27 @@ QQ 用 `fcg_play_single_song` + `vkey.GetVkeyServer`。
 跨分片时间戳重排、按分片 Range 下载——这不是「顺手加个入口」，属于独立里程碑。所以现在手机端遇到
 `.m3u8` 直链会如实报「暂不支持这个平台（识别为 sniff）」，不假装能下。
 
-**仍未做**：专辑批量、端上登录（所以 QQ 的 320K/无损、B站字幕与 1080P 以上档位都拿不到，只能如实报
-`need_login`）、「打开文件夹/预览」按钮（桌面语义，端上仍是 `unsupported`）、HLS（见上）。
+2026-10-30 端上登录（M6 后续，**实现已完成，真实账号验收待做**）：
+
+做法是「cookie 不出原生」，而不是把 cookie 交给 JS：
+
+- 登录页是独立 `LoginActivity` + 独立 WebView，**不注入任何 `JavascriptInterface`**——
+  远端站点不该拿到能读写文件、能发任意请求的桥。
+- 登录后的 cookie 由系统 `CookieManager` 持久化；`http.request` 与 `transfer.start` 在发请求前
+  按 host 自动补 `Cookie` 头（只认 `*.bilibili.com` 与 `*.163.com`，CDN 域不带）。
+  **引擎代码一行没改**，也就没有 cookie 被写进 localStorage / 日志的机会。
+- `auth.status` 只回「关键 cookie 在不在 + 在线校验结果」，不回 cookie 值；
+  在线校验用接口真问一次（B站 `nav`、网易云 `nuser/account/get`），避免「cookie 在但早过期」显示成已登录。
+- 设置面板「账号」区直接复用桌面端那套 `/api/auth`（`local-api` 转到桥），登录后点「刷新状态」即可看到
+  `有效（晨星成焰（大会员））` 这类结果。文案里「登录在电脑上完成」在端上被 `build-ui.mjs` 定向改写
+  （匹配不上就构建失败，避免留一句假话）。
+
+已验证到：`POST /api/auth/bilibili/login` 能打开 `passport.bilibili.com` 登录页（标题写明不注入桥）、
+`GET /api/auth` 在未登录时如实回「已失效」、引擎请求不带 cookie。
+**未验证**：真实扫码/手机号登录后的 `有效` 状态，以及登录后 B站 是否真到 1080P、网易云是否真到无损。
+
+**仍未做**：专辑批量、QQ 的 320K/无损（QQ 没有可用的会员账号且本地凭据已失效）、
+「打开文件夹/预览」按钮（桌面语义，端上仍是 `unsupported`）、HLS（见上）。
 任务历史从 M1-d 起就存在 `localStorage`（杀进程重开仍在）。
 
 ## 三、桥与目录（M0 已实现的部分）

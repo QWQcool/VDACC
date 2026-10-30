@@ -92,8 +92,12 @@ class Bridge(private val ctx: Context, private val web: WebView) {
                 }
                 deliver(reqId, envelope)
             }
-            // fs 必须保序（单线程）；http 是耗时调用，不跟着排队
-            if (method.startsWith("http.")) httpPool.execute(task) else worker.execute(task)
+            // fs 必须保序（单线程）；http / auth 是耗时调用（auth 要联网校验），不跟着排队
+            if (method.startsWith("http.") || method.startsWith("auth.")) {
+                httpPool.execute(task)
+            } else {
+                worker.execute(task)
+            }
         }
     }
 
@@ -113,6 +117,11 @@ class Bridge(private val ctx: Context, private val web: WebView) {
             Notify.done(ctx, payload.optString("name"), payload.optString("path"))
             JSONObject().put("shown", true)
         }
+
+        // 登录（M6 后续）：状态只报「有没有/是否有效」，cookie 本身不回传 JS
+        "auth.status" -> Auth.status()
+        "auth.login" -> Auth.startLogin(ctx, payload.optString("site"))
+        "auth.logout" -> Auth.logout(payload.optString("site"))
 
         "http.request" -> http.request(payload)
 

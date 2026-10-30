@@ -5,6 +5,12 @@
 
 ## 未发布
 
+- **Android 端登录（cookie 不出原生）**：独立 `LoginActivity` + 独立 WebView 承载站点登录页，
+  **不注入桥**；cookie 由系统 `CookieManager` 持久化，`http.request` / `transfer.start` 按 host
+  自动补 `Cookie`（只认 `*.bilibili.com` / `*.163.com`），引擎代码零改动、cookie 不进 JS。
+  设置面板「账号」区复用桌面端 `/api/auth`：`GET` 返回关键 cookie 是否齐全 + 在线校验
+  （B站 `nav` / 网易云 `nuser/account/get`），`POST /api/auth/<site>/login` 打开登录页。
+  已验证：登录页可打开、未登录时如实显示「已失效」、请求不带 cookie；真实账号登录后的档位变化待验收。
 - **网易云：真无损不再被误判成「降级」**（2026-10-30，会员账号实测暴露）：上一版按「实际 br < 请求档位
   ×95% 即降级」判断，而真无损时接口给的 `br` 是 FLAC **编码后的实际码率**（实测 476590 / 901303 /
   1546095），于是真无损被标成「477K（可能没有该档权益）」。现在无损档改判 `type` 是否 `flac`，

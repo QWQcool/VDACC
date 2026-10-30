@@ -90,6 +90,9 @@ class Transfer(private val ctx: Context, private val paths: Paths, private val f
             readTimeout = 30_000
             setRequestProperty("User-Agent", job.userAgent)
             if (job.referer.isNotEmpty()) setRequestProperty("Referer", job.referer)
+            // 登录态由原生补（与 http.request 同一规则）；CDN 域名不会命中
+            val cookie = Auth.headerFor(job.url)
+            if (cookie.isNotEmpty()) setRequestProperty("Cookie", cookie)
             if (from > 0) setRequestProperty("Range", "bytes=$from-")
         }
 

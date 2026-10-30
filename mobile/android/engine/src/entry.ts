@@ -717,6 +717,27 @@ export async function notifyDone(name: string, path: string): Promise<boolean> {
   }
 }
 
+/**
+ * 登录状态（M6 后续）。
+ *
+ * cookie 只活在原生侧：这里拿到的是「有没有登录、在线是否有效」，**没有 cookie 值**。
+ * 引擎发请求时由原生自动补 Cookie（见 Bridge 的 `http.request` / `transfer.start`），
+ * 所以引擎代码不需要知道登录这回事。
+ */
+export async function authStatus() {
+  return call<{ sites: Array<Record<string, unknown>> }>('auth.status', {}, { timeoutMs: 40_000 });
+}
+
+/** 打开系统登录页（独立 WebView，不注入桥）。 */
+export async function authLogin(site: string) {
+  return call<{ started: boolean; site: string }>('auth.login', { site });
+}
+
+/** 退出登录：只清该站点已知的 cookie。 */
+export async function authLogout(site: string) {
+  return call<{ cleared: number }>('auth.logout', { site });
+}
+
 /** 取消正在进行的下载；`.part` 会保留，下次同一个文件名就是续传。 */
 export async function cancelTransfer(jobId: string): Promise<boolean> {
   return cancelTransferById(jobId);
@@ -804,6 +825,9 @@ const api = {
   tagProbe,
   tagFileProbe,
   notifyDone,
+  authStatus,
+  authLogin,
+  authLogout,
   cancelTransfer,
   cancelProbe,
   transferProbe,

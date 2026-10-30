@@ -58,11 +58,19 @@ class Http {
         }
 
         val headers = payload.optJSONObject("headers")
+        var callerSetCookie = false
         if (headers != null) {
             for (name in headers.keys()) {
                 val value = headers.optString(name)
                 if (value.isNotEmpty()) connection.setRequestProperty(name, value)
+                if (name.equals("Cookie", ignoreCase = true)) callerSetCookie = true
             }
+        }
+        // 登录态由原生补：JS 侧拿不到也不该拿到 cookie（引擎代码因此零改动）。
+        // 调用方显式设了 Cookie 就尊重它的（桌面端导出的场景）。
+        if (!callerSetCookie) {
+            val cookie = Auth.headerFor(url)
+            if (cookie.isNotEmpty()) connection.setRequestProperty("Cookie", cookie)
         }
 
         try {
