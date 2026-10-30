@@ -178,9 +178,16 @@ async function probeNeteaseImpl(url: string): Promise<ProbeResult> {
     const size = real || declared || 0;
     // 接口会「请求无损给 320K」而不报错：实测免费曲 2007983648 的 999000 档返回
     // br=320000 / type=mp3 / 10.3MB。照抄请求档位当标签就是撒谎——文件名会写着
-    // 「无损 FLAC」而文件是 320K mp3。这里按**接口给的实际码率**标注并留 warning。
+    // 「无损 FLAC」而文件是 320K mp3。
+    //
+    // 但**不能只比 br**：真无损时接口给的是 FLAC 编码后的实际码率（实测 477K / 901K / 1546K），
+    // 拿它跟请求档位 999000 比会把真无损误判成降级（2026-10-30 用黑胶会员账号踩到）。
+    // 判据改成「无损档要求 type=flac；其它档才比码率」。
     const actualBr = Number(item.br || 0) || 0;
-    const downgraded = actualBr > 0 && actualBr < br * 0.95;
+    const expectFlac = br >= 999000;
+    const downgraded = expectFlac
+      ? ext !== 'flac'
+      : actualBr > 0 && actualBr < br * 0.95;
     const shownLabel = downgraded ? `${Math.round(actualBr / 1000)}K` : label;
     if (downgraded) {
       warnings.push(`请求${label}档，接口实际返回 ${Math.round(actualBr / 1000)}K（br=${actualBr}、type=${ext}）`

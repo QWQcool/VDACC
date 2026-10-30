@@ -183,6 +183,19 @@ describe('网易云 probe：档位呈现', () => {
     expect(probe.warnings.some((w) => w.includes('实际返回 320K'))).toBe(true);
   });
 
+  test('N0c 真无损的 br 是 FLAC 编码实际码率，不能判成降级', async () => {
+    stubDetail();
+    // 实测（黑胶会员账号，2026-10-30）：请求 999000 返回 type=flac、br=901303、36MB
+    stubUrls({ 999000: urlBody([{ br: 901_303, size: 36_097_193, type: 'flac' }]) });
+    stubHead({ '999000': 36_097_193 });
+
+    const probe = await probeNetease(SID);
+    const lossless = probe.formats.find((f) => f.id === 'lossless');
+    expect(lossless?.label).toBe('无损 FLAC');
+    expect(lossless?.ext).toBe('flac');
+    expect(probe.warnings.some((w) => w.includes('实际返回'))).toBe(false);
+  });
+
   test('N1 未放行档位也要出现：available=false 且 reason 带真实 code', async () => {
     stubDetail();
     stubUrls({

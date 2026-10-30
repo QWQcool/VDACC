@@ -248,9 +248,12 @@ parity 稳定后再决定 Python 是否退化为 yt-dlp helper。
   **M5 已完成（2026-10-30）**：被杀后自动续传（次数上限 2）、修 416（`.part` 已完整却被续传拒掉）、
   断网失败归类为 `ENET` 且恢复后重试成功、内存不随文件大小增长；HLS 评估结论为**不移植**
   （桌面靠 ffmpeg，端上缺 playlist 解析 + AES-128 + 跨分片时间戳重排）。
-  仍在分支 `feat/android-standalone`（未合并 main）。**下一步 M6** 是「会员认证/付费限制」研究项，
-  按 `ReversePlan.md` 需要用户明确授权才能做线上验证，不擅自开工；另一条路是把本分支合并回 main
-  并更新根 `README.md` 的 Android 章节（那里还写着「手机只当屏幕」）。
+  **已合并回 `main`**（2026-10-30，快进 14 个提交 + 根 `README.md` 的 Android 章节更到现状）。
+  **M6 重新定义为「经授权的权益核对」并已做 B站/网易云**（2026-10-30）：用用户本人大会员 / 黑胶账号，
+  记录平台实际放行什么——B站番剧 会员 16 轨 / 最大 1440 宽 vs 匿名 6 轨 / 640 宽，
+  网易云 VIP 曲 `type=flac`（901K~1656K）vs 匿名 `code=-110`；同时确认「有会员 ≠ 该曲可下」
+  （`id=186016` 会员态仍 `code=404`）。矩阵见 `docs/design/member-capability-baseline.md`。
+  **不做**凭证伪造、cookie 盗用、DRM 破解或付费墙绕过。
   遗留：专辑批量、端上登录（QQ 320K/无损、B站字幕与 1080P 以上档位因此拿不到，只会如实报
   `need_login`）、「打开文件夹/预览」仍是 `unsupported`、HLS。
 - **HarmonyOS NEXT**：仍等待华为开发者账号与 DevEco 签名；独立端方案可复用同一份 JS 引擎 bundle 与桥接口设计。

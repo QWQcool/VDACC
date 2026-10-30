@@ -113,9 +113,14 @@ async function probeImpl(input: string): Promise<ProbeBundle> {
     const ext = String(item.type || 'mp3').toLowerCase();
     const size = real || declared || 0;
     // 与桌面端同一条：接口「请求无损给 320K」不报错（实测 br=320000 / type=mp3），
-    // 照抄请求档位会让文件名写着「无损 FLAC」而文件是 320K mp3
+    // 照抄请求档位会让文件名写着「无损 FLAC」而文件是 320K mp3。
+    // 真无损时 br 是 FLAC 编码后的实际码率（477K/901K/1546K），不能拿它跟 999000 比，
+    // 否则真无损会被误判成降级——无损档改判 type。
     const actualBr = Number(item.br || 0) || 0;
-    const downgraded = actualBr > 0 && actualBr < br * 0.95;
+    const expectFlac = br >= 999000;
+    const downgraded = expectFlac
+      ? ext !== 'flac'
+      : actualBr > 0 && actualBr < br * 0.95;
     const shownLabel = downgraded ? `${Math.round(actualBr / 1000)}K` : label;
     if (downgraded) {
       warnings.push(`请求${label}档，接口实际返回 ${Math.round(actualBr / 1000)}K（br=${actualBr}、type=${ext}）`
