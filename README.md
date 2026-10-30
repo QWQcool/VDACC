@@ -133,14 +133,19 @@ Playwright 起一个独立 Edge（独立 profile，不碰你正在用的）
   正常用法是用 `VDACC.bat` 启动（它会自动打开带新 token 的地址）；
 - 需要长期固定的快捷方式，就自己用 `--token <固定值>` 启动，并接受这个 token 落在本机 URL/本地存储里。
 
-## 手机壳（Android）
+## 手机（Android）
 
-`mobile/android/` 是一个极薄的 WebView 壳（无第三方依赖，APK 约 10KB）：手机只当屏幕，
-解析与下载仍在电脑上跑。
+`mobile/android/` 有两种模式，右下角按钮切换：
 
-1. 电脑：`bun ts/src/server.ts --port 8765 --token <token> --lan`，记下打印的局域网地址；
-2. 手机：装 `mobile/android/app/build/outputs/apk/debug/app-debug.apk`，粘地址点「连接」；
-3. 手机与电脑需同一 Wi-Fi；首次运行 Windows 防火墙要允许「专用网络」。
+| 模式 | 说明 |
+|---|---|
+| **本地引擎**（默认） | TS 引擎打成 bundle 跑在 WebView 里，解析与下载都在手机上；界面就是 `web/vue` 的产物，只把 API 层换成 `local-api.js` |
+| **连电脑** | 手机只当屏幕：`bun ts/src/server.ts --port 8765 --token <token> --lan`，手机粘局域网地址点「连接」 |
+
+本地引擎已支持：抖音、B站（含分P/弹幕，DASH 两条轨在手机上合并）、网易云 / 酷我 / 酷狗 / QQ 音乐。
+文件默认落 `Download/VDACC`，也可以在壳上「目录」按钮里用系统文件选择器改到别的目录（长按恢复默认）。
+系统「分享」过来的链接会直接进解析；下载完成有通知，一点回 App。构建与逐版验收记录见
+[`mobile/android/README.md`](mobile/android/README.md)。
 
 `--lan` 会绑定 `0.0.0.0`，同一局域网内任何设备都能访问（仍需 token），公共网络下别开。
 HarmonyOS NEXT（HAP）等拿到华为开发者账号再做。
@@ -170,7 +175,8 @@ vdl serve --allow-origin http://localhost:5173   # 允许 infOS 开发源调用
 - **首次打开会要求粘贴 token**（存在浏览器本地，只需一次）；之后从主屏幕快捷方式打开也能直接用。
 - 任务卡完成后多一个「下载」按钮，走 `/api/files/<jobId>` 把文件取回手机。
 - 公共 WiFi 下别开 `--lan`：拿到链接的任意设备都能提交任务。
-- 原生壳（Android Capacitor / Harmony ArkWeb）**未构建**：本机没有 JDK / Android SDK / DevEco。
+- Android 原生壳**已构建**（本地引擎 + 连电脑双模式，见上文「手机（Android）」）；
+  HarmonyOS NEXT 仍在等华为开发者账号与 DevEco 签名。
   三种移动路线的边界与构建前提见 [`integrations/mobile/README.md`](integrations/mobile/README.md)。
 - infOS 的接入方式见 [`integrations/infos/README.md`](integrations/infos/README.md)（薄页面，不改宿主代码）。
 
