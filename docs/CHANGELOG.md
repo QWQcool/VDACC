@@ -5,6 +5,16 @@
 
 ## 未发布
 
+- **Android 端 M5：稳定性（自动续传 / 弱网 / 内存 / HLS 结论）**：①被杀后自动续传——重开 App 时
+  `localStorage` 里 running/queued 的任务改为「queued + attempts+1」自动重跑（同一任务最多自动重试
+  2 次，避免永久失败的链接每次开 App 都白下一次；续传拿不到 `.part` 时如实提示「这次从头下载」）。
+  ②修 416：上次「整条流已写完但进程在 publish/合并前被杀」时，续传带 `Range: bytes=<完整大小>-`
+  必然 416；现在 `Transfer` 收到 416 先 `HEAD` 拿远端大小，相等即当完成、拿不到则删 `.part` 从 0 重来。
+  ③真机实测：下载第 4 秒强杀（tracks 完整、mux 半截 16,810,821 字节）→ 重开自动续传并发布
+  25,227,500 字节、staging 清空；飞行模式下两个任务失败为 `ENET: UnknownHostException`，
+  恢复网络后「重试失败」全部完成；下载中 PSS 160,597 KB / Native Heap 24,407 KB，不随文件大小增长。
+  ④HLS 明确不移植（桌面靠 ffmpeg，端上要补 playlist 解析 + AES-128 解密 + 跨分片时间戳重排，
+  属独立里程碑），`.m3u8` 链接如实报「暂不支持（识别为 sniff）」。
 - **Android 端 M4：系统分享入口、完成通知、自选保存目录**：①分享入口只接 `text/plain` 的
   `ACTION_SEND`（B站/抖音/音乐 App 的「分享」都是「标题+链接」文本），拼成界面的 `?url=` 深链自动解析；
   加 `singleTop` + `onNewIntent`，前台时再分享只换链接。不接管 `http/https` 的 `VIEW`（声明过重）。

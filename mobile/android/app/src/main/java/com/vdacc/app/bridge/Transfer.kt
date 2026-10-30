@@ -81,6 +81,44 @@ class Transfer(private val ctx: Context, private val paths: Paths, private val f
 
     private fun stagingFile(name: String) = File(paths.staging, "$name.part")
 
+    /** 按已写字节发 Range；`from = 0` 时就是普通 GET。 */
+    private fun open(job: Job, from: Long): HttpURLConnection =
+        (URL(job.url).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            instanceFollowRedirects = true
+            connectTimeout = 20_000
+            readTimeout = 30_000
+            setRequestProperty("User-Agent", job.userAgent)
+            if (job.referer.isNotEmpty()) setRequestProperty("Referer", job.referer)
+            if (from > 0) setRequestProperty("Range", "bytes=$from-")
+        }
+
+    /**
+     * HEAD 拿远端大小，只用于判定 416 的两种成因。
+     *
+     * 拿不到（HEAD 被拒/无 content-length）返回 0，调用方按「远端变了」处理——从 0 重来。
+     * 宁可多重下一遍，也不要把一个可能过期的 `.part` 当成成品 publish 出去。
+     */
+    private fun remoteSize(job: Job): Long {
+        var conn: HttpURLConnection? = null
+        return try {
+            conn = (URL(job.url).openConnection() as HttpURLConnection).apply {
+                requestMethod = "HEAD"
+                instanceFollowRedirects = true
+                connectTimeout = 15_000
+                readTimeout = 15_000
+                setRequestProperty("User-Agent", job.userAgent)
+                if (job.referer.isNotEmpty()) setRequestProperty("Referer", job.referer)
+            }
+            conn.responseCode
+            conn.contentLengthLong.takeIf { it > 0 } ?: 0L
+        } catch (_: Exception) {
+            0L
+        } finally {
+            try { conn?.disconnect() } catch (_: Exception) { }
+        }
+    }
+
     fun start(payload: JSONObject): JSONObject {
         val url = payload.optString("url").trim()
         if (url.isEmpty()) throw BridgeException("bad_request", "transfer.start 缺少 url")
@@ -138,24 +176,40 @@ class Transfer(private val ctx: Context, private val paths: Paths, private val f
                 throw BridgeException("EACCES", "无法创建暂存目录 ${it.absolutePath}")
             } }
 
-            val conn = (URL(job.url).openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                instanceFollowRedirects = true
-                connectTimeout = 20_000
-                readTimeout = 30_000
-                setRequestProperty("User-Agent", job.userAgent)
-                if (job.referer.isNotEmpty()) setRequestProperty("Referer", job.referer)
-                if (written > 0) setRequestProperty("Range", "bytes=$written-")
-            }
+            var conn = open(job, written)
             job.connection = conn
 
-            val status = conn.responseCode
-            if (status !in 200..299) throw BridgeException("http_$status", "下载失败 HTTP $status")
+            var status = conn.responseCode
+            // 416 = Range 起点已在文件末尾之外。两个真实成因：
+            // 1) 上次正好把整条流写完（被杀在 publish 之前）——`.part` 就是完整文件，直接算完成；
+            // 2) 远端内容变短了——从 0 重来。
+            // 不判这个的话，「下满但没来得及 publish」的任务每次重开都会永远失败在 416（真机踩到）。
+            var alreadyComplete = false
+            if (status == 416 && written > 0) {
+                val remote = remoteSize(job)
+                if (remote > 0 && remote == written) {
+                    alreadyComplete = true
+                    job.total = remote
+                } else {
+                    written = 0L
+                    try { conn.disconnect() } catch (_: Exception) { }
+                    try { file.delete() } catch (_: Exception) { }
+                    conn = open(job, 0)
+                    job.connection = conn
+                    status = conn.responseCode
+                    if (status !in 200..299) throw BridgeException("http_$status", "下载失败 HTTP $status")
+                }
+            }
+            // alreadyComplete 时 status 仍是 416：那正是「已经下完」的信号，不能当错误抛
+            if (!alreadyComplete && status !in 200..299) {
+                throw BridgeException("http_$status", "下载失败 HTTP $status")
+            }
 
             val resumed = status == 206 && written > 0
-            if (!resumed) written = 0L // 服务端不认 Range：从 0 重写，别把新内容接在旧内容后面
+            if (!resumed && !alreadyComplete) written = 0L // 服务端不认 Range：从 0 重写，别接在旧内容后面
             val length = conn.contentLengthLong
-            job.total = if (length > 0) length + (if (resumed) written else 0L) else 0L
+            job.total = if (alreadyComplete) written
+            else if (length > 0) length + (if (resumed) written else 0L) else 0L
             job.bytes = written
 
             publishState(job, written, job.total)
@@ -163,40 +217,43 @@ class Transfer(private val ctx: Context, private val paths: Paths, private val f
                 .put("status", "start")
                 .put("bytes", written)
                 .put("total", job.total)
-                .put("resumeFrom", if (resumed) written else 0L))
+                .put("resumeFrom", if (resumed || alreadyComplete) written else 0L))
 
-            FileOutputStream(file, resumed).use { out ->
-                conn.inputStream.use { input ->
-                    val buffer = ByteArray(BUFFER)
-                    var lastEmit = 0L
-                    var runBytes = 0L
-                    val pacingStart = System.currentTimeMillis()
-                    while (true) {
-                        if (job.cancelled) throw Cancelled()
-                        val read = input.read(buffer)
-                        if (read < 0) break
-                        out.write(buffer, 0, read)
-                        written += read
-                        runBytes += read
-                        job.bytes = written
-                        if (job.limitBytesPerSec > 0) {
-                            // 按「本次已读字节 / 限速」算出应到的时刻，超前的部分睡回去
-                            val due = pacingStart + runBytes * 1000L / job.limitBytesPerSec
-                            val waitMs = due - System.currentTimeMillis()
-                            if (waitMs > 0) Thread.sleep(minOf(waitMs, 400L))
-                        }
-                        val now = System.currentTimeMillis()
-                        if (now - lastEmit >= PROGRESS_GAP_MS) {
-                            lastEmit = now
-                            publishState(job, written, job.total)
-                            emit(job.id, JSONObject()
-                                .put("status", "progress")
-                                .put("bytes", written)
-                                .put("total", job.total))
+            // 已经完整（416 且远端大小与 `.part` 相同）就不用再读一遍
+            if (!alreadyComplete) {
+                FileOutputStream(file, resumed).use { out ->
+                    conn.inputStream.use { input ->
+                        val buffer = ByteArray(BUFFER)
+                        var lastEmit = 0L
+                        var runBytes = 0L
+                        val pacingStart = System.currentTimeMillis()
+                        while (true) {
+                            if (job.cancelled) throw Cancelled()
+                            val read = input.read(buffer)
+                            if (read < 0) break
+                            out.write(buffer, 0, read)
+                            written += read
+                            runBytes += read
+                            job.bytes = written
+                            if (job.limitBytesPerSec > 0) {
+                                // 按「本次已读字节 / 限速」算出应到的时刻，超前的部分睡回去
+                                val due = pacingStart + runBytes * 1000L / job.limitBytesPerSec
+                                val waitMs = due - System.currentTimeMillis()
+                                if (waitMs > 0) Thread.sleep(minOf(waitMs, 400L))
+                            }
+                            val now = System.currentTimeMillis()
+                            if (now - lastEmit >= PROGRESS_GAP_MS) {
+                                lastEmit = now
+                                publishState(job, written, job.total)
+                                emit(job.id, JSONObject()
+                                    .put("status", "progress")
+                                    .put("bytes", written)
+                                    .put("total", job.total))
+                            }
                         }
                     }
+                    out.flush()
                 }
-                out.flush()
             }
 
             if (job.cancelled) throw Cancelled()

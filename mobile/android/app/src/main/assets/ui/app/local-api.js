@@ -26,15 +26,25 @@
     return `m${Date.now().toString(36)}${seq}`;
   }
 
+  /** 同一任务最多自动续传几次：永久失败的链接不该每次开 App 都白下一次。 */
+  const RESUME_MAX = 2;
+
   function load() {
     try {
       const raw = JSON.parse(localStorage.getItem(STORE) || '[]');
       if (!Array.isArray(raw)) return [];
       return raw.map((job) => {
-        // 上次没跑完的：进程已经没了，不能显示成"进行中"
+        // 上次没跑完的：进程已经没了。这里不再直接标死，而是「自动续传」
+        // ——.part 还在 staging 里，引擎重算的同一个文件名会让 startTransfer 带上 Range 续上。
         if (job.status === 'running' || job.status === 'queued') {
-          return { ...job, status: 'failed', finishedAt: job.finishedAt || Date.now(),
-            error: { code: 'interrupted', message: '上次中断（App 重启前未完成）' } };
+          const attempts = (job.attempts || 0) + 1;
+          if (attempts <= RESUME_MAX) {
+            return { ...job, status: 'queued', attempts, percent: 0, bytes: 0, total: 0,
+              error: undefined, finishedAt: undefined };
+          }
+          return { ...job, status: 'failed', attempts, finishedAt: job.finishedAt || Date.now(),
+            error: { code: 'interrupted',
+              message: `上次中断（已自动续传 ${RESUME_MAX} 次仍未完成，不再自动重试）` } };
         }
         return job;
       });
@@ -94,8 +104,13 @@
           job.percent = total ? Math.min(100, Math.round((bytes * 100) / total)) : 0;
           upsert(job);
         },
-        onReady: (transferId) => {
+        onReady: (transferId, resumeFrom) => {
           job.transferId = transferId;
+          // 续传要如实：上次下到一半却从 0 开始（文件名变了/暂存被清），不能假装是续传
+          if (job.attempts && !resumeFrom) {
+            job.warnings = [...(job.warnings || []),
+              '上次的暂存文件对不上（可能换了档位或标题），这次从头下载'];
+          }
           // 取消可能发生在 onReady 之前：补一次
           if (job.cancelRequested) engine().cancelTransfer(transferId).catch(() => undefined);
         },
@@ -326,4 +341,9 @@
 
   jobs = load();
   save();
+  // 上次没跑完的任务：load 已把可续传的置成 queued，这里按原来的先后（旧→新）接着跑。
+  // 不弹窗、不打断：用户上次点过下载，这次只是把它做完。
+  for (const job of jobs.slice().reverse()) {
+    if (job.status === 'queued') enqueue(job);
+  }
 })();
