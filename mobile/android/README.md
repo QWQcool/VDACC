@@ -20,7 +20,7 @@
 rem 1) 引擎 bundle（Bun 自带 bundler，无第三方依赖）
 cd mobile\android\engine
 bun build.mjs
-bun selftest.mjs          rem 无设备自检：32 条纯函数/桥断言 + 8 条落盘 + 8 条标签写入
+bun selftest.mjs          rem 无设备自检：60 条纯函数/桥断言 + 8 条落盘 + 8 条标签写入
 
 rem 2) APK
 set JAVA_HOME=%LOCALAPPDATA%\vdacc-tools\jdk17
@@ -156,8 +156,35 @@ rem 看结果
 现在按接口给的实际码率标注（`320K`）并给 warning「请求无损 FLAC 档，接口实际返回 320K」；
 档位 id 仍是 `lossless`，显式指定它的调用不受影响。桌面端加了对应用例（测试 154 → 155）。
 
+2026-10-30 M2 实测（B站：DASH 两轨 + 原生合并 + 拆轨 + 弹幕，引擎 `0.1.0-m1e` → 51.5 KB）：
+
+| 项 | 结果 |
+|---|---|
+| 解析 | `BV1SknF6KE5g`：标题/作者正确、`4 个（当前 P1）`、档位 `bili-sd 852×480`；与桌面端同档位 id/标签一致（桌面登录态另有 `bili-1920/bili-1280`，端上匿名只到 480P，已如实警告） |
+| 合并 | `…_P1_852×480.mp4` 25,227,500 字节：`ffprobe` 双轨（h264 852×480 228.29 s / aac 228.31 s，5479 视频帧 / 10702 音频帧） |
+| 与 ffmpeg 对拍 | 同一视频桌面 `-c copy` 产物：抽取第 100/1000 帧解码 MD5 **完全相同**、`-ss 100` 与 `-ss 180` 取帧也完全相同、逐包 PTS 序列一致 |
+| 拆轨（`maxMuxBytes:0`） | `.video.mp4` 20,229,955 + `.audio.m4a` 4,985,395 = 25,215,350，各自单轨可解码 |
+| 弹幕 | `.danmaku.xml` 107,748 字节 / **1200 条**（与桌面端记录一致） |
+| 字幕 | 匿名 `player/v2` 的 `subtitles` 为空（B站字幕要登录），界面提示「没有可用字幕，主文件已保留」 |
+
+端上将 `media.mux` 做成一个桥原语（`Media.kt`）：`MediaExtractor` 读两条流、`MediaMuxer`
+按时间戳交错写一个 mp4，**不解码不重编码**。三个坑写在代码注释里：codec-config 帧不能当样本写
+（会得到打不开的文件）、`KEY_ROTATION` 要传给 muxer（否则成片方向错）、合并成功后才删分离流
+（失败时它们是重试/拆轨的唯一来源）。
+
+**为什么没用 Media3**（设计稿 §9 写的是它）：设计稿要的是「合并 + 超限拆轨」，而 framework
+的 `MediaMuxer` 在 API 26 就有，能把依赖清单继续留空；Media3 的 Transformer 面向「加特效/转码」，
+纯封装场景会白解码一遍。代价是 framework muxer 不写 `ctts` 表：产物 `r_frame_rate` 被读成 21
+而不是 24、`ffmpeg -f null` 会给 685 条 DTS 告警——但逐帧解码结果、PTS 时间轴与 seek 都与
+ffmpeg 产物一致，所以按「可用但样本表不完美」如实记录，而不是藏着。真机上出现播放异常时，
+第一优先是换 `androidx.media3:media3-muxer`（对外只有 `media.mux` 一个方法，替换面很小）。
+
+**顺带修了一个真 bug**：B站弹幕接口 `x/v1/dm/list.so` 返回 `Content-Encoding: deflate`，
+而桥的 `http.request` 原来只解 gzip，deflate 的响应被当二进制文本交给 JS——表现是「弹幕 0 条」，
+看起来像「这个视频没有弹幕」。现在 gzip/deflate（zlib 包装与裸 deflate 两种）都处理。
+
 **仍未做**：进程被杀后的**自动**续传（现在标「上次中断」，手动「重试」会从 `.part` 续传）、
-专辑批量、端上登录（所以会员曲只能报 `need_login`）。
+专辑批量、端上登录（所以会员曲只能报 `need_login`，B站字幕与 1080P 以上档位同理）。
 
 ## 三、桥与目录（M0 已实现的部分）
 

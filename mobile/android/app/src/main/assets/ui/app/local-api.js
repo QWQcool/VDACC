@@ -86,7 +86,7 @@
     job.startedAt = Date.now();
     upsert(job);
     try {
-      // downloadAny：抖音与网易云的差异由引擎按平台路由，界面不需要知道
+      // downloadAny：平台差异由引擎路由；附属产物开关原样带下去（B站的 subs/danmaku）
       const result = await engine().downloadAny(job.url, job.formatId, {
         onProgress: (bytes, total) => {
           job.bytes = bytes;
@@ -99,7 +99,7 @@
           // 取消可能发生在 onReady 之前：补一次
           if (job.cancelRequested) engine().cancelTransfer(transferId).catch(() => undefined);
         },
-      });
+      }, { subs: job.subs, danmaku: job.danmaku, cover: job.cover });
       job.status = 'done';
       job.percent = 100;
       job.path = result.path;
@@ -216,6 +216,8 @@
       const created = ids.map((formatId) => {
         const job = {
           id: nowId(), url: target, formatId,
+          // 附属产物开关与桌面 /api/jobs 同名字段；端上目前只有 B站 认它们
+          subs: !!body.subs, danmaku: !!body.danmaku, cover: !!body.cover,
           status: 'queued', percent: 0, bytes: 0, total: 0, createdAt: Date.now(),
         };
         jobs.unshift(job);

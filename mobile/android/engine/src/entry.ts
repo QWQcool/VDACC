@@ -26,6 +26,10 @@ import {
   buildAudioTag, buildFlacTag, buildMp3Tag, existingId3Size, imageSize, parseFlacChain,
 } from './audiometa';
 import { downloadNetease, probeNetease } from './netease';
+import {
+  aggregateProgress, bucketOf, chooseFormat as chooseBilibiliFormat, countDanmaku,
+  downloadBilibili, foldDash, parseContentRangeTotal, parseTarget, probeBilibili, srtTime, toSrt,
+} from './bilibili';
 import { readHead, rewriteStaged } from './staging';
 
 /**
@@ -149,6 +153,87 @@ function tagChecks(): Check[] {
   return checks;
 }
 
+/**
+ * B站纯函数自检（M2）。
+ *
+ * 为什么这些值得进自检：DASH 折叠决定了「用户看到几个档位、点下去下的是哪条流」，
+ * 折错了在真机上表现为「明明选了 1080P 却下到 720P」——这类错不会被下载本身暴露。
+ * 断言用的 dash 是**手写的最小结构**（不是真实响应），所以还要有一次真机 probe 与桌面端
+ * 逐档对比作为外部证据。
+ */
+function bilibiliChecks(): Check[] {
+  const checks: Check[] = [];
+
+  checks.push(check('bucketOf 1920 → 1080P', bucketOf(1920).join('|'), '1920|1080P'));
+  checks.push(check('bucketOf 1080 → 480P（按宽度归档）', bucketOf(1080).join('|'), '854|480P'));
+
+  const dash = {
+    video: [
+      { width: 1920, height: 1080, codecs: 'hev1.1.6', bandwidth: 3_000_000, baseUrl: 'v-hev' },
+      { width: 1920, height: 1080, codecs: 'avc1.640028', bandwidth: 2_000_000, baseUrl: 'v-avc' },
+      { width: 1280, height: 720, codecs: 'avc1.64001F', bandwidth: 1_000_000, baseUrl: 'v-720' },
+      // 竖屏：宽度 720 落不到任何档位，label 必须用「宽×高」而不是「1280P」
+      { width: 720, height: 1280, codecs: 'avc1.64001F', bandwidth: 900_000, baseUrl: 'v-portrait' },
+    ],
+    audio: [{ codecs: 'mp4a.40.2', bandwidth: 128_000, baseUrl: 'a-main' }],
+  };
+  const folded = foldDash(dash, 10_000);
+  checks.push(check('foldDash 按宽度折成 3 档', folded.formats.map((f) => f.id).join(','),
+    'bili-1920,bili-1280,bili-sd'));
+  checks.push(check('foldDash 同档优先 avc', folded.formats[0].vcodec, 'avc1'));
+  checks.push(check('foldDash 竖屏用宽×高当标签', folded.formats[2].label, '720×1280'));
+  checks.push(check('foldDash 体积 = (视频+音频带宽)×秒/8', folded.formats[0].bytes, 2_660_000));
+  checks.push(check('foldDash 推荐 1080P', folded.formats.find((f) => f.recommended)?.id, 'bili-1920'));
+  checks.push(check('foldDash 地址表取到 avc 那条', folded.urls.get('bili-1920')?.video, 'v-avc'));
+  checks.push(check('foldDash 音轨地址挂到每档', folded.urls.get('bili-1280')?.audio, 'a-main'));
+
+  // 无声视频：没有 audio 时也要出档位（产物会是无声视频，由警告说明）
+  const silent = foldDash({ video: dash.video, audio: [] }, 10_000);
+  checks.push(check('foldDash 无音轨仍出档位', silent.formats.length, 3));
+  checks.push(check('foldDash 无音轨时 audio 为空', silent.urls.get('bili-1920')?.audio, ''));
+
+  checks.push(check('chooseFormat 命中显式档位', chooseBilibiliFormat(folded.formats, 'bili-1280').id, 'bili-1280'));
+  checks.push(check('chooseFormat 缺省取 recommended', chooseBilibiliFormat(folded.formats, null).id, 'bili-1920'));
+  let missingCode = 'ok';
+  try {
+    chooseBilibiliFormat(folded.formats, 'bili-4096');
+  } catch (error) {
+    missingCode = (error as { code?: string }).code || 'no_code';
+  }
+  checks.push(check('chooseFormat 缺档位报 no_stream（不静默换档）', missingCode, 'no_stream'));
+
+  checks.push(check('srtTime 带毫秒与逗号', srtTime(3661.5), '01:01:01,500'));
+  checks.push(check('srtTime 负数钳到 0', srtTime(-3), '00:00:00,000'));
+  const srt = toSrt([{ from: 1, to: 2.5, content: '第一句' }, { from: 3, to: 4, content: '第二句\r' }]);
+  checks.push(check('toSrt 序号与时间轴', srt.split('\n').slice(0, 3).join('|'),
+    '1|00:00:01,000 --> 00:00:02,500|第一句'));
+  checks.push(check('toSrt 去掉 \\r', srt.includes('\r'), false));
+
+  checks.push(check('countDanmaku 数 <d 标签', countDanmaku('<d p="1">a</d><d p="2">b</d>'), 2));
+  checks.push(check('parseContentRangeTotal 取总数', parseContentRangeTotal('bytes 0-0/21154992'), 21_154_992));
+  checks.push(check('parseContentRangeTotal 畸形值返回 0', parseContentRangeTotal('bytes */'), 0));
+
+  checks.push(check('aggregateProgress 用两轨总字节当分母',
+    aggregateProgress(100, 50, 1000, 400).join('|'), '150|1000'));
+  checks.push(check('aggregateProgress 没探到总量时退回单流',
+    aggregateProgress(0, 50, 0, 400).join('|'), '50|400'));
+
+  // 分P 与番剧：界面靠 `?p=` 选分P，靠 ep/ss 认番剧，认错就是下错集
+  checks.push(check('parseTarget 认裸 BV', parseTarget('BV1SknF6KE5g').bvid, 'BV1SknF6KE5g'));
+  checks.push(check('parseTarget 取 ?p=3', parseTarget('https://www.bilibili.com/video/BV1SknF6KE5g?p=3').page, 3));
+  checks.push(check('parseTarget 认番剧 ep', parseTarget('https://www.bilibili.com/bangumi/play/ep12345').epId, '12345'));
+  checks.push(check('parseTarget 认番剧 ss', parseTarget('https://www.bilibili.com/bangumi/play/ss678').seasonId, '678'));
+  let badCode = 'ok';
+  try {
+    parseTarget('https://example.com/nothing');
+  } catch (error) {
+    badCode = (error as { code?: string }).code || 'no_code';
+  }
+  checks.push(check('parseTarget 认不出时报 bad_input', badCode, 'bad_input'));
+
+  return checks;
+}
+
 function check(name: string, actual: unknown, expected: unknown, note?: string): Check {
   const a = stringify(actual);
   const e = stringify(expected);
@@ -193,6 +278,9 @@ export async function selfTest(): Promise<SelfTestReport> {
 
   // 标签写入（M1-e 网易云的前置）：端上没有 ffmpeg，字节是我们自己拼的
   checks.push(...tagChecks());
+
+  // B站（M2）：DASH 折叠、档位选择、SRT、弹幕计数、两轨进度、Range 解析
+  checks.push(...bilibiliChecks());
 
   // 桥交叉校验：JS 侧 md5 与原生 MessageDigest 必须一致，否则签名类引擎在端上必错
   let bridgeOk = true;
@@ -373,7 +461,14 @@ export type DownloadResult = {
   ms: number;
   /** 非致命问题（标签写失败、封面跳过…）：界面要显示出来，不能吞掉。 */
   warnings?: string[];
+  /** 字幕行数（B站 `--subs`）：>0 才说明真的落了 .srt */
+  srtCount?: number;
+  /** 弹幕条数（B站 `--danmaku`） */
+  danmakuCount?: number;
 };
+
+/** 附属产物开关：界面提交任务时带上（与桌面端 `/api/jobs` 的字段同名）。 */
+export type SidecarOptions = { subs?: boolean; danmaku?: boolean; cover?: boolean };
 
 export type DownloadHooks = {
   onProgress?: (bytes: number, total: number) => void;
@@ -453,21 +548,33 @@ export async function probeAny(text: string) {
     const result = await probeNetease(target);
     return { ...result, ms: Date.now() - started };
   }
+  if (platform === 'bilibili') {
+    const started = Date.now();
+    const result = await probeBilibili(target);
+    return { ...result, ms: Date.now() - started };
+  }
   if (platform === 'douyin') return probeShare(text);
-  throw codedError('unsupported', `手机端暂不支持这个平台（识别为 ${platform}）：目前支持抖音与网易云`);
+  throw codedError('unsupported', `手机端暂不支持这个平台（识别为 ${platform}）：目前支持抖音、B站与网易云`);
 }
 
-/** 下载也按平台分发；两个引擎的返回形状一致，界面不需要知道差异。 */
+/** 下载也按平台分发；各引擎的返回形状一致，界面不需要知道差异。 */
 export async function downloadAny(
   text: string,
   formatId: string | null = null,
   hooks: DownloadHooks = {},
+  sidecars: SidecarOptions = {},
 ): Promise<DownloadResult> {
   const target = firstUrl(text) || (text || '').trim();
   const platform = platformOf(target);
   if (platform === 'netease') return downloadNetease(target, formatId, hooks);
+  if (platform === 'bilibili') {
+    return downloadBilibili(target, formatId, hooks, {
+      subs: sidecars.subs,
+      danmaku: sidecars.danmaku,
+    });
+  }
   if (platform === 'douyin') return downloadShare(text, formatId, hooks);
-  throw codedError('unsupported', `手机端暂不支持这个平台（识别为 ${platform}）：目前支持抖音与网易云`);
+  throw codedError('unsupported', `手机端暂不支持这个平台（识别为 ${platform}）：目前支持抖音、B站与网易云`);
 }
 
 /**
@@ -596,6 +703,8 @@ const api = {
   downloadAny,
   probeNetease,
   downloadNetease,
+  probeBilibili,
+  downloadBilibili,
   tagProbe,
   tagFileProbe,
   cancelTransfer,
@@ -611,6 +720,14 @@ const api = {
   reserveDest,
   releaseDest,
   md5Hex,
+  // 纯函数面：m0 验证页与后续排查会用
+  foldDash,
+  bucketOf,
+  srtTime,
+  toSrt,
+  countDanmaku,
+  parseContentRangeTotal,
+  aggregateProgress,
 };
 
 (globalThis as unknown as { VDACC_ENGINE: typeof api }).VDACC_ENGINE = api;

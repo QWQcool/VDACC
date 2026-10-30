@@ -53,7 +53,7 @@ class Fs(private val ctx: Context, private val paths: Paths) {
         return name
     }
 
-    private fun stagingFile(name: String) = File(paths.staging, "$name.part")
+    internal fun stagingFile(name: String) = File(paths.staging, "$name.part")
 
     private fun mimeOf(name: String): String = when (name.substringAfterLast('.', "").lowercase()) {
         "txt", "log", "json", "md" -> "text/plain"
@@ -318,6 +318,26 @@ class Fs(private val ctx: Context, private val paths: Paths) {
             .put("bytes", source.length())
             .put("prefixBytes", prefix.size)
             .put("skip", skip)
+    }
+
+    /* ───────────────────────── 暂存区内改名（M2 合并/拆轨用） ───────────────────────── */
+
+    /**
+     * 暂存区内把 `.part` 改个名字（不解码、不拷贝字节）。
+     *
+     * 两个用途：
+     * 1. 合并成功后 publish 的是 `<name>.mp4`，而两条流下载时叫 `<name>.mp4.video`——
+     *    必须在 staging 里改名，否则公共目录里会出现 `xxx.mp4.video` 这种怪文件；
+     * 2. 拆轨时把视频轨改名成 `.video.mp4`、音频轨 `.audio.m4a`，MediaStore 才能按扩展名给对 MIME。
+     */
+    fun rename(fromRaw: String, toRaw: String): JSONObject {
+        val from = stagingFile(safeName(fromRaw))
+        val toName = safeName(toRaw)
+        val to = stagingFile(toName)
+        if (!from.exists()) throw BridgeException("ENOENT", "暂存文件不存在：${from.absolutePath}")
+        if (to.exists() && !to.delete()) throw BridgeException("EACCES", "无法覆盖 ${to.absolutePath}")
+        if (!from.renameTo(to)) throw BridgeException("EIO", "改名失败：${from.name} → ${to.name}")
+        return JSONObject().put("name", toName).put("bytes", to.length())
     }
 
     /* ───────────────────────────── stat / mkdirp ───────────────────────────── */

@@ -5,6 +5,24 @@
 
 ## 未发布
 
+- **Android 端 M2：B站（DASH 两轨 + 端上合并 + 拆轨 + 弹幕）**：新增 `engine/src/bilibili.ts`
+  （view → playurl → 按**宽度**折档，与桌面端同一张表同一推荐规则；端上没有登录，所以恒定提示
+  「清晰度以匿名放行为准」），桥新增两个原语：`media.mux`（`MediaExtractor` + `MediaMuxer`
+  纯封装合并，不解码不重编码；codec-config 帧不写、`KEY_ROTATION` 传给 muxer、成功后才删分离流）
+  与 `fs.rename`（staging 内改名，让合并/拆轨产物落到正常文件名）。超过 150 MB 或合并失败
+  **拆轨**成 `.video.mp4` + `.audio.m4a` 并如实说明，而不是把已下好的流丢掉。
+  真机实测（RMX5200 / Android 16，匿名）：`BV1SknF6KE5g` 解析出 `bili-sd 852×480`（与桌面同 id/标签）、
+  合并产物 25,227,500 字节、双轨 228.29 s / 5479 视频帧 + 228.31 s / 10702 音频帧；与桌面端
+  `ffmpeg -c copy` 产物对拍，第 100/1000 帧解码 MD5 相同、`-ss 100`/`-ss 180` 取帧相同、PTS 序列一致；
+  强制拆轨得到 20,229,955 + 4,985,395 两个单轨文件；弹幕 `.danmaku.xml` 1200 条 / 107,748 字节。
+  **已知差异**：framework `MediaMuxer` 不写 `ctts`，产物 `r_frame_rate` 被读成 21 而非 24、
+  `ffmpeg -f null` 有 685 条 DTS 告警（内容/时间轴/seek 均已对拍一致）。引擎 38.6 KB → 51.5 KB
+  （gzip 22.6 KB），自检 32 → **60** 条（新增 foldDash/chooseFormat/SRT/弹幕计数/Range 解析/分P 解析）。
+  字幕在匿名态拿不到（B站字幕需登录），界面如实提示「没有可用字幕，主文件已保留」。
+- **桥的 `http.request` 支持 deflate**：B站弹幕接口 `x/v1/dm/list.so` 返回
+  `Content-Encoding: deflate`，原来只解 gzip，响应被当二进制文本交给 JS，表现为「弹幕 0 条」——
+  看起来像「这个视频没有弹幕」。现在 zlib 包装与裸 deflate 都能解。
+
 - **Android 端 M1-e：网易云上机 + 端上自己写标签（没有 ffmpeg）**：新增 `engine/src/netease.ts`
   （四档全探、`available:false` 带真实 code、按字节判重、显式档位不静默降级、`incomplete_media`；
   端上不移植登录，会员曲如实报 `need_login`）与 `engine/src/audiometa.ts`

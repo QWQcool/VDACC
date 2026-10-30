@@ -99,13 +99,29 @@ class Http {
         }
     }
 
-    /** 读响应体，超过上限就报错而不是截断（截断的 JSON 会变成更难查的 bad_json）。 */
+    /**
+     * 读响应体，超过上限就报错而不是截断（截断的 JSON 会变成更难查的 bad_json）。
+     *
+     * 为什么要单独处理 **deflate**：B站的弹幕接口 `x/v1/dm/list.so` 回的是
+     * `Content-Encoding: deflate` 的 XML。原来只认 gzip，deflate 的响应会被当成二进制文本
+     * 直接交给 JS，表现为「弹幕 0 条」——看起来像「这个视频没有弹幕」，很难归因。
+     */
     private fun readCapped(stream: java.io.InputStream, encoding: String?): ByteArray {
-        val source = if (encoding != null && encoding.contains("gzip", ignoreCase = true)) {
-            GZIPInputStream(stream)
-        } else {
-            stream
+        val enc = (encoding ?: "").lowercase()
+        if (enc.contains("gzip")) return readAll(GZIPInputStream(stream))
+        if (enc.contains("deflate")) {
+            // 两种 deflate：zlib 包装（RFC1950，B站用这种）与裸 deflate（RFC1951）
+            val raw = readAll(stream)
+            return try {
+                inflate(raw, nowrap = false)
+            } catch (_: Exception) {
+                inflate(raw, nowrap = true)
+            }
         }
+        return readAll(stream)
+    }
+
+    private fun readAll(source: java.io.InputStream): ByteArray {
         val out = ByteArrayOutputStream()
         val buffer = ByteArray(16 * 1024)
         while (true) {
@@ -120,6 +136,11 @@ class Http {
             out.write(buffer, 0, read)
         }
         return out.toByteArray()
+    }
+
+    private fun inflate(raw: ByteArray, nowrap: Boolean): ByteArray {
+        val inflater = java.util.zip.Inflater(nowrap)
+        return java.util.zip.InflaterInputStream(raw.inputStream(), inflater).use { readAll(it) }
     }
 
     /** headerFields 的 key 可能为 null（首行状态），值是 List；同名头合成一行用 \n 分隔。 */

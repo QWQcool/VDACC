@@ -96,6 +96,22 @@
   </div>
 
   <div class="card">
+    <h2>B站（M2：DASH 两轨 + 原生合并）</h2>
+    <textarea id="bili" spellcheck="false">https://www.bilibili.com/video/BV1SknF6KE5g</textarea>
+    <div class="row"><span class="k">标题</span><span class="v" id="bTitle">—</span></div>
+    <div class="row"><span class="k">分P</span><span class="v" id="bParts">—</span></div>
+    <div class="row"><span class="k">档位</span><span class="v" id="bFormats">—</span></div>
+    <div class="row"><span class="k">下载</span><span class="v" id="bState">—</span></div>
+    <div class="row"><span class="k">进度</span><span class="v" id="bProgress">—</span></div>
+    <div class="row"><span class="k">产物</span><span class="v" id="bPath">—</span></div>
+    <ul class="checks" id="bWarn"></ul>
+    <button class="ghost" id="bProbe">解析</button>
+    <button id="bDl">下载（默认档，合并）</button>
+    <button class="ghost" id="bSplit">强制拆轨</button>
+    <button class="ghost" id="bSide">带字幕 + 弹幕</button>
+  </div>
+
+  <div class="card">
     <h2>FLAC 标签端到端探针（先 adb reverse tcp:8899）</h2>
     <div class="sub" style="margin:0 0 8px">匿名网易云只给 mp3，所以 flac 分支用电脑上的真实样本验证：
       <code style="font-size:11px">adb reverse tcp:8899 tcp:8899</code> + 本地静态服务。</div>
@@ -336,6 +352,85 @@
   $('nsDlMp3').addEventListener('click', () => nsDownload('standard', 'nsDlMp3'));
   $('nsDlFlac').addEventListener('click', () => nsDownload('lossless', 'nsDlFlac'));
 
+  function bWarnings(list) {
+    $('bWarn').textContent = '';
+    for (const w of list || []) {
+      const li = document.createElement('li');
+      const mark = document.createElement('span');
+      mark.className = 'mark';
+      mark.textContent = '注意';
+      const body = document.createElement('div');
+      body.className = 'why';
+      body.textContent = w;
+      li.appendChild(mark);
+      li.appendChild(body);
+      $('bWarn').appendChild(li);
+    }
+  }
+
+  $('bProbe').addEventListener('click', async () => {
+    const btn = $('bProbe');
+    if (!engine) return;
+    btn.disabled = true;
+    setText('bTitle', '解析中…');
+    setText('bParts', '—');
+    setText('bFormats', '—');
+    bWarnings([]);
+    try {
+      const res = await engine.probeBilibili($('bili').value.trim());
+      const media = res.media || {};
+      setText('bTitle', (media.title || '（空）') + ' · ' + (media.author || '未知'), 'ok');
+      const parts = media.parts || [];
+      setText('bParts', parts.length > 1
+        ? parts.length + ' 个（当前 P' + (parts.find((p) => p.selected) || {}).index + '）'
+        : '单 P');
+      const list = (res.formats || []).map((f) => f.id + ' ' + f.label
+        + (f.width ? ' ' + f.width + '×' + f.height : '')).join(' / ');
+      setText('bFormats', list || '（无档位）', list ? 'ok' : 'bad');
+      bWarnings(res.warnings);
+    } catch (error) {
+      const code = error && error.code ? error.code + ' ' : '';
+      setText('bTitle', '失败：' + code + (error && error.message ? error.message : error), 'bad');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  async function bDownload(options, btnId) {
+    const btn = $(btnId);
+    if (!engine) return;
+    btn.disabled = true;
+    setText('bState', '下载中…');
+    setText('bPath', '—');
+    bWarnings([]);
+    try {
+      const res = await engine.downloadBilibili($('bili').value.trim(), null, {
+        onProgress: (bytes, total) => {
+          const pct = total ? Math.round((bytes * 100) / total) + '%' : '';
+          setText('bProgress', mb(bytes) + (total ? ' / ' + mb(total) + '（' + pct + '）' : ''));
+        },
+        onReady: (jobId) => { window.__bJobId = jobId; },
+      }, options);
+      setText('bState', '完成（' + res.label + ' · ' + (res.muxed ? '已合并' : '未合并')
+        + (res.srtCount ? ' · 字幕 ' + res.srtCount + ' 行' : '')
+        + (res.danmakuCount ? ' · 弹幕 ' + res.danmakuCount + ' 条' : '')
+        + ' · ' + res.ms + ' ms）', 'ok');
+      setText('bProgress', res.bytes + ' 字节');
+      setText('bPath', res.path, 'ok');
+      bWarnings(res.warnings);
+    } catch (error) {
+      const code = error && error.code ? error.code + ' ' : '';
+      setText('bState', '失败：' + code + (error && error.message ? error.message : error), 'bad');
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  $('bDl').addEventListener('click', () => bDownload({}, 'bDl'));
+  // maxMuxBytes: 0 → 任何体积都走拆轨分支，用来验证「不合并」这条路径
+  $('bSplit').addEventListener('click', () => bDownload({ maxMuxBytes: 0 }, 'bSplit'));
+  $('bSide').addEventListener('click', () => bDownload({ subs: true, danmaku: true }, 'bSide'));
+
   $('tfBtn').addEventListener('click', async () => {
     const btn = $('tfBtn');
     if (!engine) return;
@@ -498,6 +593,10 @@
     if (probe === 'music') setTimeout(() => $('nsDlMp3').click(), 400);
     if (probe === 'flac') setTimeout(() => $('nsDlFlac').click(), 400);
     if (probe === 'tagflac') setTimeout(() => $('tfBtn').click(), 400);
+    if (probe === 'bilibili') setTimeout(() => $('bProbe').click(), 400);
+    if (probe === 'bvideo') setTimeout(() => $('bDl').click(), 400);
+    if (probe === 'bsplit') setTimeout(() => $('bSplit').click(), 400);
+    if (probe === 'bside') setTimeout(() => $('bSide').click(), 400);
   })();
 </script>
 </body>

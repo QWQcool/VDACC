@@ -38,6 +38,7 @@ class Bridge(private val ctx: Context, private val web: WebView) {
     private val paths = Paths(ctx)
     private val fs = Fs(ctx, paths)
     private val http = Http()
+    private val media = Media(fs)
     private val transfer = Transfer(ctx, paths, fs).also { engine ->
         // 进度/完成是被推的，不走 reqId 信封：一次下载可能有上百条进度
         engine.emit = { jobId, payload -> emitEvent("transfer", jobId, payload) }
@@ -117,6 +118,15 @@ class Bridge(private val ctx: Context, private val web: WebView) {
         "fs.readHead" -> fs.readHead(payload.optString("name"), payload.optInt("bytes", 65536))
         "fs.rewrite" -> fs.rewrite(payload.optString("name"), payload.optString("base64"), payload.optLong("skip", 0))
         "fs.mkdirp" -> fs.mkdirp(payload.optString("path"))
+        "fs.rename" -> fs.rename(payload.optString("from"), payload.optString("to"))
+
+        // 音视频合并走 worker（默认分支）：它要读两个文件写一个文件，和 fs 抢同一个暂存区，
+        // 放到 httpPool 里与下载并发跑会互相拖慢，而且合并期间没有别的桥调用需要插队。
+        "media.mux" -> media.mux(
+            payload.optString("video"),
+            payload.optString("audio"),
+            payload.optString("name"),
+        )
 
         else -> throw BridgeException("unsupported_method", "端上还没有实现 $method")
     }
