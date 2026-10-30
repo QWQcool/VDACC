@@ -239,9 +239,12 @@ parity 稳定后再决定 Python 是否退化为 yt-dlp helper。
   **M2 已完成（2026-10-30）**：B站 DASH 两轨 + 端上合并（`MediaExtractor`/`MediaMuxer` 纯封装，
   未引入 Media3，理由见 `mobile/android/README.md`）+ 150MB 超限拆轨 + 弹幕落盘（顺带修了桥只解
   gzip 不认 deflate 导致弹幕恒 0 条的问题）；产物与桌面端 `ffmpeg -c copy` 逐帧对拍一致。
-  仍在分支 `feat/android-standalone`（未合并 main）。**下一步 M3**：QQ / 酷我 / 酷狗 + 标签封面。
+  **M3 已完成（2026-10-30）**：酷我 / 酷狗 / QQ 音乐三个引擎上机（共用 `music-common` 公共层：
+  Range 探真音频、暂存下载、自写标签/封面、截断判定）；酷狗实测三档全放行、无损 43.6 MB 标签与
+  500×500 封面正确，QQ 匿名只放行 128K/96K 并带 `result=104003`，m4a 明确不写标签。
+  仍在分支 `feat/android-standalone`（未合并 main）。**下一步 M4**：分享入口、通知、SAF 选目录、任务历史。
   遗留：进程被杀后的自动续传（手动「重试」已能从 `.part` 续传）、专辑批量、端上登录
-  （会员曲报 `need_login`，B站字幕与 1080P 以上档位同理）。
+  （QQ 320K/无损、B站字幕与 1080P 以上档位因此拿不到，只会如实报 `need_login`）。
 - **HarmonyOS NEXT**：仍等待华为开发者账号与 DevEco 签名；独立端方案可复用同一份 JS 引擎 bundle 与桥接口设计。
 
 执行依赖：F01–F07 → N01/N02 → N03/N04；N05 可在稳定源码上独立推进；N06 依赖设备和稳定连接恢复。

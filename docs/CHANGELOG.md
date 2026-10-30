@@ -5,6 +5,17 @@
 
 ## 未发布
 
+- **Android 端 M3：酷我 / 酷狗 / QQ 音乐上机**：新增 `engine/src/{kuwo,kugou,qq}.ts` 与
+  公共层 `music-common.ts`（Range 探真音频、下到暂存区、补标签/封面、截断判定）。
+  三个引擎与桌面端同一套接口与判定：酷我双候选（`mobi.s`/`antiserver`）+ 内嵌 ID3 兜底标题；
+  酷狗搜索拿 `sqhash/320hash` 再走 `trackercdn`（`key=md5(hash+kgcloud)`），三种「拿不到档位」
+  分开说；QQ 四档全列、未放行带真实 `result`。真机实测（RMX5200 / Android 16，匿名）：
+  酷我 3,368,106 字节 / 128 kbps / 标签正确 / `.lrc` 45 行；酷狗**三档全放行**，无损
+  43,616,452 字节 / 958 kbps / 364 s，`TITLE`/`ARTIST` + `mjpeg 500×500` 封面，解码通过；
+  QQ `m500`+`c400` 可用、`m800`/`f000` 带 `result=104003`，下载 3,368,088 字节 + `.lrc`。
+  引擎 51.5 KB → 71.6 KB（gzip 29.8 KB），自检 60 → **75** 条。
+  **m4a 不写标签**：`buildAudioTag` 认出 `ftyp` 就返回空前缀并说明原因（往 m4a 前塞 ID3 会毁文件），
+  QQ 的 96K AAC 与酷狗的 m4a 档因此只有音频、没有内嵌标签。
 - **Android 端 M2：B站（DASH 两轨 + 端上合并 + 拆轨 + 弹幕）**：新增 `engine/src/bilibili.ts`
   （view → playurl → 按**宽度**折档，与桌面端同一张表同一推荐规则；端上没有登录，所以恒定提示
   「清晰度以匿名放行为准」），桥新增两个原语：`media.mux`（`MediaExtractor` + `MediaMuxer`

@@ -30,6 +30,9 @@ import {
   aggregateProgress, bucketOf, chooseFormat as chooseBilibiliFormat, countDanmaku,
   downloadBilibili, foldDash, parseContentRangeTotal, parseTarget, probeBilibili, srtTime, toSrt,
 } from './bilibili';
+import { downloadKuwo, probeKuwo, parseRid, toLrc } from './kuwo';
+import { downloadKugou, probeKugou, parseHash } from './kugou';
+import { downloadQQ, probeQQ, parseSongmid } from './qq';
 import { readHead, rewriteStaged } from './staging';
 
 /**
@@ -234,6 +237,47 @@ function bilibiliChecks(): Check[] {
   return checks;
 }
 
+/**
+ * 音乐三平台的纯函数自检（M3）。
+ *
+ * 为什么先验解析：酷我是 rid、酷狗是 32 位 hash、QQ 是 14 位 mid，三者形态完全不同，
+ * 而 `core/platform.ts` 只按域名路由。解析错了在真机上表现为「解析出别的歌」，
+ * 比报错更难发现。
+ */
+function musicChecks(): Check[] {
+  const checks: Check[] = [];
+
+  checks.push(check('parseRid 认 play_detail', parseRid('https://www.kuwo.cn/play_detail/474678847'), '474678847'));
+  checks.push(check('parseRid 认 MUSIC_ 前缀', parseRid('MUSIC_123456'), '123456'));
+  checks.push(check('parseRid 认裸数字', parseRid('12345'), '12345'));
+  checks.push(check('parseRid 别的站点返回空', parseRid('https://music.163.com/song?id=123456'), ''));
+
+  const kgHash = 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
+  checks.push(check('parseHash 认 #hash= 片段', parseHash(`https://www.kugou.com/song/#hash=${kgHash}`), kgHash));
+  checks.push(check('parseHash 认裸 32 位 hex', parseHash(kgHash), kgHash));
+  checks.push(check('parseHash 位数不足返回空', parseHash('https://www.kugou.com/song/#hash=abc'), ''));
+
+  const mid = '0039MnYb0qxYhV';
+  checks.push(check('parseSongmid 认 songDetail', parseSongmid(`https://y.qq.com/n/ryqq/songDetail/${mid}`), mid));
+  checks.push(check('parseSongmid 认裸 mid', parseSongmid(mid), mid));
+  // 任意站点都可能有 ?songmid=，跟着它猜平台会把别的链接当成 QQ 音乐
+  checks.push(check('parseSongmid 非 QQ 域名返回空',
+    parseSongmid(`https://example.com/?songmid=${mid}`), ''));
+
+  checks.push(check('toLrc 秒 → [mm:ss.cc]', toLrc([{ time: 61.999, lineLyric: '你好' }]), '[01:02.00]你好'));
+  checks.push(check('toLrc 空时间钳到 0', toLrc([{ time: 0, lineLyric: 'a' }]), '[00:00.00]a'));
+
+  // m4a 不能塞 ID3：QQ 的 96K AAC / 酷狗的 m4a 档会走到这里，写坏就是整个文件打不开
+  const m4aHead = new Uint8Array(16);
+  m4aHead.set([0, 0, 0, 0x20, 0x66, 0x74, 0x79, 0x70, 0x4d, 0x34, 0x41, 0x20], 0);
+  const m4aPlan = buildAudioTag(m4aHead, { title: 'x' });
+  checks.push(check('buildAudioTag 认 m4a 并拒绝写 ID3', m4aPlan.format, 'm4a'));
+  checks.push(check('buildAudioTag m4a 不改文件（prefix 为空）', m4aPlan.prefix.length, 0));
+  checks.push(check('buildAudioTag m4a 带原因说明', typeof m4aPlan.note === 'string' && m4aPlan.note.length > 0, true));
+
+  return checks;
+}
+
 function check(name: string, actual: unknown, expected: unknown, note?: string): Check {
   const a = stringify(actual);
   const e = stringify(expected);
@@ -281,6 +325,9 @@ export async function selfTest(): Promise<SelfTestReport> {
 
   // B站（M2）：DASH 折叠、档位选择、SRT、弹幕计数、两轨进度、Range 解析
   checks.push(...bilibiliChecks());
+
+  // 音乐三平台（M3）：链接识别是「能不能下对曲」的第一道门，认错就是下错歌
+  checks.push(...musicChecks());
 
   // 桥交叉校验：JS 侧 md5 与原生 MessageDigest 必须一致，否则签名类引擎在端上必错
   let bridgeOk = true;
@@ -540,6 +587,26 @@ export async function downloadShare(
  * 端上再抄一份就会出现「界面认成抖音、引擎认成网易云」的漂移——
  * 这种错在真机上表现为「解析出来的字段莫名其妙」，很难归因。
  */
+/** 三家音乐平台分发（酷我/酷狗/QQ 的契约形状一致，差异在各自引擎里）。 */
+type MusicPlatform = 'kuwo' | 'kugou' | 'qq';
+
+async function probeMusic(target: string, platform: MusicPlatform) {
+  if (platform === 'kuwo') return probeKuwo(target);
+  if (platform === 'kugou') return probeKugou(target);
+  return probeQQ(target);
+}
+
+async function downloadMusic(
+  target: string,
+  platform: MusicPlatform,
+  formatId: string | null,
+  hooks: DownloadHooks,
+) {
+  if (platform === 'kuwo') return downloadKuwo(target, formatId, hooks);
+  if (platform === 'kugou') return downloadKugou(target, formatId, hooks);
+  return downloadQQ(target, formatId, hooks);
+}
+
 export async function probeAny(text: string) {
   const target = firstUrl(text) || (text || '').trim();
   const platform = platformOf(target);
@@ -553,8 +620,13 @@ export async function probeAny(text: string) {
     const result = await probeBilibili(target);
     return { ...result, ms: Date.now() - started };
   }
+  if (platform === 'kuwo' || platform === 'kugou' || platform === 'qq') {
+    const started = Date.now();
+    const result = await probeMusic(target, platform);
+    return { ...result, ms: Date.now() - started };
+  }
   if (platform === 'douyin') return probeShare(text);
-  throw codedError('unsupported', `手机端暂不支持这个平台（识别为 ${platform}）：目前支持抖音、B站与网易云`);
+  throw codedError('unsupported', `手机端暂不支持这个平台（识别为 ${platform}）：目前支持抖音、B站、网易云、酷我、酷狗、QQ 音乐`);
 }
 
 /** 下载也按平台分发；各引擎的返回形状一致，界面不需要知道差异。 */
@@ -573,8 +645,11 @@ export async function downloadAny(
       danmaku: sidecars.danmaku,
     });
   }
+  if (platform === 'kuwo' || platform === 'kugou' || platform === 'qq') {
+    return downloadMusic(target, platform, formatId, hooks);
+  }
   if (platform === 'douyin') return downloadShare(text, formatId, hooks);
-  throw codedError('unsupported', `手机端暂不支持这个平台（识别为 ${platform}）：目前支持抖音、B站与网易云`);
+  throw codedError('unsupported', `手机端暂不支持这个平台（识别为 ${platform}）：目前支持抖音、B站、网易云、酷我、酷狗、QQ 音乐`);
 }
 
 /**
@@ -705,6 +780,12 @@ const api = {
   downloadNetease,
   probeBilibili,
   downloadBilibili,
+  probeKuwo,
+  downloadKuwo,
+  probeKugou,
+  downloadKugou,
+  probeQQ,
+  downloadQQ,
   tagProbe,
   tagFileProbe,
   cancelTransfer,

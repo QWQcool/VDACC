@@ -96,6 +96,22 @@
   </div>
 
   <div class="card">
+    <h2>音乐三平台（M3：酷我 / 酷狗 / QQ）</h2>
+    <textarea id="m3" spellcheck="false">https://www.kuwo.cn/play_detail/474678847</textarea>
+    <div class="row"><span class="k">平台</span><span class="v" id="m3Plat">—</span></div>
+    <div class="row"><span class="k">标题</span><span class="v" id="m3Title">—</span></div>
+    <div class="row"><span class="k">档位</span><span class="v" id="m3Formats">—</span></div>
+    <div class="row"><span class="k">下载</span><span class="v" id="m3State">—</span></div>
+    <div class="row"><span class="k">产物</span><span class="v" id="m3Path">—</span></div>
+    <ul class="checks" id="m3Warn"></ul>
+    <button class="ghost" id="m3Kuwo">填酷我</button>
+    <button class="ghost" id="m3Kugou">填酷狗</button>
+    <button class="ghost" id="m3QQ">填 QQ</button>
+    <button class="ghost" id="m3Probe">解析</button>
+    <button id="m3Dl">下载（推荐档）</button>
+  </div>
+
+  <div class="card">
     <h2>B站（M2：DASH 两轨 + 原生合并）</h2>
     <textarea id="bili" spellcheck="false">https://www.bilibili.com/video/BV1SknF6KE5g</textarea>
     <div class="row"><span class="k">标题</span><span class="v" id="bTitle">—</span></div>
@@ -352,6 +368,82 @@
   $('nsDlMp3').addEventListener('click', () => nsDownload('standard', 'nsDlMp3'));
   $('nsDlFlac').addEventListener('click', () => nsDownload('lossless', 'nsDlFlac'));
 
+  // 三家的样本（2026-10-30 实测：酷我与酷狗 DJ 版匿名可下，QQ 只有 DJ 版放行 m500/c400）
+  const M3_SAMPLES = {
+    kuwo: 'https://www.kuwo.cn/play_detail/474678847',
+    kugou: 'https://www.kugou.com/song/#hash=f8de1dfdff5f9a1150c28f920a2a93c6',
+    qq: 'https://y.qq.com/n/ryqq/songDetail/004OtIcv22ptDz',
+  };
+
+  function m3Warnings(list) {
+    $('m3Warn').textContent = '';
+    for (const w of list || []) {
+      const li = document.createElement('li');
+      const mark = document.createElement('span');
+      mark.className = 'mark';
+      mark.textContent = '注意';
+      const body = document.createElement('div');
+      body.className = 'why';
+      body.textContent = w;
+      li.appendChild(mark);
+      li.appendChild(body);
+      $('m3Warn').appendChild(li);
+    }
+  }
+
+  $('m3Kuwo').addEventListener('click', () => { $('m3').value = M3_SAMPLES.kuwo; });
+  $('m3Kugou').addEventListener('click', () => { $('m3').value = M3_SAMPLES.kugou; });
+  $('m3QQ').addEventListener('click', () => { $('m3').value = M3_SAMPLES.qq; });
+
+  $('m3Probe').addEventListener('click', async () => {
+    const btn = $('m3Probe');
+    if (!engine) return;
+    btn.disabled = true;
+    setText('m3Title', '解析中…');
+    setText('m3Formats', '—');
+    m3Warnings([]);
+    try {
+      const res = await engine.probeAny($('m3').value);
+      const media = res.media || {};
+      setText('m3Plat', res.platform + ' · ' + res.engine);
+      setText('m3Title', (media.title || '（空）') + ' · ' + (media.author || '未知'), 'ok');
+      const list = (res.formats || []).map((f) => f.id + ' ' + f.label
+        + (f.bytes ? ' ' + mb(f.bytes) : '') + (f.available ? '' : '（不可用）')).join(' / ');
+      setText('m3Formats', list || '（无档位）', list ? 'ok' : 'bad');
+      m3Warnings(res.warnings);
+    } catch (error) {
+      const code = error && error.code ? error.code + ' ' : '';
+      setText('m3Title', '失败：' + code + (error && error.message ? error.message : error), 'bad');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  $('m3Dl').addEventListener('click', async () => {
+    const btn = $('m3Dl');
+    if (!engine) return;
+    btn.disabled = true;
+    setText('m3State', '下载中…');
+    setText('m3Path', '—');
+    m3Warnings([]);
+    try {
+      const res = await engine.downloadAny($('m3').value, null, {
+        onProgress: (bytes, total) => {
+          const pct = total ? Math.round((bytes * 100) / total) + '%' : '';
+          setText('m3State', mb(bytes) + (total ? ' / ' + mb(total) + '（' + pct + '）' : ''));
+        },
+      });
+      setText('m3State', '完成（' + res.label + ' · ' + res.ms + ' ms）', 'ok');
+      setText('m3Path', res.path + ' · ' + res.bytes + ' 字节', 'ok');
+      m3Warnings(res.warnings);
+    } catch (error) {
+      const code = error && error.code ? error.code + ' ' : '';
+      setText('m3State', '失败：' + code + (error && error.message ? error.message : error), 'bad');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
   function bWarnings(list) {
     $('bWarn').textContent = '';
     for (const w of list || []) {
@@ -593,6 +685,8 @@
     if (probe === 'music') setTimeout(() => $('nsDlMp3').click(), 400);
     if (probe === 'flac') setTimeout(() => $('nsDlFlac').click(), 400);
     if (probe === 'tagflac') setTimeout(() => $('tfBtn').click(), 400);
+    if (probe === 'music3') setTimeout(() => $('m3Probe').click(), 400);
+    if (probe === 'music3dl') setTimeout(() => $('m3Dl').click(), 400);
     if (probe === 'bilibili') setTimeout(() => $('bProbe').click(), 400);
     if (probe === 'bvideo') setTimeout(() => $('bDl').click(), 400);
     if (probe === 'bsplit') setTimeout(() => $('bSplit').click(), 400);

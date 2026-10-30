@@ -40,7 +40,7 @@ export type TagPlan = {
   prefix: Uint8Array;
   /** 原文件要跳过的开头字节数（旧标签长度）。 */
   skip: number;
-  format: 'mp3' | 'flac';
+  format: 'mp3' | 'flac' | 'm4a';
   /** 非空表示没写标签的原因——调用方要如实告诉用户，不能假装写过。 */
   note?: string;
 };
@@ -300,6 +300,16 @@ export function buildFlacTag(head: Uint8Array, meta: AudioMeta): TagPlan {
  * 返回不同 URL 但字节完全相同，`type` 也只写了一种）。魔数比扩展名可靠。
  */
 export function buildAudioTag(head: Uint8Array, meta: AudioMeta, extHint = ''): TagPlan {
+  // m4a/mp4 的结构是「大小+类型」的 box 链，开头不是 ID3；往它前面塞 ID3 会直接毁掉文件。
+  // 端上只实现 ID3v2 与 Vorbis comment，所以这里如实报告「没写」而不是硬写。
+  if (head.length >= 12 && head[4] === 0x66 && head[5] === 0x74 && head[6] === 0x79 && head[7] === 0x70) {
+    return {
+      prefix: new Uint8Array(0),
+      skip: 0,
+      format: 'm4a',
+      note: 'm4a 容器的标签暂不支持（端上只写 ID3v2 与 Vorbis comment），音频已保留',
+    };
+  }
   const isFlac = (head.length >= 4 && head[0] === 0x66 && head[1] === 0x4c
     && head[2] === 0x61 && head[3] === 0x43) || extHint.toLowerCase() === 'flac';
   return isFlac ? buildFlacTag(head, meta) : buildMp3Tag(head, meta);

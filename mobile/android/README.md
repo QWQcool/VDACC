@@ -20,7 +20,7 @@
 rem 1) 引擎 bundle（Bun 自带 bundler，无第三方依赖）
 cd mobile\android\engine
 bun build.mjs
-bun selftest.mjs          rem 无设备自检：60 条纯函数/桥断言 + 8 条落盘 + 8 条标签写入
+bun selftest.mjs          rem 无设备自检：75 条纯函数/桥断言 + 8 条落盘 + 8 条标签写入
 
 rem 2) APK
 set JAVA_HOME=%LOCALAPPDATA%\vdacc-tools\jdk17
@@ -183,8 +183,30 @@ ffmpeg 产物一致，所以按「可用但样本表不完美」如实记录，�
 而桥的 `http.request` 原来只解 gzip，deflate 的响应被当二进制文本交给 JS——表现是「弹幕 0 条」，
 看起来像「这个视频没有弹幕」。现在 gzip/deflate（zlib 包装与裸 deflate 两种）都处理。
 
+2026-10-30 M3 实测（酷我 / 酷狗 / QQ 音乐，引擎 51.5 KB → 71.6 KB）：
+
+| 平台 | 结果 |
+|---|---|
+| 酷我 `474678847` | 解析 `kuwo-mobi 128kbps 3.21 MB`；下载 3,368,106 字节 / 210.44 s / 128 kbps，`ffprobe` 读到 `title=花海 (DJ 阿若版)` `artist=周杰伦`，`.lrc` 45 行；**该曲接口本身没有专辑与封面**（桌面端同样为空，已核对原始响应） |
+| 酷狗 `f8de1dfd…` | 三档全放行：`kg-flac 41.55 MB` / `kg-320 13.89 MB` / `kg-128 5.56 MB`；下载无损 43,616,452 字节 / 958 kbps / 364 s，`ffprobe` 读到 `TITLE=花海` `ARTIST=周杰伦` + `mjpeg 500×500` 封面，`ffmpeg -f null` 解码通过 |
+| QQ `004OtIcv22ptDz` | 四档全部列出：`m500 128K MP3 3.21 MB`、`c400 96K AAC 2.45 MB` 可用，`m800/f000` 不可用且带真实 `result=104003`；下载 3,368,088 字节，`ffprobe` 读到 `title=花海` `artist=周杰伦`，`.lrc` 1,402 字节。该曲详情里专辑为空、封面地址 404（桌面端同样拿不到），所以**没有**内嵌封面，不是写失败 |
+| 自检 | 60 → **75** 条（新增 rid/hash/songmid 解析、LRC 时间轴、m4a 拒写 ID3） |
+
+三个引擎与桌面端同一套接口与判定：酷我用 `songinfoandlrc` + `mobi.s`/`antiserver` 双候选，
+酷狗用 `getSongInfo` + 搜索拿 `sqhash/320hash` 再走 `trackercdn`（`key=md5(hash+kgcloud)`），
+QQ 用 `fcg_play_single_song` + `vkey.GetVkeyServer`。
+
+**端上与桌面端的三个差异（都是「端上没有的东西」）**：
+1. **没有登录**：QQ 固定 `uin=0`，四档照列、未放行的带 `result` 代码并明说「端上未登录，仅匿名档」；
+   全档被拒时报 `need_login` 并建议改用桌面端，而不是把用户指去一个不存在的登录入口。
+2. **没有 ffmpeg**：标签由 `music-common.tagStaged` 自己拼字节（mp3 ID3v2.3 / flac Vorbis+PICTURE）。
+   m4a（QQ 的 96K AAC、酷狗的 m4a 档）**不写标签**——`buildAudioTag` 认出 `ftyp` 就返回空前缀
+   并说明原因，往 m4a 前面塞 ID3 会直接把文件写坏。
+3. **截断判定按接口声明**：QQ 用「实际 < 声明 × 60%」，酷我/酷狗用探测到的总字节 × 95%，
+   与桌面端各自的阈值一致（平台不同，证据强度不同）。
+
 **仍未做**：进程被杀后的**自动**续传（现在标「上次中断」，手动「重试」会从 `.part` 续传）、
-专辑批量、端上登录（所以会员曲只能报 `need_login`，B站字幕与 1080P 以上档位同理）。
+专辑批量、端上登录（所以 QQ 的 320K/无损、B站字幕与 1080P 以上档位都拿不到，只能如实报 `need_login`）。
 
 ## 三、桥与目录（M0 已实现的部分）
 

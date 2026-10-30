@@ -207,7 +207,7 @@ mobile/android/
 | M0 | ✅ **已完成（2026-10-27）**：引擎 bundle（Bun.build，iife，8.5KB/gzip 4.6KB）+ Kotlin 桥（paths/md5/fs 分块写/publish）+ 真机验证页 | 3–4 天 |
 | M1 | ✅ **已完成（2026-10-29）**：抖音单文件（M1-b/c）、Vue 产品界面直上端（M1-d）、网易云 + 端上 ID3/Vorbis 标签与封面（M1-e，桥补 `publish:false`/`fs.readHead`/`fs.rewrite`）。**未做**：进程被杀后的自动续传（手动「重试」会从 `.part` 续传）、专辑批量、端上登录 | 1 周 |
 | M2 | ✅ **已完成（2026-10-30）**：B站两轨 + 合并 + 超限拆轨 + 弹幕。合并用 framework `MediaExtractor`/`MediaMuxer` 而非 Media3（纯封装不需要解码，依赖清单仍为空；代价是不写 `ctts`，见 `mobile/android/README.md` 的对拍证据与已知差异）。字幕因端上无登录拿不到，如实提示 | 1 周 |
-| M3 | QQ/酷我/酷狗 + 标签/封面 | 4–5 天 |
+| M3 | ✅ **已完成（2026-10-30）**：酷我/酷狗/QQ 三引擎 + 端上标签（mp3 ID3v2.3 / flac Vorbis+PICTURE）；m4a 明确不写（会毁文件）；QQ 匿名只有 128K/96K，未放行档带真实 `result` | 4–5 天 |
 | M4 | 分享入口、通知、SAF 选目录、任务历史 | 3–4 天 |
 | M5 | 稳定性：弱网/被杀/低内存机、HLS 评估 | 1 周 |
 | M6 | 尝试绕过或者伪造会员认证下载付费内容 | 3天 |
