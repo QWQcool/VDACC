@@ -5,6 +5,17 @@
 
 ## 未发布
 
+- **端上登录真机验收通过 + 三个真 bug 修复**：B站 大会员 / 网易云 黑胶在手机上登录后，
+  `BV1SknF6KE5g` 从 `852×480` 变成 **1080P 119 MB**，黑胶曲 `287398` 从 `need_login` 变成
+  **无损 FLAC 34.42 MB**（落盘 36,097,193 字节 / 901 kbps / 解码通过，`.lrc` 同时落盘）；
+  免费曲也从 320K 升级为真无损 15.3 MB / 477 kbps，`TITLE/ARTIST/ALBUM` + 600×600 封面齐全。
+  随之修掉三个 bug：①`netease.ts` 漏 import `loggedIn` → 运行时 `ReferenceError`，真机表现为
+  「点解析完全没反应」，并给 WebView 接上 `onConsoleMessage` → logcat（tag `VDACC-Console`）；
+  ②`head.truncated && ext==='flac'` 对任何 >512 KB 的 flac 都成立，导致整曲无损档全部跳过写标签
+  （36 MB 会员曲 `format_tags` 为空，104 KB 探针样本恰好通过），改由 `buildFlacTag` 判断块链；
+  ③网易云四档串行（4 次 API + 4 次 HEAD）导致登录后解析十几秒，改为两波并行、HEAD 超时 6 s。
+  界面另修两处：账号行名字被挤成「B.」「网…」（名字不缩、徽章换行）；右下角两个 86×40 浮层按钮
+  压住档位文字（收成 44×44 的「⋯」菜单）。
 - **Android 端登录（cookie 不出原生）**：独立 `LoginActivity` + 独立 WebView 承载站点登录页，
   **不注入桥**；cookie 由系统 `CookieManager` 持久化，`http.request` / `transfer.start` 按 host
   自动补 `Cookie`（只认 `*.bilibili.com` / `*.163.com`），引擎代码零改动、cookie 不进 JS。

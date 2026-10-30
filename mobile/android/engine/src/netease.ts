@@ -12,6 +12,7 @@
  */
 import { request } from '../../../../ts/src/core/http';
 import { VdlError } from '../../../../ts/src/core/errors';
+import { loggedIn } from './account';
 import { safeName } from '../../../../ts/src/core/naming';
 import { format, type Format, type ProbeResult } from '../../../../ts/src/core/types';
 import { buildAudioTag, imageSize, type Cover } from './audiometa';
@@ -68,7 +69,8 @@ async function apiJson(path: string): Promise<any> {
 
 async function headSize(url: string): Promise<number> {
   try {
-    const res = await request(url, { method: 'HEAD', headers: headers(), timeoutMs: 10000 });
+    // 6 秒够了：HEAD 只为拿字节数，拿不到会退回接口声明的 size（见下面的 `real || declared`）
+    const res = await request(url, { method: 'HEAD', headers: headers(), timeoutMs: 6000 });
     const value = Number(res.headers.get('content-length') || 0);
     return value > 0 ? value : 0;
   } catch {
@@ -90,9 +92,17 @@ async function probeImpl(input: string): Promise<ProbeBundle> {
   const deniedCodes: number[] = [];
   const warnings: string[] = [];
 
-  for (const [br, level, label] of LEVELS) {
-    const data = await apiJson(`/api/song/enhance/player/url?ids=%5B${sid}%5D&br=${br}`);
-    const item = (data.data || [])[0];
+  // 四档「要地址」并行发出。
+  // 为什么必须并行：登录后四档都会给地址，串行就是 4 次 API + 4 次 HEAD 共 8 个来回，
+  // 真机上表现为「点了解析十几秒没反应、还以为卡死」（2026-10-30 实测）。
+  const levelResponses = await Promise.all(LEVELS.map(([br]) => apiJson(
+    `/api/song/enhance/player/url?ids=%5B${sid}%5D&br=${br}`,
+  ).catch(() => null)));
+
+  const picked: Array<{ br: number; level: string; label: string; item: any; url: string }> = [];
+  for (const [index, [br, level, label]] of LEVELS.entries()) {
+    const data = levelResponses[index];
+    const item = data ? (data.data || [])[0] : null;
     const code = Number(item?.code ?? 0);
     const url = String(item?.url || '');
 
@@ -107,9 +117,16 @@ async function probeImpl(input: string): Promise<ProbeBundle> {
       if (code && code !== 200) deniedCodes.push(code);
       continue;
     }
+    picked.push({ br, level, label, item, url });
+  }
 
+  // HEAD 也并行：拿真实字节数是为了识别试听片段，但不该让用户为它多等四倍
+  const sizes = await Promise.all(picked.map((one) => headSize(one.url)));
+
+  for (const [position, one] of picked.entries()) {
+    const { br, level, label, item, url } = one;
     const declared = Number(item.size || 0);
-    const real = await headSize(url);
+    const real = sizes[position];
     const ext = String(item.type || 'mp3').toLowerCase();
     const size = real || declared || 0;
     // 与桌面端同一条：接口「请求无损给 320K」不报错（实测 br=320000 / type=mp3），
@@ -146,14 +163,19 @@ async function probeImpl(input: string): Promise<ProbeBundle> {
   }
 
   const available = formats.filter((f) => f.available);
+  const signedIn = await loggedIn('netease');
   if (!available.length) {
-    // 端上永远没有 cookie，所以这里只会是 need_login（除非接口全给了空地址之外的错）
     const suffix = deniedCodes.length ? `（code=${[...new Set(deniedCodes)].join('/')}）` : '';
-    throw new VdlError('need_login', `没有匿名可用的地址${suffix}`,
-      '该曲可能需要会员权益：请用电脑登录后再下（手机端暂不支持登录）');
+    // 登录与否决定「下一步」该说什么：已登录还报「去登录」是把用户送进死胡同
+    throw new VdlError('need_login', `没有可用的地址${signedIn ? '' : '（未登录）'}${suffix}`,
+      signedIn
+        ? '已登录但没有放行：该曲可能是付费单曲、地区受限或已下架；接口只给一个 code，不做猜测'
+        : '该曲可能需要会员权益：在「设置 → 账号」里登录后再试');
   }
   available[0].recommended = true;
-  warnings.unshift('手机端未登录，仅匿名可取的档位（无损/320K 通常需要对应权益）');
+  warnings.unshift(signedIn
+    ? '已登录，档位以账号实际权益为准'
+    : '未登录，仅匿名可取的档位（无损/320K 通常需要对应权益；可在「设置 → 账号」登录）');
   if (denied.length) warnings.push(`本次未放行：${denied.join('、')}`);
 
   const album = song.album || {};
@@ -310,21 +332,20 @@ export async function downloadNetease(
       ? String(new Date(publishedAt > 1e11 ? publishedAt : publishedAt * 1000).getFullYear())
       : '';
     const head = await readHead(name, 512 * 1024);
-    if (head.truncated && ext === 'flac') {
-      warnings.push('flac 元数据块超过 512KB，未写标签（音频完整）');
-    } else {
-      const plan = buildAudioTag(head.bytes, {
-        title: probe.media!.title,
-        artist: probe.media!.author,
-        album: String(song?.album?.name || ''),
-        year,
-        cover,
-      }, ext);
-      if (plan.note) {
-        warnings.push(plan.note);
-      } else if (plan.prefix.length) {
-        await rewriteStaged(name, plan.prefix, plan.skip);
-      }
+    // 不要用 `head.truncated` 预判：readHead 只读前 512KB，**任何超过 512KB 的 flac 都会被截断**，
+    // 于是真实的整曲无损档全被跳过写标签（36MB 的会员曲实测 format_tags 为空）。
+    // 真正该问的是「元数据块链是否读完」——`buildFlacTag` 自己会判断并在读不全时给出 note。
+    const plan = buildAudioTag(head.bytes, {
+      title: probe.media!.title,
+      artist: probe.media!.author,
+      album: String(song?.album?.name || ''),
+      year,
+      cover,
+    }, ext);
+    if (plan.note) {
+      warnings.push(plan.note);
+    } else if (plan.prefix.length) {
+      await rewriteStaged(name, plan.prefix, plan.skip);
     }
   } catch (error) {
     warnings.push(`写入标签失败，已保留音频：${(error as Error).message}`);

@@ -120,6 +120,7 @@ class Bridge(private val ctx: Context, private val web: WebView) {
 
         // 登录（M6 后续）：状态只报「有没有/是否有效」，cookie 本身不回传 JS
         "auth.status" -> Auth.status()
+        "auth.loggedIn" -> JSONObject().put("loggedIn", Auth.loggedIn(payload.optString("site")))
         "auth.login" -> Auth.startLogin(ctx, payload.optString("site"))
         "auth.logout" -> Auth.logout(payload.optString("site"))
 

@@ -131,6 +131,20 @@ object Auth {
         return cookieHeader(key)
     }
 
+    /**
+     * 只读判断「关键 cookie 在不在」，**不联网**。
+     *
+     * 引擎探测时要用它决定「未登录」那句 warning 该不该说；探测每次都联网验一次会把
+     * 解析拖慢一倍，而「cookie 在但已过期」这种情况在真正取地址时会被接口自己拒绝。
+     */
+    fun loggedIn(key: String): Boolean {
+        val info = site(key) ?: return false
+        val header = cookieHeader(info.key)
+        if (header.isEmpty()) return false
+        val names = header.split(';').map { it.trim().substringBefore('=') }
+        return info.keyNames.all { names.contains(it) }
+    }
+
     /** 登录状态：本地有哪些关键 cookie + 在线校验。不返回值本身。 */
     fun status(): JSONObject {
         val rows = JSONArray()

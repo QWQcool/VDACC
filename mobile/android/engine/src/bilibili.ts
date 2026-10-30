@@ -14,6 +14,7 @@
  * 3. 合并失败**不回滚已下好的流**，改成拆轨 + 一条明确 warning。
  */
 import { UA, request } from '../../../../ts/src/core/http';
+import { loggedIn } from './account';
 import { VdlError } from '../../../../ts/src/core/errors';
 import { safeName } from '../../../../ts/src/core/naming';
 import { format, type Format, type Part, type ProbeResult } from '../../../../ts/src/core/types';
@@ -157,12 +158,19 @@ async function apiJson(path: string, referer: string): Promise<any> {
   return data.result ?? data.data;
 }
 
-/** 端上永远没有登录态（M2 不做登录），所以「未登录」这条必须一直说。 */
-function dashWarnings(dash: any): string[] {
+/**
+ * 清晰度提示必须跟着**登录态**走。
+ *
+ * 早先端上不能登录，这句话是常量；现在登录了还照说，就会出现「提示说只有匿名档，
+ * 而下面的档位明明是 1080P」的自相矛盾——用户只会认为工具在乱报。
+ */
+async function dashWarnings(dash: any): Promise<string[]> {
   const warnings: string[] = [];
   const audio = Array.isArray(dash?.audio) ? dash.audio : [];
   if (!audio.length) warnings.push('这个视频没有音频轨，产物会是无声视频');
-  warnings.push('手机端未登录：清晰度以匿名放行为准（4K/1080P 通常需要登录）');
+  warnings.push(await loggedIn('bilibili')
+    ? '已登录，清晰度以账号实际权益为准（大会员另有 1080P+/4K 档）'
+    : '未登录：清晰度以匿名放行为准（4K/1080P 通常需要登录，可在「设置 → 账号」登录）');
   return warnings;
 }
 
@@ -229,7 +237,7 @@ async function probeVideo(target: BilibiliTarget): Promise<BilibiliProbeInternal
       parts,
     },
     formats,
-    warnings: dashWarnings(play.dash),
+    warnings: await dashWarnings(play.dash),
     error: null,
   };
   return { probe, urls, sub: { bvid, cid: Number(current.cid) } };
@@ -286,7 +294,7 @@ async function probeBangumi(target: BilibiliTarget): Promise<BilibiliProbeIntern
       parts,
     },
     formats,
-    warnings: dashWarnings(dash),
+    warnings: await dashWarnings(dash),
     error: null,
   };
   return { probe, urls, sub: { epId: String(ep.id) } };

@@ -234,7 +234,8 @@ export async function probeImpl(input: string): Promise<QQProbeInternal> {
   }
   available[0].recommended = true;
 
-  const warnings: string[] = ['端上未登录，仅匿名档（320K/FLAC 匿名未放行，本次不包含）'];
+  // 端上没做 QQ 登录入口，所以这句是「能力边界」而不是「你忘了登录」——两者对用户的下一步不同
+  const warnings: string[] = ['端上不支持 QQ 登录，仅匿名档（320K/FLAC 匿名未放行，本次不包含）'];
   if (denied.length) warnings.push(`本次未放行：${denied.join('、')}`);
   const partial = formats.find((f) => f.available && f.reason);
   if (partial) warnings.push(`${partial.label}：${partial.reason}`);

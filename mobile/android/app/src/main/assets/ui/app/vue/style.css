@@ -456,7 +456,14 @@
   padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-md);
   background: var(--surface-soft); font-size: 12px;
 }
-.comp-row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/*
+ * 名字不能被挤没：`flex: 1; min-width: 0` 在窄屏（手机设置面板）会把站点名压成「B.」「网…」，
+ * 因为右边那串「在线有效 · 晨星成焰（大会员）」抢走了全部宽度。改成名字不缩、徽章可缩。
+ */
+.comp-row .name { flex: 0 0 auto; min-width: 3.5em; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 徽章允许换行：窄屏上「在线有效 · 晨星成焰（大会员）」截成「（大会…」等于把会员信息吃掉，
+   而这条信息正是用户来这儿要看的。换行多一行高度，好过显示半句。 */
+.comp-row .badge { flex: 1; min-width: 0; white-space: normal; line-height: 1.45; word-break: break-word; }
 
 /* ── 预览 ───────────────────────────────── */
 .preview-scrim {

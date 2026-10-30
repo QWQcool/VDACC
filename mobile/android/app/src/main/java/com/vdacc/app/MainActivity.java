@@ -57,8 +57,13 @@ public class MainActivity extends Activity {
     private SharedPreferences prefs;
     private LinearLayout bar;
     private Button addressToggle;
-    private Button modeToggle;
-    private Button dirToggle;
+    /**
+     * 右下角唯一的悬浮按钮。
+     *
+     * 原来是「目录」+「连电脑」两个 86×40 的按钮，真机上正好压住档位那一行文字
+     * （1080P/720P 的价格被盖掉一半）。收进一个 44×44 的菜单后占地降到四分之一。
+     */
+    private Button moreToggle;
     private Bridge bridge;
 
     private boolean localMode = true;
@@ -138,6 +143,17 @@ public class MainActivity extends Activity {
         // 调试期留一个入口：chrome://inspect 可以看到页面控制台（M0 排查用）
         WebView.setWebContentsDebuggingEnabled(true);
 
+        // 页面里的 console.error / 未捕获异常转发到 logcat：
+        // 端上出问题时 adb logcat 是唯一能看到 JS 报错的入口（WebView 默认什么都不打）
+        web.setWebChromeClient(new android.webkit.WebChromeClient() {
+            @Override
+            public boolean onConsoleMessage(android.webkit.ConsoleMessage message) {
+                android.util.Log.d("VDACC-Console", message.message()
+                        + " @" + message.sourceId() + ":" + message.lineNumber());
+                return true;
+            }
+        });
+
         web.setWebViewClient(new WebViewClient() {
             @Override
             public void onPageFinished(WebView view, String url) {
@@ -177,37 +193,15 @@ public class MainActivity extends Activity {
         addrLp.setMargins(0, 0, dp(10), dp(14));
         root.addView(addressToggle, addrLp);
 
-        modeToggle = new Button(this);
-        modeToggle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        modeToggle.setAlpha(0.86f);
-        modeToggle.setOnClickListener(v -> {
-            localMode = !localMode;
-            applyMode();
-        });
-        FrameLayout.LayoutParams modeLp = new FrameLayout.LayoutParams(dp(86), dp(40),
+        moreToggle = new Button(this);
+        moreToggle.setText("⋯");
+        moreToggle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        moreToggle.setAlpha(0.9f);
+        moreToggle.setOnClickListener(this::showMoreMenu);
+        FrameLayout.LayoutParams moreLp = new FrameLayout.LayoutParams(dp(44), dp(44),
                 Gravity.END | Gravity.BOTTOM);
-        modeLp.setMargins(0, 0, dp(10), dp(62));
-        root.addView(modeToggle, modeLp);
-
-        // 保存目录（SAF）：长按恢复默认。放壳上而不是网页里，是因为它需要 Activity 的结果回调
-        dirToggle = new Button(this);
-        dirToggle.setText("目录");
-        dirToggle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        dirToggle.setAlpha(0.86f);
-        dirToggle.setOnClickListener(v -> pickOutDir());
-        dirToggle.setOnLongClickListener(v -> {
-            OutDir.clear(this);
-            Toast.makeText(this, "已恢复默认：Download/VDACC", Toast.LENGTH_LONG).show();
-            if (localMode) {
-                errorShown = false;
-                web.loadUrl(localUrl());
-            }
-            return true;
-        });
-        FrameLayout.LayoutParams dirLp = new FrameLayout.LayoutParams(dp(86), dp(40),
-                Gravity.END | Gravity.BOTTOM);
-        dirLp.setMargins(0, 0, dp(10), dp(110));
-        root.addView(dirToggle, dirLp);
+        moreLp.setMargins(0, 0, dp(10), dp(62));
+        root.addView(moreToggle, moreLp);
 
         setContentView(root);
 
@@ -301,10 +295,39 @@ public class MainActivity extends Activity {
         }
     }
 
+    /** 右下角菜单：保存目录 / 恢复默认 / 切换模式（菜单文字每次打开时按当前状态生成）。 */
+    private void showMoreMenu(View anchor) {
+        android.widget.PopupMenu popup = new android.widget.PopupMenu(this, anchor);
+        popup.getMenu().add(0, 1, 0, "选择保存目录");
+        popup.getMenu().add(0, 2, 1, "恢复默认目录（Download/VDACC）");
+        popup.getMenu().add(0, 3, 2, localMode ? "切换到「连电脑」模式" : "切换到「本地引擎」模式");
+        popup.setOnMenuItemClickListener(item -> {
+            switch (item.getItemId()) {
+                case 1:
+                    pickOutDir();
+                    return true;
+                case 2:
+                    OutDir.clear(this);
+                    Toast.makeText(this, "已恢复默认：Download/VDACC", Toast.LENGTH_LONG).show();
+                    if (localMode) {
+                        errorShown = false;
+                        web.loadUrl(localUrl());
+                    }
+                    return true;
+                case 3:
+                    localMode = !localMode;
+                    applyMode();
+                    return true;
+                default:
+                    return false;
+            }
+        });
+        popup.show();
+    }
+
     /** 把当前模式刷到界面上：本地模式不显示地址栏（它在那儿没有意义）。 */
     private void applyMode() {
         if (localMode) {
-            modeToggle.setText("连电脑");
             bar.setVisibility(View.GONE);
             addressToggle.setVisibility(View.GONE);
             // targetSdk >= 30 时 fileAccess 默认关闭，不显式打开会连 asset 页面都加载不了
@@ -314,7 +337,6 @@ public class MainActivity extends Activity {
             return;
         }
 
-        modeToggle.setText("本地引擎");
         // 远程页面不许读本地文件：同一个 WebView 里切模式时必须显式收回
         web.getSettings().setAllowFileAccess(false);
         setBarVisible(true);
