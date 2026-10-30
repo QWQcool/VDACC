@@ -702,6 +702,21 @@ export async function tagFileProbe(
   return { stagedBytes: staged.bytes, staged: staged.staged === true, ...tag, path: published.path };
 }
 
+/**
+ * 「下载完成」通知（M4）。
+ *
+ * 为什么由 JS 触发：音乐与 B站 的完成时刻在 publish 之后（补标签/合并都在 JS 里），
+ * 传输层过早报完成会误导。通知失败不影响下载结果，所以这里吞掉异常只返回 false。
+ */
+export async function notifyDone(name: string, path: string): Promise<boolean> {
+  try {
+    await call('ui.done', { name, path }, { timeoutMs: 8000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** 取消正在进行的下载；`.part` 会保留，下次同一个文件名就是续传。 */
 export async function cancelTransfer(jobId: string): Promise<boolean> {
   return cancelTransferById(jobId);
@@ -788,6 +803,7 @@ const api = {
   downloadQQ,
   tagProbe,
   tagFileProbe,
+  notifyDone,
   cancelTransfer,
   cancelProbe,
   transferProbe,

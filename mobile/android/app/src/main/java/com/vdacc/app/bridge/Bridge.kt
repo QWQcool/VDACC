@@ -6,6 +6,7 @@ import android.os.Looper
 import android.util.Log
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
+import com.vdacc.app.service.Notify
 import org.json.JSONObject
 import java.security.MessageDigest
 import java.util.concurrent.ExecutorService
@@ -97,11 +98,21 @@ class Bridge(private val ctx: Context, private val web: WebView) {
     }
 
     private fun dispatch(method: String, payload: JSONObject): Any = when (method) {
-        "paths" -> JSONObject()
-            .put("out", paths.outDisplay)
-            .put("outKind", paths.outKind)
-            .put("staging", paths.staging.absolutePath)
-            .put("cache", paths.cache.absolutePath)
+        "paths" -> {
+            // 用户选了自选目录（SAF）就以它为准：界面上「保存到」必须与实际落盘位置一致
+            val tree = OutDir.tree(ctx)
+            JSONObject()
+                .put("out", if (tree != null) "${OutDir.label(ctx, tree)}（自选目录）" else paths.outDisplay)
+                .put("outKind", if (tree != null) "saf" else paths.outKind)
+                .put("staging", paths.staging.absolutePath)
+                .put("cache", paths.cache.absolutePath)
+        }
+
+        // 完成通知由 JS 侧发出：真正的完成时刻在 publish 之后（补标签/合并都在 JS 里）
+        "ui.done" -> {
+            Notify.done(ctx, payload.optString("name"), payload.optString("path"))
+            JSONObject().put("shown", true)
+        }
 
         "http.request" -> http.request(payload)
 

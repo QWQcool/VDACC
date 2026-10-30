@@ -108,6 +108,10 @@
       job.finishedAt = Date.now();
       // 引擎的 warning 要透出来（标签写失败、封面跳过…），不能一律清空
       job.warnings = result.warnings || [];
+      // 完成通知：真正的完成时刻在这里（补标签/合并都在引擎里做完了）
+      const label = result.name || job.name
+        || String(result.path || '').split(/[\\/]/).pop() || '';
+      engine().notifyDone(label, String(result.path || '')).catch(() => undefined);
     } catch (error) {
       const code = (error && error.code) || 'error';
       if (code === 'cancelled') {
@@ -168,10 +172,17 @@
     const body = opts.body || {};
 
     if (path === '/api/health') {
+      // 保存位置以原生为准：用户可能选了自选目录（SAF）
+      let outDir = 'Download/VDACC';
+      try {
+        outDir = (await engine().paths()).out || outDir;
+      } catch {
+        /* 取不到就显示默认，不让健康检查失败 */
+      }
       return ok({
         version: engine().engineInfo().version,
         schema: 2,
-        outDir: 'Download/VDACC',
+        outDir,
         jobs: jobs.length,
         engine: 'mobile',
         theme: localStorage.getItem('vdl-theme') || 'light',

@@ -486,8 +486,15 @@ async function renameStaged(from: string, to: string): Promise<number> {
   return res.bytes;
 }
 
-async function publishStaged(name: string): Promise<{ path: string; bytes: number }> {
-  const res = await call<{ path: string; bytes: number }>('fs.publish', { name }, { timeoutMs: 10 * 60_000 });
+async function publishStaged(
+  name: string,
+  warnings: string[],
+): Promise<{ path: string; bytes: number }> {
+  const res = await call<{ path: string; bytes: number; note?: string }>(
+    'fs.publish', { name }, { timeoutMs: 10 * 60_000 },
+  );
+  // note：原生在「自选目录写失败、已回退到 Download/VDACC」时给的原因，必须透给用户
+  if (res.note) warnings.push(res.note);
   return { path: res.path, bytes: res.bytes };
 }
 
@@ -566,16 +573,16 @@ export async function downloadBilibili(
     // 没有音轨：把视频轨改名成最终名再发布，产物名不能带 `.video`
     warnings.push('这个视频没有音频轨，产物是无声视频');
     await renameStaged(vName, name);
-    published = await publishStaged(name);
+    published = await publishStaged(name, warnings);
   } else if (totalBytes > maxMuxBytes) {
     // 超阈值拆轨：手机上合并大文件要额外写一份，代价比「播放器可能不支持」更直观
     const at = (totalBytes / 1048576).toFixed(1);
     warnings.push(`两轨合计 ${at} MB，超过合并上限 ${(maxMuxBytes / 1048576).toFixed(0)} MB，`
       + '已拆成 .video.mp4 与 .audio.m4a 两个文件（没有合并）');
     const vBytes = await renameStaged(vName, `${stem}.video.mp4`);
-    const vPub = await publishStaged(`${stem}.video.mp4`);
+    const vPub = await publishStaged(`${stem}.video.mp4`, warnings);
     await renameStaged(aName, `${stem}.audio.m4a`);
-    const aPub = await publishStaged(`${stem}.audio.m4a`);
+    const aPub = await publishStaged(`${stem}.audio.m4a`, warnings);
     published = { path: `${vPub.path} + ${aPub.path}`, bytes: vBytes + (aPub.bytes || 0) };
   } else {
     try {
@@ -585,16 +592,16 @@ export async function downloadBilibili(
       if (merged.rotation && ![0, 90, 180, 270].includes(merged.rotation)) {
         warnings.push(`视频旋转角 ${merged.rotation}° 未写入成片`);
       }
-      published = await publishStaged(name);
+      published = await publishStaged(name, warnings);
     } catch (error) {
       // 合并失败不回滚已下好的流：拆轨后用户至少能拿到内容，且能看出「没合并」
       const code = (error as { code?: string }).code || 'media_mux_failed';
       const message = (error as Error).message || '未知原因';
       warnings.push(`合并失败（${code}）：${message}；已拆成 .video.mp4 与 .audio.m4a`);
       const vBytes = await renameStaged(vName, `${stem}.video.mp4`);
-      const vPub = await publishStaged(`${stem}.video.mp4`);
+      const vPub = await publishStaged(`${stem}.video.mp4`, warnings);
       await renameStaged(aName, `${stem}.audio.m4a`);
-      const aPub = await publishStaged(`${stem}.audio.m4a`);
+      const aPub = await publishStaged(`${stem}.audio.m4a`, warnings);
       published = { path: `${vPub.path} + ${aPub.path}`, bytes: vBytes + (aPub.bytes || 0) };
     }
   }

@@ -205,8 +205,33 @@ QQ 用 `fcg_play_single_song` + `vkey.GetVkeyServer`。
 3. **截断判定按接口声明**：QQ 用「实际 < 声明 × 60%」，酷我/酷狗用探测到的总字节 × 95%，
    与桌面端各自的阈值一致（平台不同，证据强度不同）。
 
+2026-10-30 M4 实测（分享入口 / 完成通知 / 自选目录，引擎 71.6 KB 不变）：
+
+| 项 | 结果 |
+|---|---|
+| 分享入口 | `am start -a SEND -t text/plain --es EXTRA_TEXT <B站链接>` → App 打开后链接自动填入并**已解析**（封面/标题/`bilibili-api-mobile`）；已加 `launchMode=singleTop` + `onNewIntent`，App 在前台时再分享只换链接不叠页面 |
+| 完成通知 | 下载完成后通知栏出现 `channel=vdacc-done id=2001`：标题「下载完成」、正文「<文件名> · Download/VDACC/<文件名>」，点击回 App，`AUTO_CANCEL` |
+| 自选目录（SAF） | 壳上「目录」按钮 → 系统选择器选 `DrCom` → 下载后 `.mp4`(5,544,685) 与 `.danmaku.xml`(32,661) 都落在 `/sdcard/DrCom/`，`Download/VDACC` 没有新文件 |
+| 恢复默认 | 长按「目录」→ Toast「已恢复默认：Download/VDACC」，再下一次回到 `Download/VDACC` |
+| 降级兜底复现 | 同一首酷我那一次 `songinfo` 返回空（接口本来就会间歇性空），于是用 rid 命名下载、**读文件自带 ID3 改名**为 `474678847_花海_128kbps.mp3`，与设计一致 |
+
+实现要点：
+
+- **分享**只接 `text/plain` 的 `ACTION_SEND`，把文本拼成 `index.html?url=<encoded>`——界面本来就支持
+  `?url=` 深链并自动解析（与桌面端同一套）。**不**声明 `http/https` 的 `VIEW`：那会让本应用出现在
+  「用什么打开网页」的候选里，是个过重的声明。
+- **完成通知**由 JS 触发（`ui.done`），不是传输层：音乐/B站 的完成时刻在 publish 之后
+  （补标签、合并都在 JS 里），用传输完成当信号会在补标签期间就报「下载完成」。
+- **SAF**：`ACTION_OPEN_DOCUMENT_TREE` 必须由 Activity 发起且有 `onActivityResult`，
+  桥是「同步 post + 异步回投」没有这个位置，所以按钮放在壳上。选中后 `takePersistableUriPermission`
+  并存进 SharedPreferences；`Fs.publish` 优先走 `DocumentsContract.createDocument` + `openOutputStream`，
+  **同名先删**（否则重下会给 `xxx (1).mp4`）。写失败（授权被撤销/目录被删）**回退**到 MediaStore
+  并带 `note`，一路透到任务卡 warning——下载已经成功的情况下不能报失败。
+
 **仍未做**：进程被杀后的**自动**续传（现在标「上次中断」，手动「重试」会从 `.part` 续传）、
-专辑批量、端上登录（所以 QQ 的 320K/无损、B站字幕与 1080P 以上档位都拿不到，只能如实报 `need_login`）。
+专辑批量、端上登录（所以 QQ 的 320K/无损、B站字幕与 1080P 以上档位都拿不到，只能如实报 `need_login`）、
+「打开文件夹/预览」按钮（桌面语义，端上仍是 `unsupported` 提示；没有实现「打开文件」）。
+任务历史从 M1-d 起就存在 `localStorage`（杀进程重开仍在），M4 未改动。
 
 ## 三、桥与目录（M0 已实现的部分）
 

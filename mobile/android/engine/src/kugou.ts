@@ -256,6 +256,7 @@ export async function downloadKugou(
     title: info.title, artist: info.artist, album: info.album,
   }, info.cover ? { url: info.cover, referer: REFERER } : null);
   const published = await publishStaged(name);
+  if (published.note) warnings.push(published.note);
 
   return {
     path: published.path,

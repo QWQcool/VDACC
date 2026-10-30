@@ -136,9 +136,14 @@ export async function tagStaged(
   return warnings;
 }
 
-export async function publishStaged(name: string): Promise<{ path: string; bytes: number }> {
-  const res = await call<{ path: string; bytes: number }>('fs.publish', { name }, { timeoutMs: 120_000 });
-  return { path: res.path, bytes: res.bytes };
+export async function publishStaged(
+  name: string,
+): Promise<{ path: string; bytes: number; note?: string }> {
+  const res = await call<{ path: string; bytes: number; note?: string }>(
+    'fs.publish', { name }, { timeoutMs: 120_000 },
+  );
+  // note：原生在「自选目录写失败、已回退到 Download/VDACC」时会带上原因，必须透给用户
+  return { path: res.path, bytes: res.bytes, ...(res.note ? { note: res.note } : {}) };
 }
 
 /** 歌词/字幕这类文本附属文件：与 M1-e 的 `.lrc` 走同一条写盘路径。 */

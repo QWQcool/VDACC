@@ -336,6 +336,7 @@ export async function downloadKuwo(
   }, info.pic ? { url: info.pic, referer: REFERER } : null));
 
   const published = await publishStaged(name);
+  if (published.note) warnings.push(published.note);
 
   // 歌词：失败不影响音频（与桌面端同一条规矩）
   if (info.lrc) {

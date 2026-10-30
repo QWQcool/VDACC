@@ -2,6 +2,7 @@ package com.vdacc.app;
 
 import android.Manifest;
 import android.app.Activity;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
@@ -25,6 +26,7 @@ import android.widget.LinearLayout;
 import android.widget.Toast;
 
 import com.vdacc.app.bridge.Bridge;
+import com.vdacc.app.bridge.OutDir;
 
 /**
  * 两种模式共用一个壳：
@@ -56,11 +58,15 @@ public class MainActivity extends Activity {
     private LinearLayout bar;
     private Button addressToggle;
     private Button modeToggle;
+    private Button dirToggle;
     private Bridge bridge;
 
     private boolean localMode = true;
     /** 验收脚本用：`-e probe 1` 跑落盘探针，`-e probe net` 跑网络探针。 */
     private String autoProbe = null;
+    /** 系统分享进来的一段文本（B站/抖音的「分享」几乎都是 text/plain），启动后自动解析。 */
+    private String sharedText = null;
+    private static final int REQ_DIR = 1002;
     private boolean barVisible = true;
     private boolean errorShown = false;
     private String failedUrl = "";
@@ -106,6 +112,8 @@ public class MainActivity extends Activity {
         if (launch != null && !launch.trim().isEmpty()) {
             address.setText(launch.trim());
         }
+        // 系统分享（B站/抖音/音乐 App 的「分享」基本都是 text/plain）
+        sharedText = extractShare(getIntent());
 
         Button connect = new Button(this);
         connect.setText("连接");
@@ -181,6 +189,26 @@ public class MainActivity extends Activity {
         modeLp.setMargins(0, 0, dp(10), dp(62));
         root.addView(modeToggle, modeLp);
 
+        // 保存目录（SAF）：长按恢复默认。放壳上而不是网页里，是因为它需要 Activity 的结果回调
+        dirToggle = new Button(this);
+        dirToggle.setText("目录");
+        dirToggle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        dirToggle.setAlpha(0.86f);
+        dirToggle.setOnClickListener(v -> pickOutDir());
+        dirToggle.setOnLongClickListener(v -> {
+            OutDir.clear(this);
+            Toast.makeText(this, "已恢复默认：Download/VDACC", Toast.LENGTH_LONG).show();
+            if (localMode) {
+                errorShown = false;
+                web.loadUrl(localUrl());
+            }
+            return true;
+        });
+        FrameLayout.LayoutParams dirLp = new FrameLayout.LayoutParams(dp(86), dp(40),
+                Gravity.END | Gravity.BOTTOM);
+        dirLp.setMargins(0, 0, dp(10), dp(110));
+        root.addView(dirToggle, dirLp);
+
         setContentView(root);
 
         // Android 9 及以下写公共 Download 需要「存储」权限（10+ 走 MediaStore，不需要）
@@ -202,7 +230,75 @@ public class MainActivity extends Activity {
         if (autoProbe != null) {
             return LOCAL_VERIFY + "?probe=" + android.net.Uri.encode(autoProbe);
         }
+        // 分享进来的文本拼成 `?url=`：界面自己会读这个参数并自动解析（与桌面端深链同一套）
+        if (sharedText != null && !sharedText.trim().isEmpty()) {
+            return LOCAL_APP + "&url=" + android.net.Uri.encode(sharedText.trim());
+        }
         return LOCAL_APP;
+    }
+
+    /**
+     * 从 Intent 里取「用户想下载的东西」。
+     *
+     * 只认 text/plain：分享面板里最常见的形态是「标题 + 链接」的一段文字，
+     * 引擎的 `firstUrl` 会自己把链接抽出来。不做 VIEW 的 http/https 接管——
+     * 那会让 VDACC 出现在「用什么打开网页」的候选里，是个过重的声明。
+     */
+    private String extractShare(Intent intent) {
+        if (intent == null) return null;
+        String action = intent.getAction();
+        if (Intent.ACTION_SEND.equals(action)) {
+            String type = intent.getType();
+            if (type == null || type.startsWith("text/")) {
+                String text = intent.getStringExtra(Intent.EXTRA_TEXT);
+                if (text != null && !text.trim().isEmpty()) return text;
+            }
+        }
+        return null;
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        // singleTop：App 已经在前台时再分享一次，走这里而不是重建
+        setIntent(intent);
+        String shared = extractShare(intent);
+        if (shared == null) return;
+        sharedText = shared;
+        localMode = true;
+        applyMode();
+    }
+
+    /** 选保存目录（SAF）。选完刷新页面，让「保存到」与实际落盘位置一致。 */
+    private void pickOutDir() {
+        try {
+            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                    | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+            startActivityForResult(intent, REQ_DIR);
+        } catch (Exception error) {
+            Toast.makeText(this, "这台设备没有目录选择器：" + error.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQ_DIR) return;
+        if (resultCode != RESULT_OK || data == null || data.getData() == null) {
+            Toast.makeText(this, "没有选择目录，继续用 Download/VDACC", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        OutDir.persist(this, data.getData());
+        OutDir.set(this, data.getData());
+        Toast.makeText(this, "保存到：" + OutDir.label(this, data.getData()), Toast.LENGTH_LONG).show();
+        if (localMode) {
+            errorShown = false;
+            web.loadUrl(localUrl());
+        } else {
+            Toast.makeText(this, "切到「本地引擎」模式后生效", Toast.LENGTH_LONG).show();
+        }
     }
 
     /** 把当前模式刷到界面上：本地模式不显示地址栏（它在那儿没有意义）。 */

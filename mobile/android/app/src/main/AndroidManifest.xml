@@ -27,15 +27,30 @@
         android:usesCleartextTraffic="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
 
+        <!--
+          singleTop：从别的 App「分享」到 VDACC 时，若已经在前台就复用当前实例
+          （onNewIntent 里换 url 重新加载），而不是叠一层新页面。
+        -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTop"
             android:configChanges="orientation|screenSize|keyboardHidden">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!--
+              分享入口：只接 text/plain。B站/抖音/音乐 App 的「分享」几乎都是
+              「标题 + 链接」的一段文字，引擎会自己抽链接；不接管 http/https 的 VIEW，
+              那会让本应用出现在「用什么打开网页」的候选里，声明过重。
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
         </activity>
 
         <service

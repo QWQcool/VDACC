@@ -5,6 +5,14 @@
 
 ## 未发布
 
+- **Android 端 M4：系统分享入口、完成通知、自选保存目录**：①分享入口只接 `text/plain` 的
+  `ACTION_SEND`（B站/抖音/音乐 App 的「分享」都是「标题+链接」文本），拼成界面的 `?url=` 深链自动解析；
+  加 `singleTop` + `onNewIntent`，前台时再分享只换链接。不接管 `http/https` 的 `VIEW`（声明过重）。
+  ②完成通知 `channel=vdacc-done`，由 JS 在 publish 之后触发（音乐/B站 的完成时刻在补标签/合并之后），
+  点击回 App。③「目录」按钮走 `ACTION_OPEN_DOCUMENT_TREE` + `takePersistableUriPermission`，
+  `Fs.publish` 优先 `DocumentsContract.createDocument` 写入自选目录（同名先删），失败回退 MediaStore
+  并把原因作为 warning 透出；长按恢复默认。真机实测：分享链接自动解析、通知标题/正文正确、
+  选 `DrCom` 后 mp4 与 danmaku.xml 都落在该目录、恢复默认后回到 `Download/VDACC`。
 - **Android 端 M3：酷我 / 酷狗 / QQ 音乐上机**：新增 `engine/src/{kuwo,kugou,qq}.ts` 与
   公共层 `music-common.ts`（Range 探真音频、下到暂存区、补标签/封面、截断判定）。
   三个引擎与桌面端同一套接口与判定：酷我双候选（`mobi.s`/`antiserver`）+ 内嵌 ID3 兜底标题；

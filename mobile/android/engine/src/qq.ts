@@ -313,6 +313,7 @@ export async function downloadQQ(
   }, probe.media!.thumbnail ? { url: probe.media!.thumbnail, referer: REFERER } : null);
 
   const published = await publishStaged(name);
+  if (published.note) warnings.push(published.note);
 
   const lyric = await fetchLyric(probe.media!.id);
   if (lyric) {

@@ -5,6 +5,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.media.MediaScannerConnection
 import android.os.Build
+import android.provider.DocumentsContract
 import android.provider.MediaStore
 import org.json.JSONObject
 import java.io.File
@@ -136,6 +137,22 @@ class Fs(private val ctx: Context, private val paths: Paths) {
         if (!source.exists()) throw BridgeException("ENOENT", "暂存文件不存在：${source.absolutePath}")
         val bytes = source.length()
 
+        // 用户选了自选目录就写那儿（SAF）。写失败要**回退**而不是让下载失败：
+        // 授权可能被用户在系统设置里撤销、目录可能被删——那时下载其实已经成功了，
+        // 报失败会让用户白下一次；回退到 Download/VDACC 并留一条 note 更诚实。
+        val tree = OutDir.tree(ctx)
+        var note = ""
+        if (tree != null) {
+            try {
+                val saf = publishViaSaf(tree, name, source)
+                source.delete()
+                return saf.put("bytes", bytes)
+            } catch (error: Exception) {
+                note = "自选目录写入失败（${error.message ?: "未知原因"}），已回退到 Download/VDACC"
+                android.util.Log.w("VDACC-Fs", note)
+            }
+        }
+
         val result = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             publishViaMediaStore(name, source)
         } else {
@@ -143,7 +160,61 @@ class Fs(private val ctx: Context, private val paths: Paths) {
         }
         // 公共目录已经确认写入后才删暂存，顺序不能反
         source.delete()
+        if (note.isNotEmpty()) result.put("note", note)
         return result.put("bytes", bytes)
+    }
+
+    /**
+     * 写到用户通过 SAF 选的目录。
+     *
+     * 三步都是 SAF 的硬要求：同名先删（`createDocument` 遇到同名会给 `xxx (1).mp4`，
+     * 用户重下同一首会攒一堆）、按 MIME 建文档、写入后再查一次真实大小。
+     */
+    private fun publishViaSaf(tree: android.net.Uri, name: String, source: File): JSONObject {
+        val resolver = ctx.contentResolver
+        val treeDocId = DocumentsContract.getTreeDocumentId(tree)
+        val treeDoc = DocumentsContract.buildDocumentUriUsingTree(tree, treeDocId)
+        val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, treeDocId)
+
+        resolver.query(
+            children,
+            arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME),
+            null, null, null,
+        )?.use { cursor ->
+            while (cursor.moveToNext()) {
+                if (cursor.getString(1) == name) {
+                    DocumentsContract.deleteDocument(
+                        resolver,
+                        DocumentsContract.buildDocumentUriUsingTree(tree, cursor.getString(0)),
+                    )
+                }
+            }
+        }
+
+        val created = DocumentsContract.createDocument(resolver, treeDoc, mimeOf(name), name)
+            ?: throw BridgeException("EIO", "SAF 拒绝创建文档（目录可能只读）")
+        try {
+            resolver.openOutputStream(created)?.use { out ->
+                source.inputStream().use { input -> input.copyTo(out, 64 * 1024) }
+            } ?: throw BridgeException("EIO", "SAF 没有给出可写流")
+        } catch (error: Exception) {
+            try { DocumentsContract.deleteDocument(resolver, created) } catch (_: Exception) { }
+            throw if (error is BridgeException) error
+            else BridgeException("EIO", "写入自选目录失败：${error.message}", error)
+        }
+
+        val size = try {
+            resolver.query(
+                created, arrayOf(DocumentsContract.Document.COLUMN_SIZE), null, null, null,
+            )?.use { cursor -> if (cursor.moveToFirst()) cursor.getLong(0) else source.length() } ?: source.length()
+        } catch (_: Exception) {
+            source.length()
+        }
+        return JSONObject()
+            .put("path", "${OutDir.label(ctx, tree)}/$name")
+            .put("name", name)
+            .put("outKind", "saf")
+            .put("size", size)
     }
 
     private fun publishViaMediaStore(name: String, source: File): JSONObject {
