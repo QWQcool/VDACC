@@ -4,9 +4,10 @@
 定位是「桌面可编程下载内核 + 可选 Web GUI + Agent Skill」。
 动手前先读 `Plan.md`（路线图与待决策）。本文只写**不能违反的红线**和**已验证的事实**。
 
-> **内容分析与生成侧已暂缓（2026-10-21）**：下载后自动分析、人物三视图、视频生成提示词反推
-> 均不列入开发计划，等前提成熟再重启（见 `Plan.md` §3.4「暂缓」）。不要主动提议开始，
-> 也不要因为看到 `Plan.md §4` 有设计就当成待办。
+> **内容分析与生成侧已解冻（2026-11-02）**：视频风格分析与提示词反推**已重启**，
+> 执行计划见 [`docs/style-transfer-plan.md`](docs/style-transfer-plan.md)（A0–A5，约 6 个工作日）。
+> 范围收窄为「同风格新内容 + MiniMax H3 提示词」，**人物三视图仍不排期**。
+> `Plan.md` §2.4 与 §3.5 里的「暂缓」表述是旧结论，以该计划文档为准。
 
 ## 一、红线（踩过的坑，不要再走回头路）
 
@@ -70,6 +71,7 @@
 | Playwright | 1.64.0，用 `channel=msedge` 复用系统 Edge，不下载 chromium |
 | venv | `venv\Scripts\python.exe` = **3.13.4**（系统 `python` = 3.13.14），已装 playwright 1.64.0 + yt-dlp 2026.8.19，legacy 可直接跑 |
 | Android 端 M0 | 引擎 bundle 8.5KB（gzip 4.6KB）、APK 846KB、minSdk 26；桥（paths / md5 / fs 分块+publish）在 realme RMX5200 / Android 16 真机跑通，落盘 md5 与 `md5sum` 一致。JS 侧 md5 必须纯 JS（`node:crypto` 是同步 API，桥是异步），已与原生 `MessageDigest` 交叉校验 |
+| MiniMax H3 | 提示词是**三字段结构**：`integrated_multimodal_description` / `overall_soundscape` / `non_diegetic_music`（官方 guide）；纯文本生成直接从三字段开始，用首/尾帧才加 instruction 行。时长 **4–15s**；原生 32kHz 立体声，声音必须写进提示词；**2K 不是超分**，是 768P 的 in-context regeneration。详见 `docs/style-transfer-plan.md` §3 |
 
 ffmpeg 为什么是硬前提：B站/YouTube 全是 DASH 音视频分离，yt-dlp 下完会得到
 `.fXXX.mp4` + `.fXXX.m4a` 两个文件然后警告 ffmpeg 不存在，结果是**无声视频**。
