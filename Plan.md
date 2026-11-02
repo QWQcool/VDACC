@@ -1,6 +1,6 @@
 # Plan.md —— 计划、架构与决策（唯一计划来源）
 
-> 状态：**3.4.2 已发布**（tag `v3.4.2`，2026-10-27）。后端主线为 TypeScript（Bun），
+> 状态：**3.5.0 已定版**（2026-11-02；tag 与 GitHub Release 另行安排）。后端主线为 TypeScript（Bun），
 > Python 冻结并归档在 `legacy/python/`。硬性约束见 `AGENTS.md`，使用说明见 `README.md`，
 > 逐版本历史见 `docs/CHANGELOG.md`，完成盘点见 §2.2，后续执行计划见 §2.6。
 
@@ -148,6 +148,7 @@ parity 稳定后再决定 Python 是否退化为 yt-dlp helper。
 | 3.4.0 | 专辑分批、缺档位不静默换档、账号状态与重新登录、附属单独重取、`doctor` 与组件 SHA256 校验、Android 壳自动收起地址栏/离线页（tag `v3.4.0`） |
 | 3.4.1 | ffmpeg 异步化、真实 worker 池（1–4）+ 目标路径预留、提交去重、酷我元数据降级、抖音详情抗风控（tag `v3.4.1`） |
 | 3.4.2 | 前端模块化（i18n/api/format/jobs/overlays）+ 12 组布局回归脚本、Skill 包 manifest/SHA256SUMS 与校验器（tag `v3.4.2`） |
+| 3.5.0 | **Android 独立端**（M0–M6：本地引擎、抖音/网易云/B站/酷我/酷狗/QQ、原生流式下载与续传、DASH 合并、写标签、分享入口、完成通知、自选目录、端上登录）+ 网易云真无损判据 + 端上三个真 bug 修复（tag 待打） |
 | 已知边界 | 番剧 4K 选流与 yt-dlp 有差异；B站 合并后的 mp4 比两条流之和大一点（容器索引，实测 61KB/21MB） |
 
 契约不变：仍是 `schema=2`，`ts/src/core/types.ts` 与 `legacy/python/vdl/core/models.py` 字段一致。

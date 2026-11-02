@@ -74,9 +74,9 @@ Release 说明从 `docs/CHANGELOG.md` 的对应段落摘取，附件只放
 
 | 项 | 状态 | 说明 |
 |---|---|---|
-| **干净机器验收** | ❌ 未做 | 需要一台**没有** Bun / Python / ffmpeg 的 Windows，解压 zip 后跑 `vdl.exe probe/get`。这是 N05 唯一还缺的硬证据 |
-| 第三方站点在线可用性 | ⚠️ 部分 | 2026-10-27 做过抖音下载、酷我下载、网易云 probe/download、B站 probe；**会员档位与冷门站点未覆盖** |
-| Android 独立端 | ⚠️ M0 | 见 `docs/design/android-standalone-plan.md`；M1 起需要真机 |
+| **干净机器验收** | ⏸ 决定跳过（2026-11-02） | 需要一台**没有** Bun / Python / ffmpeg 的 Windows，解压 zip 后跑 `vdl.exe probe/get`。本轮决定**不做**，改为等真实用户反馈来暴露环境问题（例如机器上没装 ffmpeg 时的提示是否够清楚）。这是 N05 唯一还缺的硬证据，**不要当成已通过** |
+| 第三方站点在线可用性 | ⚠️ 部分 | 2026-10-30 复测：抖音下载、酷我/酷狗/QQ 解析下载、网易云 probe/download（含 VIP 无损）、B站 1080P 合并；**冷门站点与地区限制仍未覆盖** |
+| Android 独立端 | ✅ M6 已验收 | 见 `mobile/android/README.md`；登录后 B站 1080P、网易云无损均实测落盘 |
 | 自动 CI | ❌ 暂停 | 配额原因，恢复条件见 workflow 注释 |
 
 ## 6. 回滚
