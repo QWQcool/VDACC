@@ -27,14 +27,13 @@ python tools/verify_skill_ts.py dist/video-acquire-ts
 # 3) 体积基线（与上次发布对比，漂移 >25% 会失败）
 node tools/release_baseline.cjs
 
-# 4) 界面：布局矩阵 + 减少动态效果
-bun ts/src/server.ts --port 8765 --token <token>
-node tools/ui_shots.cjs http://127.0.0.1:8765 <token>          # 浅/深 × 中/英 × 390/768/1440
-node tools/reduced_motion_check.cjs http://127.0.0.1:8765 <token>
+# 4) （已取消）界面布局矩阵 + 减少动态效果
+#    按 AGENTS.md 红线 4（2026-11-04），UI/UX 与体验数字类测试不再是发布门槛。
+#    功能面只要求：页面能加载、按钮能触发请求、错误能显示。脚本保留但不维护。
 ```
 
-`ui_shots.cjs` 需要 `cd ts && bun install`（playwright-core，复用系统 Edge，不下载浏览器）；
-截图落在 `docs/design/ui/shots/`（不入库）。
+历史脚本 `tools/ui_shots.cjs` / `tools/reduced_motion_check.cjs` 仍可用（需要
+`cd ts && bun install`，复用系统 Edge，不下载浏览器），但**不再要求跑、也不作为发版依据**。
 
 ## 2. 体积基线怎么用
 
