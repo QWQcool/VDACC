@@ -111,7 +111,9 @@
 | `media.mux` | `{video, audio, out, title}` | `{path, bytes}` | Media3 Transformer |
 | `media.tag` | `{path, tags, cover}` | warnings | jaudiotagger |
 | `notify.update` | `{id, title, percent}` | ok | 通知栏 |
-| `openFile` / `shareFile` | 路径 | ok | 完成后打开/分享 |
+| `ui.reveal` / `ui.preview` | `{path}` | `{opened, uri, mime}` / `{url, mime}` | 路径 → `content://`（直认 / MediaStore / SAF）；打开交给系统默认应用——手机没有「在文件夹中显示」；分享仍未做 |
+| `ui.done` | `{name, path}` | `{shown}` | 下载完成通知（由 JS 在 publish 之后触发） |
+| `auth.status` / `auth.loggedIn` / `auth.uin` / `auth.login` / `auth.logout` | `{site}` | 状态 / 布尔 / 账号数字 | cookie 不出原生；`auth.uin` 只回 QQ 账号数字（vkey 的 body 要它），回不了 cookie |
 
 > 关键取舍：**下载字节不走 JS**。参考实现用 Range 8MB 分片 + base64 回传是为了兼容 CapacitorHttp；我们直接原生 OkHttp 写文件，内存占用与文件大小无关。
 

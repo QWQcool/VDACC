@@ -20,7 +20,7 @@
 rem 1) 引擎 bundle（Bun 自带 bundler，无第三方依赖）
 cd mobile\android\engine
 bun build.mjs
-bun selftest.mjs          rem 无设备自检：75 条纯函数/桥断言 + 8 条落盘 + 8 条标签写入
+bun selftest.mjs          rem 无设备自检：75 条纯函数/桥 + 8 条落盘 + 8 条标签 + 16 条专辑分批
 
 rem 2) APK
 set JAVA_HOME=%LOCALAPPDATA%\vdacc-tools\jdk17
@@ -248,7 +248,8 @@ QQ 用 `fcg_play_single_song` + `vkey.GetVkeyServer`。
 端上没有 ffmpeg：`MediaMuxer` 只能封装、不能解析 playlist，也没法把一串 MPEG-TS 分片拼成一个文件。
 真要做得补三件事——playlist 解析（含 `EXT-X-MAP` 初始化段与 `EXT-X-KEY` 的 AES-128 解密）、
 跨分片时间戳重排、按分片 Range 下载——这不是「顺手加个入口」，属于独立里程碑。所以现在手机端遇到
-`.m3u8` 直链会如实报「暂不支持这个平台（识别为 sniff）」，不假装能下。
+`.m3u8` 直链会如实报「手机端暂不支持这个平台（识别为 unsupported）」——端上没有 `sniff` 引擎，
+`core/platform.ts` 也不会把它识别成 sniff（此处原先写成 sniff，与代码不符，2026-11-06 更正）。
 
 2026-10-30 端上登录（M6 后续，**实现已完成，真实账号验收待做**）：
 
@@ -292,9 +293,32 @@ QQ 用 `fcg_play_single_song` + `vkey.GetVkeyServer`。
 - 右下角「目录」+「连电脑」两个 86×40 按钮正好压住档位文字，收成一个 44×44 的「⋯」菜单
   （选择保存目录 / 恢复默认 / 切换模式）。
 
-**仍未做**：专辑批量、QQ 的 320K/无损（QQ 没有可用的会员账号且本地凭据已失效）、
-「打开文件夹/预览」按钮（桌面语义，端上仍是 `unsupported`）、HLS（见上）。
+**仍未做**（2026-11-06 更新，前面四条已在二期补齐，见下节）：HLS（见上）、
+端上「解析前预览」（要先拿远端直链，目前如实报 `unsupported` 并提示先下载再看）。
 任务历史从 M1-d 起就存在 `localStorage`（杀进程重开仍在）。
+
+## 二·五、二期补齐（2026-11-06）
+
+用户侧原本挂着四项「端上没有」的能力，这一轮把能做的都做了，做不了的写明原因：
+
+| 项 | 状态 | 做法与实测 |
+|---|---|---|
+| **专辑批量** | ✅ 端上可用 | 引擎补 `albumTracks`（网易云 `apiJson`、QQ `fcg_v8_album_info_cp`）+ `entry.albumAny` 复用桌面 `core/album.ts` 的 `planAlbum`（20 首/批、`nextOffset`）+ `local-api` 加 `POST /api/album`。**界面一行没改**：`web/vue` 早就有「加载下一批」。真机实测《叶惠美》`11 / 11 曲目`、`offset=10` 只回 1 首、QQ 专辑标题/曲目/`songDetail` 链接正确、非音乐链接报 `unsupported` |
+| **QQ 320K/无损** | 🟡 登录通道已通，档位待账号验证 | `Auth.kt` 增 `qq` 站点（`qm_keyst`、登录页 `y.qq.com`、校验走 `musicu.fcg` 的 `GetLoginUserInfo`，按 cookie 现拼 query）；`headerFor` 只给 `y/u/c.y.qq.com` 补 Cookie（**不按 `qq.com` 后缀**，否则会把签名 cookie 发给 `*.stream.qqmusic.qq.com` 这种 CDN）；新增只读桥方法 `auth.uin`（**只给账号数字，不给 cookie**），引擎 vkey 请求不再硬编码 `uin=0`。真机：未登录时四档全列、`m500/c400` 可用、`m800/f000` 带真实 `result=104003`，文案「未登录，仅匿名档…」；登录页能正常打开。**账号未登录，所以「登录后 320K 是否放行」还没被证明**——`comm.authst` 刻意不发（那等于把 `qm_keyst` 交给 JS），若登录后仍 104003 会如实报 `filtered` 而不是假装成功 |
+| **打开 / 预览** | ✅ 端上可用 | 新增 `bridge/Open.kt`：路径 → `content://`（先认 `content://`，再查 MediaStore Downloads，最后查 SAF 自选目录），桥方法 `ui.reveal` / `ui.preview`。产品语义按手机重定义：**没有「在文件夹中显示」**，`reveal` = 交给系统默认应用打开；界面文案在端上被 `build-ui.mjs` 改写成「打开」（匹配不上就构建失败）。预览地址改由 API 给：桌面新增 `POST /api/preview-url`，端上回 `content://`，界面不再自己拼 `/api/preview?token=…`（在手机壳里会变成 `file:///api/preview…`）。真机实测 `<video>` 载入 `content://media/external/downloads/10700`、`readyState=4`、`duration=42.03`；点「打开」后前台变成系统播放器 `com.heytap.yoli/SysVideoPlayActivity` |
+| **B站 字幕 / 1080P+** | ✅ 本来就通，只差文案 | 复核结论：cookie 一直带得到（`headerFor` 白名单含 `*.bilibili.com`），登录后 1080P 早在 10-30 真机验收过。本轮只删掉 `bilibili.ts` 里过期的「手机端不支持登录」提示，改成「在设置 → 账号 登录后重试」 |
+| **HLS** | ⛔ 不做 | 结论不变，见上节；顺手把 README 里「识别为 sniff」的错写更正为 `unsupported` |
+
+真机回归（realme RMX5200 / Android 16，2026-11-06）：
+
+| 项 | 证据 |
+|---|---|
+| 引擎自检 | `75/75` + 落盘 8 + 标签 8 + **专辑分批 16**（假 http 喂 25 首，验 20 上限、`nextOffset`、第二批从第 21 首开始、QQ 字段形状、非音乐链接拒绝） |
+| 专辑 | UI 粘 `https://music.163.com/#/album?id=18905` 点「解析」→ `叶惠美 ALBUM 11 / 11 曲目`，逐首列 `以父之名 / 懦夫 / …` 且作者正确 |
+| 预览 | 成品 mp3 → `content://` → `readyState=4`、`duration=42.03s`（不是白屏、不是 0） |
+| 打开 | 点「打开」→ `topResumedActivity=com.heytap.yoli/SysVideoPlayActivity` |
+| 账号区 | 三个站点都在：B站 大会员、网易云 黑胶、`QQ音乐 端上未登录`（如实） |
+| 缺失文件 | `previewFile('__nope__')` → `not_found`，不返回假地址 |
 
 ## 三、桥与目录（M0 已实现的部分）
 
@@ -309,8 +333,14 @@ app/src/main/java/com/vdacc/app/
 ```
 
 已实现的桥方法：`paths`、`crypto.md5Hex`、`http.request`、`fs.openWrite`、`fs.writeChunk`、
-`fs.closeWrite`、`fs.publish`、`fs.stat`、`fs.mkdirp`。通道与字段形状见
+`fs.closeWrite`、`fs.publish`、`fs.stat`、`fs.readHead`、`fs.rewrite`、`fs.mkdirp`、`fs.rename`、
+`transfer.start` / `transfer.cancel`、`media.mux`、`ui.done`、`ui.reveal`、`ui.preview`、
+`auth.status` / `auth.loggedIn` / `auth.uin` / `auth.login` / `auth.logout`。通道与字段形状见
 `docs/design/android-standalone-plan.md` §5。
+
+`auth.uin` 是个特例：它**回一个账号数字**而不是布尔。原因是 QQ 的 vkey 请求要把 `uin` 放进 body，
+而拼 body 的是 JS 引擎；`qm_keyst` 仍然只在原生（`Auth.headerFor` 补 Cookie 头），
+所以「给引擎够用的信息、不给它凭据」这条边界没破。
 
 `http.request` 是 M1-a 加的：页面在 `file:///android_asset/` 下是不透明来源，
 直接 `fetch('https://www.douyin.com/...')` 会被 CORS 拒（对方不会给我们

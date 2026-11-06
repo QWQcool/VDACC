@@ -265,11 +265,40 @@ parity 稳定后再决定 Python 是否退化为 yt-dlp helper。
   网易云 VIP 曲 `type=flac`（901K~1656K）vs 匿名 `code=-110`；同时确认「有会员 ≠ 该曲可下」
   （`id=186016` 会员态仍 `code=404`）。矩阵见 `docs/design/member-capability-baseline.md`。
   **不做**凭证伪造、cookie 盗用、DRM 破解或付费墙绕过。
-  遗留：专辑批量、端上登录（QQ 320K/无损、B站字幕与 1080P 以上档位因此拿不到，只会如实报
-  `need_login`）、「打开文件夹/预览」仍是 `unsupported`、HLS。
+  遗留：HLS（已定不移植）；专辑批量、QQ 登录通道、「打开文件夹/预览」三项已于 N08（2026-11-06）补齐，见下。
+  B站 字幕与 1080P 以上档位并不是遗留——cookie 一直带得到，10-30 已真机验收过登录后 1080P。
 - **HarmonyOS NEXT**：仍等待华为开发者账号与 DevEco 签名；独立端方案可复用同一份 JS 引擎 bundle 与桥接口设计。
 
+**M4 · 2026-11-06 收尾（B/C/D 三条）**
+
+- **N08 · 端上二期（专辑 / QQ 登录通道 / 打开预览）**：✅ 完成（真机 realme RMX5200 验收）。
+  ①专辑：引擎补 `albumTracks`（网易云 / QQ）+ `entry.albumAny` 复用 `core/album.ts` 的 `planAlbum`，
+  `local-api` 加 `POST /api/album`，界面零改动（`web/vue` 本来就有「加载下一批」）；
+  实测《叶惠美》11/11、`offset=10` 只回 1 首。②QQ：`Auth.kt` 增站点（`qm_keyst`，校验按 cookie 现拼
+  `musicu.fcg`），`headerFor` 只给 `y/u/c.y.qq.com` 补 Cookie（不按 `qq.com` 后缀，避免发给 CDN），
+  新增只读桥方法 `auth.uin`，vkey 不再固定 `uin=0`；**`comm.authst` 刻意不发**（等于把 cookie 交给 JS），
+  所以「登录后 320K 是否放行」仍**待真实账号验证**，未验证前文案不承诺。③打开/预览：新增
+  `bridge/Open.kt`（路径 → `content://`：直认 / MediaStore / SAF），桥方法 `ui.reveal` / `ui.preview`；
+  手机没有「在文件夹中显示」，`reveal` 语义改为「用系统默认应用打开」，端上文案由 `build-ui.mjs`
+  改写成「打开」。预览地址改由 API 给（桌面新增 `POST /api/preview-url`，端上回 `content://`）。
+  实测 `<video>` 载入 `content://` `readyState=4 / duration=42.03s`，「打开」跳到系统播放器。
+- **N09 · 番剧 4K 选流与 yt-dlp 对齐**：✅ 完成。根因不是参数没给全——`fnval ∈ {4048,12240,16336,20464}`
+  × `qn ∈ {0,120,125,126,127}` × v1/v2、以及签过 wbi 的 `/x/player/wbi/playurl` 全部试过，
+  API 最高只给 `id=120`（4K 5978k）；yt-dlp 多出来的那档是**页面 SSR `playurlSSRData` 里的 `id=122`**
+  （avc1 8554k / hvc1 5968k），它本来就先读 SSR。现在番剧探测多读一次页面，按括号配平取出 SSR 的
+  `dash.video`，与 API 结果按 `id+codecs+bandwidth` 去重合并后**再折叠**；解析失败静默退回 API。
+  实测 `ep397051`：4K 从 1.09 GB/6155k 变成 **1.52 GB/8731k**，地址实为 `…-100198.m4s`，
+  `Range: bytes=0-1023` 回 `206` 且 `content-range /1517239746`（与 yt-dlp 的 1.41 GiB 完全一致）。
+- **N10 · 目标 C 收窄为 A1（纯分析）**：✅ 落地（`ts/src/analyze/` + `cli analyze`）。
+  只做确定性部分：`ffmpeg scdet` 切分镜、每镜中点抽帧（<30s→30 帧、>10min→100 帧，均写在
+  `frames.ts`）、帧亮度用同一次 ffmpeg 的 16×16 灰度算、台词优先读同名 `.srt`/`.lrc`（没有就说没有，
+  **不跑语音识别**）、指标只报 ffprobe 直算值。产物 `下载/_analysis/<文件名>/{result.json,frame-*.jpg}`。
+  实测 122.5s / 1080P 的 MV：47 段分镜、41 张帧、10.9 s 跑完；单测 19 项（含真 ffmpeg 的 3 秒测试片）。
+  **仍然冻结**：A2 逐镜描述、A3 风格卡、A4/A5 H3 提示词与评估——它们要 H3 通道才能验收，
+  见 `docs/style-transfer-plan.md` §0.1。
+
 执行依赖：F01–F07 → N01/N02 → N03/N04；N05 可在稳定源码上独立推进；N06 依赖设备和稳定连接恢复。
+N08–N10 于 2026-11-06 一次性收口，互不依赖。
 
 **付费限制与 DRM 研究（2026-10-27 决策更新）**：取消此前对付费绕过和 DRM 的项目禁令，允许将付费限制、会员凭证及 DRM 相关机制纳入研究。该方向目前仅为研究意向，尚无经验证的实现或支持承诺；工作步骤、证据与未验证项见 [ReversePlan.md](ReversePlan.md)。DRM、普通加密、付费限制和版权权限分别判断，不可混为一谈。
 **QQ 第一批（工作包 1–2）已完成，仅离线验证**：数据流与已知/未知清单见
@@ -421,6 +450,9 @@ App-Bound Encryption 挡的是「**从磁盘偷用户的 cookie**」——密钥
 > ✅ **本项目已重启**，执行计划见 [`docs/style-transfer-plan.md`](docs/style-transfer-plan.md)。
 > 以下是 2026-10-19 的原始设计输入，部分已被新计划收窄或替换：
 > 三视图仍不做；提示词部分改为对齐 MiniMax H3 官方三字段格式；VLM 确定为 DeepSeek。
+>
+> **2026-11-06 现状**：范围收窄后的 **A1（分镜 + 抽帧 + 台词 + 客观指标）已落地**
+> （`ts/src/analyze/`、`cli analyze`），**A2–A5 仍冻结**——它们要 H3 出片才能验收。
 
 #### 3.5.1 三段式拆解（确定性依次下降）
 
@@ -540,8 +572,8 @@ def route(url) -> Engine: ...  # 域名 → 引擎
 | **P0.5** | 抖音纯 HTTP 签名引擎（`dy_http.py`） | **完成 2026-10-21** | 无 cookie 拿 1080p，浏览器方案降为兜底 | P0 |
 | **P1** | 引擎路由重构 + B站跑通 | **完成**（M1 + M5） | B站视频下有声音有画面，1080P | P0 |
 | **P2** | 通用兜底 | **完成**：`ytdlp-generic`（R3）+ L2 直链/`m3u8` 嗅探（3.2.0，`ts/src/engines/sniff.ts`；不跑页面 JS、不做 blob/MSE） | 任找一个 yt-dlp 不支持的站点下成功 | P1 |
-| **P3** | 分析链路（抽帧 + 转写 + 客观指标） | **已解冻 2026-11-02**（`docs/style-transfer-plan.md` A1） | 30s 视频出 scenes + 帧 + 台词 | — |
-| **P4** | 风格卡 + H3 提示词 | **已解冻 2026-11-02**（同上 A3–A5） | 产出可直接喂 H3 的三字段 prompt | P3 |
+| **P3** | 分析链路（分镜 + 抽帧 + 客观指标） | **A1 已落地 2026-11-06**：`ts/src/analyze/` + `cli analyze`（台词只读同名字幕，不做语音识别） | 30s 视频出 scenes + 帧 + 台词 → 真机 122s MV 出 47 段/41 帧 | — |
+| **P4** | 风格卡 + H3 提示词 | **仍冻结**（`docs/style-transfer-plan.md` §0.1：没有 H3 通道就无法验收 A2–A5） | 产出可直接喂 H3 的三字段 prompt | P3 + H3 通道 |
 | **P5** | Skill 化封装（`video-acquire`） | **完成**（M6） | agent 能一句话调通 | P1 |
 
 **P0/P1 是地基**，且能验证"通用化"这个假设成不成立。
@@ -563,6 +595,11 @@ P3 之后的每一段都应能独立失败而不影响下载器。
 ---
 
 ## 4. 变更记录
+
+- 2026-11-06：**M4 三条收尾**（N08 端上二期 / N09 番剧 4K 对齐 / N10 A1 分析落地），详见 §2.6.3。
+  测试基线：`bun test ts/tests` **176 pass / 0 fail**（+19 分析、+1 `preview-url`）；
+  端上自检 75 + 落盘 8 + 标签 8 + 专辑 16；真机用 realme RMX5200 复核专辑、预览、打开、账号区。
+  QQ 320K/无损只完成了**登录通道**，档位仍需真实账号验证（未验证前不写进结论）。
 
 - 2026-10-27：根据用户后续决策取消 DRM 的原项目禁令，将 DRM 纳入研究，细节见 `ReversePlan.md`；该决策不代表已实现或验证。
 - 2026-10-27：根据用户决策取消「付费绕过」的原项目禁令，将付费限制与会员凭证列为研究方向，细节见 `ReversePlan.md`。当时的 DRM 禁令已由上条更新取消。

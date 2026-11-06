@@ -92,6 +92,9 @@
 | venv | `venv\Scripts\python.exe` = **3.13.4**（系统 `python` = 3.13.14），已装 playwright 1.64.0 + yt-dlp 2026.8.19，legacy 可直接跑 |
 | Android 端 M0 | 引擎 bundle 8.5KB（gzip 4.6KB）、APK 846KB、minSdk 26；桥（paths / md5 / fs 分块+publish）在 realme RMX5200 / Android 16 真机跑通，落盘 md5 与 `md5sum` 一致。JS 侧 md5 必须纯 JS（`node:crypto` 是同步 API，桥是异步），已与原生 `MessageDigest` 交叉校验 |
 | MiniMax H3 | 提示词是**三字段结构**：`integrated_multimodal_description` / `overall_soundscape` / `non_diegetic_music`（官方 guide）；纯文本生成直接从三字段开始，用首/尾帧才加 instruction 行。时长 **4–15s**；原生 32kHz 立体声，声音必须写进提示词；**2K 不是超分**，是 768P 的 in-context regeneration。详见 `docs/style-transfer-plan.md` §3 |
+| Android 端二期（2026-11-06 真机） | 专辑批量可用（20 首/批 + `nextOffset`，界面本来就有「加载下一批」）；QQ 登录通道已通（`auth.uin` **只给账号数字**，`qm_keyst` 不出原生），**档位未用真实账号验证**；打开/预览走 `content://`（`ui.reveal` = 用系统默认应用打开，手机没有「在文件夹中显示」），`<video>` 实测 `readyState=4` |
+| B站 番剧 4K | API（含 wbi 签名、fnval/qn 共 20+ 组合实测）最高只给 `id=120`（4K 5978k）；`id=122`（8554k）**只在页面 SSR `playurlSSRData` 里**，yt-dlp 也是先读 SSR。我们从页面补这一档后 4K = 1.52 GB / 8731k（地址 `…-100198.m4s`） |
+| 分析 A1（`cli analyze`） | `bun ts/src/cli.ts analyze <本地文件>` → `下载/_analysis/<文件名>/{result.json,frame-*.jpg}`；台词**只读同名 `.srt/.lrc`**，没接语音识别；122s/1080P 实测 47 段 / 41 帧 / 10.9s。A2–A5（VLM/H3）仍冻结 |
 
 ffmpeg 为什么是硬前提：B站/YouTube 全是 DASH 音视频分离，yt-dlp 下完会得到
 `.fXXX.mp4` + `.fXXX.m4a` 两个文件然后警告 ffmpeg 不存在，结果是**无声视频**。
@@ -102,8 +105,9 @@ ffmpeg 为什么是硬前提：B站/YouTube 全是 DASH 音视频分离，yt-dlp
 ```
 ├─ ts/src/           主线（Bun）：cli.ts / server.ts / auth.ts / skill_cli.ts
 │  ├─ core/          契约层：types / platform / config / http / progress / cancel / rate / naming / errors
-│  └─ engines/       douyin / netease / qq / kuwo / kugou / bilibili(_api) / sniff(L2) / generic(yt-dlp)
-├─ ts/tests/         bun test（当前 75 个）
+│  ├─ engines/       douyin / netease / qq / kuwo / kugou / bilibili(_api) / sniff(L2) / generic(yt-dlp)
+│  └─ analyze/       A1：分镜(scdet) / 抽帧 / 台词 / 客观指标（不依赖任何模型）
+├─ ts/tests/         bun test（当前 175 个）
 ├─ web/              Vue 3 界面（默认入口 /）+ vendor / assets（无 PWA：sw/manifest 已删）
 ├─ ts/skill/         TS Skill 源（SKILL.md + references），由 tools/build_skill_ts.py 组装
 ├─ legacy/python/    Python 归档：vdl / skill / tests / tools / dy_* / VDACC.bat（冻结，仅参考）
@@ -138,7 +142,7 @@ venv\Scripts\python.exe -m pip install playwright yt-dlp   # 仅 legacy 需要
 ```bash
 bun --version                              # 1.4.x
 ffmpeg -version                            # 9.x；缺了 B站/音乐/m3u8 全废
-bun test ts/tests                          # 75 pass
+bun test ts/tests                          # 176 pass
 bun ts/src/cli.ts probe "<抖音或B站链接>" --json
 ```
 
