@@ -21,3 +21,20 @@ export async function loggedIn(site: LoginSite): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * 账号数字（目前只有 QQ 用得上），**不是凭据**。
+ *
+ * 为什么必须由原生给：QQ 的 vkey 请求要把 uin 放进 body，而拼 body 的是引擎；
+ * 同时 `qm_keyst` 仍然只在原生（`Auth.headerFor` 补 Cookie 头），所以这里拿不到密钥。
+ * 桥不可用或未登录时返回空串，调用方按匿名档发请求。
+ */
+export async function accountUin(site: LoginSite): Promise<string> {
+  try {
+    const res = await call<{ uin?: string }>('auth.uin', { site }, { timeoutMs: 5_000 });
+    const value = String(res.uin || '');
+    return /^\d+$/.test(value) ? value : '';
+  } catch {
+    return '';
+  }
+}

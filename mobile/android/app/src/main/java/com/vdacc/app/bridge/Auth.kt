@@ -7,6 +7,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLDecoder
+import java.net.URLEncoder
 
 /**
  * 端上登录（M6 后续）。
@@ -40,6 +42,11 @@ object Auth {
         val verifyReferer: String,
         /** 从校验响应里取 (ok, 一句话)。 */
         val parse: (JSONObject) -> Pair<Boolean, String>,
+        /**
+         * 校验地址要带凭据时用（QQ 的 musicu 接口把 uin/authst 放在 query 里）。
+         * 返回空串表示「凭据不全，没法校验」，[verify] 会如实回一条原因，不去打空地址。
+         */
+        val verifyUrlFor: ((String) -> String)? = null,
     )
 
     private val SITES = listOf(
@@ -84,6 +91,45 @@ object Auth {
                 }
             },
         ),
+        // QQ 音乐：关键 cookie 是 qm_keyst；uin 与 authst 必须进请求体/query，
+        // 所以额外提供 verifyUrlFor（桌面端 auth.ts 的 qq 校验用同一套字段）。
+        Site(
+            key = "qq",
+            label = "QQ音乐",
+            loginUrl = "https://y.qq.com/",
+            probeUrls = listOf("https://y.qq.com", "https://u.y.qq.com", "https://c.y.qq.com"),
+            keyNames = listOf("qm_keyst"),
+            verifyUrl = "https://u.y.qq.com/cgi-bin/musicu.fcg",
+            verifyReferer = "https://y.qq.com/",
+            parse = { body ->
+                val req = body.optJSONObject("req_1")
+                val nick = req?.optJSONObject("data")?.optJSONObject("info")?.optString("nick") ?: ""
+                if (req != null && req.optInt("code", -1) == 0 && nick.isNotEmpty()) {
+                    true to nick
+                } else {
+                    false to "未登录（code=${req?.opt("code") ?: "?"}）"
+                }
+            },
+            verifyUrlFor = { cookie ->
+                val uin = qqUin(cookie)
+                val authst = qqAuthst(cookie)
+                val numeric = uin.toLongOrNull()
+                if (numeric == null || authst.isEmpty()) {
+                    // 凭据不全就别打接口：空地址会让 HttpURLConnection 抛一句用户看不懂的异常
+                    ""
+                } else {
+                    val data = JSONObject()
+                        .put("comm", JSONObject().put("ct", 24).put("cv", 0)
+                            .put("uin", numeric).put("authst", authst))
+                        .put("req_1", JSONObject()
+                            .put("module", "music.UserInfo.userInfoServer")
+                            .put("method", "GetLoginUserInfo")
+                            .put("param", JSONObject()))
+                    "https://u.y.qq.com/cgi-bin/musicu.fcg?format=json&data=" +
+                        URLEncoder.encode(data.toString(), "UTF-8")
+                }
+            },
+        ),
     )
 
     private fun site(key: String): Site? = SITES.find { it.key == key }
@@ -113,9 +159,13 @@ object Auth {
     /**
      * 按目标 url 决定要不要带 cookie。
      *
-     * 只认两个站点的**接口域名**：`*.bilibili.com` 与 `*.163.com`。
-     * CDN（`m700.music.126.net`、`upos-*.bilivideo.com`）不带 cookie——
+     * 只认站点的**接口域名**：`*.bilibili.com`、`*.163.com`，以及 QQ 音乐的
+     * `y.qq.com` / `u.y.qq.com` / `c.y.qq.com`。
+     * CDN（`m700.music.126.net`、`upos-*.bilivideo.com`、`*.stream.qqmusic.qq.com`）不带 cookie——
      * 与桌面端一致（那里也是只给接口带 Cookie，播放地址本身是签名的）。
+     *
+     * QQ 为什么不像前两家那样按后缀放行：`isure.stream.qqmusic.qq.com` 也在 `qq.com` 下，
+     * 后缀匹配会把签名 cookie 发给 CDN，而它根本不需要。
      */
     fun headerFor(url: String): String {
         val host = try {
@@ -126,9 +176,37 @@ object Auth {
         val key = when {
             host == "bilibili.com" || host.endsWith(".bilibili.com") -> "bilibili"
             host == "163.com" || host.endsWith(".163.com") -> "netease"
+            host == "y.qq.com" || host == "u.y.qq.com" || host == "c.y.qq.com" -> "qq"
             else -> return ""
         }
         return cookieHeader(key)
+    }
+
+    /** cookie 头里的 `uin=o1234567890` → `1234567890`；拿不到回空串。 */
+    private fun qqUin(cookie: String): String =
+        Regex("(?:^|;\\s*)uin=o?(\\d+)").find(cookie)?.groupValues?.get(1) ?: ""
+
+    /** qm_keyst 可能被 URL 编码过（与桌面端 auth.ts 同一处理）。 */
+    private fun qqAuthst(cookie: String): String {
+        val raw = Regex("(?:^|;\\s*)qm_keyst=([^;]+)").find(cookie)?.groupValues?.get(1) ?: ""
+        if (raw.isEmpty()) return ""
+        return try {
+            URLDecoder.decode(raw, "UTF-8")
+        } catch (_: Exception) {
+            raw
+        }
+    }
+
+    /**
+     * 只回 uin（账号数字），**不回 cookie 值**。
+     *
+     * 为什么必须给引擎：QQ 的 vkey 请求要在 **body** 里带 uin（cookie 头也带，但接口认 body），
+     * 而拼 body 的是 JS 侧引擎。uin 是账号标识不是密钥，拿到它并不能冒充登录；
+     * qm_keyst 仍然只在原生里，由 [headerFor] 补进 Cookie 头。
+     */
+    fun uin(key: String): String {
+        if (key != "qq") return ""
+        return qqUin(cookieHeader("qq"))
     }
 
     /**
@@ -177,8 +255,13 @@ object Auth {
         val base = JSONObject()
             .put("site", info.key)
             .put("label", info.label)
+        // 需要带凭据的站点（QQ）现拼地址；拼不出来就把原因说清楚，不去打空地址
+        val target = info.verifyUrlFor?.invoke(cookie) ?: info.verifyUrl
+        if (target.isEmpty()) {
+            return base.put("ok", false).put("message", "cookie 里缺少 uin 或 qm_keyst，无法在线校验")
+        }
         return try {
-            val conn = (URL(info.verifyUrl).openConnection() as HttpURLConnection).apply {
+            val conn = (URL(target).openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
                 connectTimeout = 12_000
                 readTimeout = 12_000

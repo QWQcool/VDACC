@@ -20,6 +20,11 @@ if (!code.includes('VDACC_ENGINE')) {
   process.exit(1);
 }
 
+// 真机上桥由壳在 UI 脚本之前注入，引擎加载时就会把 `fetch` 换成走桥的实现。
+// 这里补一个占位 `post` 复现同样的加载顺序；真正的应答由下面的 transport 负责。
+// 不这么做的话 `fetch` 会留在 Bun 原生实现上，专辑这类「要发请求」的能力就没法离线验证。
+globalThis.VDACC_BRIDGE = { post() {} };
+
 // 产物是经典 script（给 WebView 用），不是 ES module，所以用 Function 执行而不是 import
 new Function(code)();
 const engine = globalThis.VDACC_ENGINE;
@@ -93,6 +98,44 @@ function fakeBridge(method, payload) {
       const next = Buffer.concat([prefix, all.subarray(skip)]);
       staging.set(payload.name, next);
       return { ok: true, data: { bytes: next.length, prefixBytes: prefix.length, skip } };
+    }
+    case 'http.request': {
+      // 只喂「专辑」两条真实接口的响应形状；其它 URL 一律 404，避免自检偷偷依赖外网
+      const url = String(payload.url || '');
+      let body = null;
+      if (/\/api\/album\/\d+/.test(url)) {
+        body = {
+          album: {
+            name: '自检专辑', picUrl: 'https://p1.music.126.net/cover.jpg',
+            songs: Array.from({ length: 25 }, (_, i) => ({
+              id: 1000 + i, name: `曲目 ${i + 1}`,
+              artists: [{ name: i % 2 ? '歌手B' : '歌手A' }],
+            })),
+          },
+        };
+      } else if (/fcg_v8_album_info_cp/.test(url)) {
+        body = {
+          code: 0,
+          data: {
+            name: 'QQ 自检专辑',
+            list: [
+              { songmid: '0039MnYb0qxYhV', songname: 'Q1', singer: [{ name: '甲' }] },
+              { songmid: '004Z8Ihr0JIu5s', songname: 'Q2', singer: [{ name: '乙' }] },
+              { songmid: '001OyHbk2MSIi4', songname: 'Q3', singer: [{ name: '丙' }] },
+            ],
+          },
+        };
+      }
+      const text = body ? JSON.stringify(body) : JSON.stringify({ code: -404 });
+      return {
+        ok: true,
+        data: {
+          status: body ? 200 : 404, url,
+          headers: { 'content-type': 'application/json' },
+          setCookie: [], bodyBase64: Buffer.from(text, 'utf8').toString('base64'),
+          bytes: Buffer.byteLength(text),
+        },
+      };
     }
     case 'paths':
       return {
@@ -180,6 +223,45 @@ const tagProbeChecks = [
 
 console.log('[selftest] 标签写入探针（假 fs）');
 for (const [name, actual, expected] of tagProbeChecks) {
+  const ok = JSON.stringify(actual) === JSON.stringify(expected);
+  console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}${ok ? '' : `  期望=${JSON.stringify(expected)} 实际=${JSON.stringify(actual)}`}`);
+  if (!ok) report.ok = false;
+}
+
+/* ─────────────── 5. 专辑分批（假 http，验 20 上限与翻批） ─────────────── */
+
+// 25 首：第一批必须正好 20 首且 hasMore=true，第二批 5 首且 hasMore=false。
+// 这条断言的意义在「口径」：端上若自己再写一个 20，或把 nextOffset 算成 0，
+// 界面「加载下一批」会安静地重复第一批——用户在真机上只会看到重复曲目，不会看到报错。
+const albumFirst = await engine.albumAny('https://music.163.com/#/album?id=8888');
+const albumSecond = await engine.albumAny('https://music.163.com/#/album?id=8888', albumFirst.nextOffset);
+const albumQQ = await engine.albumAny('https://y.qq.com/n/ryqq/albumDetail/002fRO0N4FftzY');
+const albumUnsupported = await engine
+  .albumAny('https://www.bilibili.com/video/BV1xx411c7mD')
+  .then(() => 'resolved', (error) => String(error?.code || 'error'));
+
+const albumChecks = [
+  ['首批正好 20 首', albumFirst.tracks.length, 20],
+  ['首批还有下一批', albumFirst.hasMore, true],
+  ['首批 nextOffset=20', albumFirst.nextOffset, 20],
+  ['专辑总曲目数如实上报', albumFirst.album.total, 25],
+  ['首批剩余 5 首', albumFirst.dropped, 5],
+  ['曲目 url 用桌面同款 /song?id=', albumFirst.tracks[0].url, 'https://music.163.com/song?id=1000'],
+  ['曲目作者用 / 连接多歌手', albumFirst.tracks[0].author, '歌手A'],
+  ['第二批 5 首', albumSecond.tracks.length, 5],
+  ['第二批没有下一批', albumSecond.hasMore, false],
+  ['第二批 nextOffset=25', albumSecond.nextOffset, 25],
+  ['第二批从第 21 首开始', albumSecond.tracks[0].id, '1020'],
+  ['QQ 专辑标题正确', albumQQ.album.title, 'QQ 自检专辑'],
+  ['QQ 专辑曲目数正确', albumQQ.tracks.length, 3],
+  ['QQ 曲目 url 指向 songDetail 页', albumQQ.tracks[0].url, 'https://y.qq.com/n/ryqq/songDetail/0039MnYb0qxYhV'],
+  ['QQ 封面按 albummid 拼', albumQQ.album.cover,
+    'https://y.qq.com/music/photo_new/T002R300x300M000002fRO0N4FftzY.jpg'],
+  ['非音乐链接的专辑请求被如实拒绝', albumUnsupported, 'unsupported'],
+];
+
+console.log('[selftest] 专辑分批（假 http）');
+for (const [name, actual, expected] of albumChecks) {
   const ok = JSON.stringify(actual) === JSON.stringify(expected);
   console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}${ok ? '' : `  期望=${JSON.stringify(expected)} 实际=${JSON.stringify(actual)}`}`);
   if (!ok) report.ok = false;

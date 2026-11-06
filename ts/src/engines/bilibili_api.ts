@@ -107,6 +107,81 @@ function dashWarnings(dash: any): string[] {
   return warnings;
 }
 
+/**
+ * 网页 SSR 里的 DASH 流（只用来**补**API 缺的档位）。
+ *
+ * 实测（2026-11-06，ep397051，大会员）：`/pgc/player/web/v2/playurl` 最高只给 120（4K 5978k），
+ * 而页面 SSR 的 `playurlSSRData` 里还有 **id=122「4K 高码率」**（avc1 8554k / hvc1 5968k）。
+ * 参数矩阵 fnval ∈ {4048,12240,16336,20464} × qn ∈ {0,120,125,126,127} × v1/v2 全试过，
+ * 122 一次都不出现；签过 wbi 的 `/x/player/wbi/playurl` 也没有。yt-dlp 同样是先读这份 SSR。
+ *
+ * 失败一律返回空数组、不抛：少了这档只是「差一个更高码率」，探测本身仍然有效。
+ */
+async function ssrDash(pageUrl: string): Promise<any[]> {
+  try {
+    const headers: Record<string, string> = { 'User-Agent': UA, Referer: 'https://www.bilibili.com/' };
+    const cookie = cookieHeader();
+    if (cookie) headers.Cookie = cookie;
+    const res = await fetch(pageUrl, { headers });
+    if (!res.ok) return [];
+    const html = await res.text();
+    const data = extractJsonAfter(html, 'playurlSSRData');
+    const dash = data?.data?.result?.video_info?.dash
+      || data?.data?.result?.dash
+      || data?.result?.video_info?.dash
+      || data?.result?.dash;
+    return Array.isArray(dash?.video) ? dash.video : [];
+  } catch {
+    return [];
+  }
+}
+
+/** 从 marker 后面第一个 `{` 起按括号配平取一个完整 JSON（字符串里的括号不算）。 */
+function extractJsonAfter(html: string, marker: string): any | null {
+  const at = html.indexOf(marker);
+  if (at < 0) return null;
+  const start = html.indexOf('{', at);
+  if (start < 0) return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < html.length; i += 1) {
+    const ch = html[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') { inString = true; continue; }
+    if (ch === '{') depth += 1;
+    else if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        try {
+          return JSON.parse(html.slice(start, i + 1));
+        } catch {
+          return null;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/** 把 SSR 里 API 没有的流并进来（按 id+codecs+bandwidth 去重，不覆盖 API 的同一条）。 */
+function mergeDash(primary: any, extra: any[]): any {
+  const videos: any[] = Array.isArray(primary?.video) ? primary.video.slice() : [];
+  const seen = new Set(videos.map((v) => `${v.id}|${v.codecs}|${v.bandwidth}`));
+  for (const one of extra) {
+    const key = `${one?.id}|${one?.codecs}|${one?.bandwidth}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    videos.push(one);
+  }
+  return { ...primary, video: videos };
+}
+
 function bucketOf(width: number): [number, string] {
   for (const [limit, label] of BUCKETS) if (width >= limit) return [limit, label];
   return [0, '标清'];
@@ -257,7 +332,10 @@ async function probeBangumi(target: Target): Promise<ProbeResult> {
   if (!dash) throw new VdlError('no_stream', '没有 DASH 流（可能需要大会员或该集受限）');
 
   const durationMs = Number(ep.duration || 0) || Number(play.timelength || 0);
-  const formats = foldDash(dash, durationMs);
+  // 先补 SSR 里那档「4K 高码率」再折叠：foldDash 会按码率取同档最优，
+  // 少了这一步，用户勾「4K」拿到的是 5978k 而不是 8554k（与 yt-dlp 的差异就在这里）
+  const ssr = await ssrDash(epReferer);
+  const formats = foldDash(ssr.length ? mergeDash(dash, ssr) : dash, durationMs);
   if (!formats.length) throw new VdlError('no_stream', '没有视频轨');
   const warnings = dashWarnings(dash);
   subtitleState().value = { epId: String(ep.id) };

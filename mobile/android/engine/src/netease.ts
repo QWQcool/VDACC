@@ -15,6 +15,7 @@ import { VdlError } from '../../../../ts/src/core/errors';
 import { loggedIn } from './account';
 import { safeName } from '../../../../ts/src/core/naming';
 import { format, type Format, type ProbeResult } from '../../../../ts/src/core/types';
+import type { AlbumInfo, AlbumTrack } from '../../../../ts/src/core/album';
 import { buildAudioTag, imageSize, type Cover } from './audiometa';
 import { readHead, rewriteStaged, writeTextAndPublish } from './staging';
 import { call } from '../shims/bridge';
@@ -53,6 +54,61 @@ export function extractSongId(input: string): string {
 function headers(): Record<string, string> {
   // UA 由 core/http 统一加；这里只补网易云要求的 Referer（不带给 `-460` 风控）
   return { Referer: `${API}/` };
+}
+
+/** 专辑链接与桌面端同一套解析：裸数字 / `/album?id=` / `/#/album?id=` / `/album/<id>`。 */
+export function parseAlbumId(input: string): string {
+  const raw = (input || '').trim();
+  if (/^\d+$/.test(raw)) return raw;
+  try {
+    const u = new URL(raw);
+    // 分享链接常是 `/#/album?id=123`：id 在 hash 里，search 是空的
+    if (/\/album\b/.test(u.hash)) {
+      const q = new URLSearchParams(u.hash.split('?')[1] || '');
+      const id = q.get('id') || '';
+      if (/^\d+$/.test(id)) return id;
+    }
+    // 只认 album 路径：`/song?id=` 里的 id 是歌曲，拿来当专辑会下错东西
+    if (/\/album\b/.test(u.pathname)) {
+      const id = u.searchParams.get('id') || '';
+      if (/^\d+$/.test(id)) return id;
+      const m = /\/album\/(\d+)/.exec(u.pathname);
+      if (m) return m[1];
+    }
+    return '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * 专辑曲目列表（端上）。
+ *
+ * 为什么整张列表一次取回、分批交给 `core/album.ts` 的 `planAlbum`：
+ * 桌面端就是这么做的，端上再切一次会造成「同一张专辑两边首批曲目不同」。
+ * cookie 仍由原生按 host 自动补（登录后无损专辑不会掉档）。
+ */
+export async function albumTracks(input: string): Promise<AlbumInfo> {
+  const id = parseAlbumId(input);
+  if (!id) throw new VdlError('bad_input', `识别不出网易云专辑 ID: ${input}`);
+  const data = await apiJson(`/api/album/${id}`);
+  const album = data?.album || {};
+  const songs: any[] = album.songs || [];
+  if (!songs.length) {
+    throw new VdlError('not_found', `专辑里没有可下载的曲目（id=${id}）`,
+      '可能是地区限制或接口限流，稍后重试');
+  }
+  return {
+    id,
+    title: String(album.name || `album_${id}`),
+    cover: String(album.picUrl || ''),
+    tracks: songs.map((s: any) => ({
+      id: String(s.id || ''),
+      title: String(s.name || ''),
+      author: (s.artists || s.ar || []).map((a: any) => String(a.name || '')).filter(Boolean).join(' / '),
+      url: `${API}/song?id=${s.id}`,
+    })).filter((t: AlbumTrack) => t.id),
+  };
 }
 
 async function apiJson(path: string): Promise<any> {

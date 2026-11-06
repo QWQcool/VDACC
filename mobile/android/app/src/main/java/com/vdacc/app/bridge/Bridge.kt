@@ -40,6 +40,7 @@ class Bridge(private val ctx: Context, private val web: WebView) {
     private val fs = Fs(ctx, paths)
     private val http = Http()
     private val media = Media(fs)
+    private val open = Open(ctx)
     private val transfer = Transfer(ctx, paths, fs).also { engine ->
         // 进度/完成是被推的，不走 reqId 信封：一次下载可能有上百条进度
         engine.emit = { jobId, payload -> emitEvent("transfer", jobId, payload) }
@@ -92,8 +93,9 @@ class Bridge(private val ctx: Context, private val web: WebView) {
                 }
                 deliver(reqId, envelope)
             }
-            // fs 必须保序（单线程）；http / auth 是耗时调用（auth 要联网校验），不跟着排队
-            if (method.startsWith("http.") || method.startsWith("auth.")) {
+            // fs 必须保序（单线程）；http / auth / ui.* 是耗时调用（auth 要联网校验、
+            // ui.* 要查 MediaStore 再起 Activity），不跟着排队
+            if (method.startsWith("http.") || method.startsWith("auth.") || method.startsWith("ui.")) {
                 httpPool.execute(task)
             } else {
                 worker.execute(task)
@@ -121,8 +123,14 @@ class Bridge(private val ctx: Context, private val web: WebView) {
         // 登录（M6 后续）：状态只报「有没有/是否有效」，cookie 本身不回传 JS
         "auth.status" -> Auth.status()
         "auth.loggedIn" -> JSONObject().put("loggedIn", Auth.loggedIn(payload.optString("site")))
+        // 只回账号数字：QQ 的 vkey 请求必须在 body 里带 uin，cookie 本身不出原生
+        "auth.uin" -> JSONObject().put("uin", Auth.uin(payload.optString("site")))
         "auth.login" -> Auth.startLogin(ctx, payload.optString("site"))
         "auth.logout" -> Auth.logout(payload.optString("site"))
+
+        // 已下载成品的打开/预览：页面拿不到 /sdcard，必须由原生换成 content://
+        "ui.reveal" -> open.reveal(payload.optString("path"))
+        "ui.preview" -> open.preview(payload.optString("path"))
 
         "http.request" -> http.request(payload)
 

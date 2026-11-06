@@ -206,7 +206,7 @@ async function probeVideo(target: BilibiliTarget): Promise<BilibiliProbeInternal
     `/x/player/playurl?bvid=${bvid}&cid=${current.cid}&qn=120&fnval=4048&fourk=1`, referer);
   if (!play?.dash) {
     throw new VdlError('no_stream', '没有 DASH 流（可能需要登录或该视频受限）',
-      '手机端不支持登录；桌面端用 vdl auth bilibili 后可以拿到 1080P/4K');
+      '该视频可能需要登录或更高权益：在「设置 → 账号」登录 B站 后重试（桌面端也可 vdl auth bilibili）');
   }
 
   const durationMs = Number(play.timelength || 0) || Number(view.duration || 0) * 1000;

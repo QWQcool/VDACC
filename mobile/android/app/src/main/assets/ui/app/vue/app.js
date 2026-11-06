@@ -448,9 +448,20 @@ createApp({
       }
     }
 
-    function previewJob(job) {
+    /**
+     * 成品预览地址由 API 给，不在界面里拼 URL。
+     *
+     * 原来这里硬编码 `/api/preview?token=…&path=…`，在手机壳里会解析成
+     * `file:///api/preview…`（本地引擎模式没有 HTTP 服务），必然播不出来；
+     * 现在桌面回本地代理地址、手机回 `content://`，界面只负责把 url 塞进 `<video>`。
+     */
+    async function previewJob(job) {
       if (!job.path) return;
-      previewUrl.value = `/api/preview?token=${encodeURIComponent(token)}&path=${encodeURIComponent(job.path)}`;
+      const data = await api('/api/preview-url', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { path: job.path },
+      });
+      if (data.ok && data.url) previewUrl.value = data.url;
+      else message.value = (data.error && data.error.message) || 'failed';
     }
     function closePreview() { previewUrl.value = ''; }
 

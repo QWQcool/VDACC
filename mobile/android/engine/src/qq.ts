@@ -5,14 +5,20 @@
  * 拿四个档位的 purl，档位与文件名的对应由实测确认（M500=128K mp3、C400=96K aac、
  * M800/F000 需账号权益）。
  *
- * 端上**没有登录**（也不打算有）：所以 vkey 请求固定 uin=0，四档全部列出、未放行的
- * `available:false` 带真实 `result` 代码，并明确说「未登录，仅匿名档」。
- * 不把「接口没返回」说成「会员缺失」，也不把别人登录后的结论套到匿名请求上。
+ * 登录（B2 起支持）：cookie 由原生按 host 补，账号数字（uin）通过桥只读拿到；
+ * 未登录时 vkey 请求 uin=0，四档仍全部列出、未放行的 `available:false` 带真实 `result` 代码。
+ * 不把「接口没返回」说成「会员缺失」，也不把某个账号登录后的结论套到匿名请求上。
+ *
+ * 已知边界：`comm.authst`（桌面端塞的是 qm_keyst）这里**不发**——那等于把 cookie 值交给 JS。
+ * 现在只靠原生补的 Cookie 头 + body 里的 uin 取地址；实测若仍 104003，说明这台账号
+ * 确实没有该档权益，文案会如实说「已登录但未放行」，不谎称未登录。
  */
 import { UA, request } from '../../../../ts/src/core/http';
 import { VdlError } from '../../../../ts/src/core/errors';
 import { safeName } from '../../../../ts/src/core/naming';
 import { format, type Format, type ProbeResult } from '../../../../ts/src/core/types';
+import type { AlbumInfo, AlbumTrack } from '../../../../ts/src/core/album';
+import { accountUin, loggedIn } from './account';
 import { randomBytes } from '../shims/crypto';
 import {
   assertNotTruncated, downloadToStaging, type MusicHooks, publishStaged, stemOf, tagStaged,
@@ -35,6 +41,7 @@ const QUALITIES: Array<{ prefix: string; ext: string; label: string; bitrate: nu
 
 const BARE_MID = /^[0-9A-Za-z]{14}$/;
 const MID_IN_PATH = /\/(?:songDetail|songdetail)\/([0-9A-Za-z]+)/;
+const ALBUM_IN_PATH = /\/(?:albumDetail|albumdetail)\/([0-9A-Za-z]+)/;
 
 /** 三种常见形态：`songDetail/<mid>`、`?songmid=<mid>`、裸 mid。 */
 export function parseSongmid(input: string): string {
@@ -56,6 +63,65 @@ export function parseSongmid(input: string): string {
   }
   const m = MID_IN_PATH.exec(url.pathname);
   return m ? m[1] : '';
+}
+
+/** 专辑链接：`/n/ryqq/albumDetail/<mid>`、`?albummid=`，或裸 mid。 */
+export function parseAlbumMid(input: string): string {
+  const raw = (input || '').trim();
+  if (BARE_MID.test(raw)) return raw;
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return '';
+  }
+  const host = u.hostname.toLowerCase();
+  if (host !== 'qq.com' && !host.endsWith('.qq.com')) return '';
+  for (const key of ['albummid', 'albumMid', 'mid']) {
+    const value = u.searchParams.get(key) || '';
+    if (BARE_MID.test(value)) return value;
+  }
+  const m = ALBUM_IN_PATH.exec(u.pathname);
+  return m ? m[1] : '';
+}
+
+/**
+ * 专辑曲目（`fcg_v8_album_info_cp`，与桌面端同一接口）。
+ *
+ * cookie 由原生按 host 补，所以登录后专辑里的会员曲解析不会比桌面端少；
+ * 但**能不能下**仍由每首歌的 vkey 决定，这里只负责列曲目。
+ */
+export async function albumTracks(input: string): Promise<AlbumInfo> {
+  const mid = parseAlbumMid(input);
+  if (!mid) throw new VdlError('bad_input', `识别不出 QQ 音乐专辑 mid: ${input}`);
+  const res = await request(
+    `https://c.y.qq.com/v8/fcg-bin/fcg_v8_album_info_cp.fcg?albummid=${mid}&format=json`,
+    { headers: { Referer: REFERER }, timeoutMs: 20_000 });
+  const text = await res.text();
+  if (!res.ok) throw new VdlError(`http_${res.status}`, `QQ 音乐专辑接口 HTTP ${res.status}`);
+  let json: any;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    throw new VdlError('bad_json', `专辑接口不是 JSON（前 120 字节: ${JSON.stringify(text.slice(0, 120))}）`);
+  }
+  if (Number(json?.code) !== 0) {
+    throw new VdlError('album_failed', `专辑接口 code=${json?.code}`, '确认专辑 mid 是否正确');
+  }
+  const data = json.data || {};
+  const list: any[] = data.list || [];
+  if (!list.length) throw new VdlError('not_found', `专辑里没有曲目（albummid=${mid}）`);
+  return {
+    id: mid,
+    title: String(data.name || mid),
+    cover: `https://y.qq.com/music/photo_new/T002R300x300M000${mid}.jpg`,
+    tracks: list.map((s: any) => ({
+      id: String(s.songmid || ''),
+      title: String(s.songname || ''),
+      author: (s.singer || []).map((x: any) => String(x.name || '')).filter(Boolean).join(' / '),
+      url: SONG_PAGE + s.songmid,
+    })).filter((t: AlbumTrack) => t.id),
+  };
 }
 
 type Cached = { url: string; ext: string; declared: number };
@@ -105,11 +171,17 @@ async function fetchDetail(mid: string): Promise<SongDetail> {
 
 type MidUrl = { filename: string; purl: string; result: number };
 
-/** 一个 mid 对应多个 filename 时接口按**下标**配对，所以 songmid/songtype 要重复。 */
-async function fetchVkeys(mid: string): Promise<{ sip: string; items: MidUrl[] }> {
+/**
+ * 一个 mid 对应多个 filename 时接口按**下标**配对，所以 songmid/songtype 要重复。
+ *
+ * `uin` 为空串 = 未登录，按匿名请求发（桌面端同样在无凭据时发 0）。
+ * 这里刻意**不发 authst**：它等于 qm_keyst 的值，发出去就是 cookie 出原生。
+ */
+async function fetchVkeys(mid: string, uin = ''): Promise<{ sip: string; items: MidUrl[] }> {
   const filenames = QUALITIES.map((q) => `${q.prefix}${mid}.${q.ext}`);
+  const numeric = Number(uin) || 0;
   const payload = {
-    comm: { uin: 0, format: 'json', ct: 24, cv: 0 },
+    comm: { uin: numeric, format: 'json', ct: 24, cv: 0 },
     req_1: {
       module: 'vkey.GetVkeyServer',
       method: 'CgiGetVkey',
@@ -117,7 +189,7 @@ async function fetchVkeys(mid: string): Promise<{ sip: string; items: MidUrl[] }
         guid: guid(),
         songmid: QUALITIES.map(() => mid),
         songtype: QUALITIES.map(() => 0),
-        uin: '0',
+        uin: numeric ? String(numeric) : '0',
         loginflag: 1,
         platform: '20',
         filename: filenames,
@@ -182,7 +254,9 @@ export async function probeImpl(input: string): Promise<QQProbeInternal> {
   const urls = new Map<string, Cached>();
 
   const detail = await fetchDetail(mid);
-  const { sip, items } = await fetchVkeys(mid);
+  // uin 只用于拼 vkey 的 body；signedIn 决定文案说「去登录」还是「账号没有这个档」
+  const [uin, signedIn] = await Promise.all([accountUin('qq'), loggedIn('qq')]);
+  const { sip, items } = await fetchVkeys(mid, uin);
 
   const formats: Format[] = [];
   const denied: string[] = [];
@@ -229,13 +303,19 @@ export async function probeImpl(input: string): Promise<QQProbeInternal> {
   if (!available.length) {
     const codes = [...new Set(items.map((x) => Number(x.result || 0)).filter((x) => x !== 0))];
     const suffix = codes.length ? `（result=${codes.join('/')}）` : '';
-    throw new VdlError('need_login', `没有匿名可用的播放地址${suffix}`,
-      'QQ 音乐的高档位需要登录；端上不支持登录，可改用桌面端下载后传回手机');
+    // 有凭据但全档被拒 ≠ 忘了登录：两者下一步完全不同，码也不能混用（对齐桌面端 filtered/need_login）
+    if (signedIn) {
+      throw new VdlError('filtered', `已登录但没有可用播放地址${suffix}`,
+        '该曲可能需要会员权益，或接口只放行部分档位；这里只报真实 result，不猜测原因');
+    }
+    throw new VdlError('need_login', `没有可用的播放地址（未登录）${suffix}`,
+      'QQ 音乐的高档位需要登录：在「设置 → 账号」里登录后重试');
   }
   available[0].recommended = true;
 
-  // 端上没做 QQ 登录入口，所以这句是「能力边界」而不是「你忘了登录」——两者对用户的下一步不同
-  const warnings: string[] = ['端上不支持 QQ 登录，仅匿名档（320K/FLAC 匿名未放行，本次不包含）'];
+  const warnings: string[] = [signedIn
+    ? '已登录，档位以账号实际权益为准'
+    : '未登录，仅匿名档（320K/FLAC 匿名通常不放行；可在「设置 → 账号」登录）'];
   if (denied.length) warnings.push(`本次未放行：${denied.join('、')}`);
   const partial = formats.find((f) => f.available && f.reason);
   if (partial) warnings.push(`${partial.label}：${partial.reason}`);

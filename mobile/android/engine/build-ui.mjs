@@ -93,6 +93,18 @@ if (helpIndex !== 2 || i18n.includes('登录在电脑上完成') || i18n.include
   console.error('[ui] accountsHelp 文案没按预期改写：桌面/端上的登录方式说明会不一致');
   process.exit(1);
 }
+
+/*
+ * 「打开文件夹」在手机上是句假话：Android 没有「在文件夹里选中文件」这个动作，
+ * 端上做的是「用系统默认应用打开这个文件」（见 `bridge/Open.kt`）。
+ * 桌面端仍是 explorer /select, 会真的选中文件，所以只改端上产物。
+ */
+let revealIndex = 0;
+i18n = i18n.replace(/reveal: '[^']*'/g, () => (revealIndex++ === 0 ? "reveal: '打开'" : "reveal: 'Open'"));
+if (revealIndex !== 2) {
+  console.error('[ui] reveal 文案没按预期改写：手机上的按钮会继续假装能「打开文件夹」');
+  process.exit(1);
+}
 writeFileSync(i18nPath, normalize(i18n), 'utf8');
 
 console.log(`[ui] 产物 ${path.relative(ROOT, OUT)}（index.html + ${7} 个脚本/样式）`);

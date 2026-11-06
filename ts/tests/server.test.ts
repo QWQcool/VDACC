@@ -96,6 +96,30 @@ describe('服务端安全边界', () => {
     expect(await (await authed('/api/preview?path=' + encodeURIComponent(join(TMP, 'out', 'inside.txt')))).text()).toBe('inside');
   });
 
+  // 成品预览地址：界面不再自己拼 URL（手机壳里会拼成 file:///api/preview…）
+  test('preview-url 给出可直接播放的地址，越界路径拒绝', async () => {
+    const inside = join(TMP, 'out', 'inside.txt');
+    const res = await authed('/api/preview-url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: inside }),
+    });
+    expect(res.status).toBe(200);
+    const data = await res.json() as any;
+    expect(data.ok).toBe(true);
+    expect(String(data.url)).toStartWith('/api/preview?token=');
+    // 地址里必须带 token，否则播放器拿不到字节
+    expect(await (await fetch(BASE + data.url)).text()).toBe('inside');
+
+    const outside = join(TMP, 'out-neighbor', 'outside.txt');
+    const bad = await authed('/api/preview-url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: outside }),
+    });
+    expect(bad.status).toBe(400);
+  });
+
   test('未知接口 404', async () => {
     const res = await authed('/api/nope');
     expect(res.status).toBe(404);

@@ -6,7 +6,7 @@
  * 只要让同样的 path 返回同样的 JSON 形状。
  *
  * 支持范围（M1-d）：
- *   /api/health  /api/probe  /api/jobs(GET/POST)  /api/jobs/:id/cancel|retry|DELETE
+ *   /api/health  /api/probe  /api/album  /api/jobs(GET/POST)  /api/jobs/:id/cancel|retry|DELETE
  *   /api/jobs/clear-finished  /api/jobs/retry-failed  /api/events(SSE)
  * 未支持的返回 `{ok:false, error:{code:'unsupported', message:…}}`，界面会显示这条消息——
  * 不假装成功，也不静默丢按钮。
@@ -229,6 +229,23 @@
       }
     }
 
+    if (path === '/api/album' && method === 'POST') {
+      const target = String(body.url || '').trim();
+      if (!target) return { status: 400, data: { ok: false, error: { code: 'bad_input', message: '缺少 url' } } };
+      try {
+        // offset 原样交给引擎：单批 20 首的上限在 core/album.ts 里，端上不再写一份
+        const result = await engine().albumAny(target, Number(body.offset) || 0);
+        return ok(result);
+      } catch (error) {
+        // 形状与桌面 /api/album 的失败一致：界面只读 error.message
+        return {
+          status: 200,
+          data: { ok: false, error: { code: (error && error.code) || 'error',
+            message: String((error && error.message) || error) } },
+        };
+      }
+    }
+
     if (path === '/api/jobs' && method === 'GET') {
       return ok({ jobs: jobs.slice(), warnings: [] });
     }
@@ -335,6 +352,39 @@
         return { status: 200, data: { ok: false, error: { code: (error && error.code) || 'error',
           message: String((error && error.message) || error) } } };
       }
+    }
+
+    // 已下载成品的打开/预览（B3）：路径→content:// 由原生查 MediaStore/SAF 得出
+    if (path === '/api/reveal' && method === 'POST') {
+      const target = String(body.path || '');
+      if (!target) return { status: 400, data: { ok: false, error: { code: 'bad_input', message: '缺少 path' } } };
+      try {
+        const res = await engine().revealFile(target);
+        return ok({ opened: !!res.opened, message: '已用系统默认应用打开' });
+      } catch (error) {
+        // 手机上没有「在文件夹中显示」：失败原因必须原样透出（找不到文件/没有能打开的应用）
+        return { status: 200, data: { ok: false, error: { code: (error && error.code) || 'error',
+          message: String((error && error.message) || error) } } };
+      }
+    }
+
+    // 成品预览地址：桌面是 /api/preview?token=…，端上直接给 content://，界面只把 url 塞进 <video>
+    if (path === '/api/preview-url' && method === 'POST') {
+      const target = String(body.path || '');
+      if (!target) return { status: 400, data: { ok: false, error: { code: 'bad_input', message: '缺少 path' } } };
+      try {
+        const res = await engine().previewFile(target);
+        return ok({ url: res.url || '' });
+      } catch (error) {
+        return { status: 200, data: { ok: false, error: { code: (error && error.code) || 'error',
+          message: String((error && error.message) || error) } } };
+      }
+    }
+
+    // 解析前预览要拿远端直链（涉及 UA/Referer 与合并流），端上暂不支持：
+    // 明确说清替代路径，而不是让按钮转圈后什么也不发生。
+    if (path === '/api/preview' && method === 'POST') {
+      return unsupported('手机端暂不支持解析前预览：先下载成品，再点成品任务的「预览」');
     }
 
     if (path === '/api/components') {

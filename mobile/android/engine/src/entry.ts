@@ -16,6 +16,7 @@ import { activeDestCount, releaseDest, reserveDest } from '../../../../ts/src/co
 import { CookieJar, request } from '../../../../ts/src/core/http';
 import { runOperation } from '../../../../ts/src/core/operation';
 import { readId3v2 } from '../../../../ts/src/core/tags';
+import { planAlbum } from '../../../../ts/src/core/album';
 import { previewDouyin, probeDouyin } from '../../../../ts/src/engines/douyin';
 import { bytesToBase64, createHash, randomBytes } from '../shims/crypto';
 import { md5Hex, toBytes, toHex } from '../shims/md5';
@@ -25,14 +26,14 @@ import { cancelTransferById, startTransfer } from '../shims/transfer';
 import {
   buildAudioTag, buildFlacTag, buildMp3Tag, existingId3Size, imageSize, parseFlacChain,
 } from './audiometa';
-import { downloadNetease, probeNetease } from './netease';
+import { albumTracks as neteaseAlbumTracks, downloadNetease, probeNetease } from './netease';
 import {
   aggregateProgress, bucketOf, chooseFormat as chooseBilibiliFormat, countDanmaku,
   downloadBilibili, foldDash, parseContentRangeTotal, parseTarget, probeBilibili, srtTime, toSrt,
 } from './bilibili';
 import { downloadKuwo, probeKuwo, parseRid, toLrc } from './kuwo';
 import { downloadKugou, probeKugou, parseHash } from './kugou';
-import { downloadQQ, probeQQ, parseSongmid } from './qq';
+import { albumTracks as qqAlbumTracks, downloadQQ, probeQQ, parseSongmid } from './qq';
 import { readHead, rewriteStaged } from './staging';
 
 /**
@@ -629,6 +630,37 @@ export async function probeAny(text: string) {
   throw codedError('unsupported', `手机端暂不支持这个平台（识别为 ${platform}）：目前支持抖音、B站、网易云、酷我、酷狗、QQ 音乐`);
 }
 
+/**
+ * 专辑曲目（端上补齐）：先列一批（默认 20），按 `nextOffset` 翻下一批。
+ *
+ * 三个刻意的选择：
+ * 1. 平台识别仍走 `platformOf`，界面只给一段文本——否则会出现「界面认成网易云、
+ *    引擎认成 QQ」的漂移（与 probeAny 同一条理由）；
+ * 2. 单批上限与截断口径直接用桌面端 `core/album.ts` 的 `planAlbum`，
+ *    端上不再写一份 `20`，否则两边首批曲目数迟早不一致；
+ * 3. 返回形状与桌面 `POST /api/album` 完全一致，`web/vue/app.js` 的
+ *    「加载下一批」原样可用（它的 `offset` 取自上一批的 `nextOffset`）。
+ */
+export async function albumAny(text: string, offset = 0) {
+  const target = firstUrl(text) || (text || '').trim();
+  const platform = platformOf(target);
+  if (platform !== 'netease' && platform !== 'qq') {
+    throw codedError('unsupported', `专辑只支持 网易云 / QQ 音乐（识别为 ${platform}）`);
+  }
+  const info = platform === 'netease'
+    ? await neteaseAlbumTracks(target)
+    : await qqAlbumTracks(target);
+  const plan = planAlbum(info.tracks, offset);
+  return {
+    album: { id: info.id, title: info.title, cover: info.cover, total: info.tracks.length },
+    tracks: plan.take,
+    dropped: plan.dropped,
+    offset: plan.offset,
+    hasMore: plan.hasMore,
+    nextOffset: plan.nextOffset,
+  };
+}
+
 /** 下载也按平台分发；各引擎的返回形状一致，界面不需要知道差异。 */
 export async function downloadAny(
   text: string,
@@ -738,6 +770,22 @@ export async function authLogout(site: string) {
   return call<{ cleared: number }>('auth.logout', { site });
 }
 
+/**
+ * 打开已下载的成品（B3）。
+ *
+ * 手机上没有桌面那种「在文件夹中显示」，所以语义是「用系统默认应用打开这个文件」；
+ * 页面拿不到 /sdcard，路径→content:// 的换算全在原生（`bridge/Open.kt`）。
+ */
+export async function revealFile(path: string) {
+  return call<{ opened?: boolean; uri?: string; mime?: string }>(
+    'ui.reveal', { path }, { timeoutMs: 15_000 });
+}
+
+/** 成品预览地址（content://）：界面直接塞进 `<video src>`，不经过本地 HTTP 服务。 */
+export async function previewFile(path: string) {
+  return call<{ url?: string; mime?: string }>('ui.preview', { path }, { timeoutMs: 15_000 });
+}
+
 /** 取消正在进行的下载；`.part` 会保留，下次同一个文件名就是续传。 */
 export async function cancelTransfer(jobId: string): Promise<boolean> {
   return cancelTransferById(jobId);
@@ -812,6 +860,7 @@ const api = {
   downloadShare,
   probeAny,
   downloadAny,
+  albumAny,
   probeNetease,
   downloadNetease,
   probeBilibili,
@@ -825,6 +874,8 @@ const api = {
   tagProbe,
   tagFileProbe,
   notifyDone,
+  revealFile,
+  previewFile,
   authStatus,
   authLogin,
   authLogout,

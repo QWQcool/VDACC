@@ -131,6 +131,59 @@ if (cmd === 'auth') {
     }
   }
 
+  // A1 分析：本地视频 → 分镜 + 帧 + 台词 + 客观指标（不接任何模型）
+  if (cmd === 'analyze') {
+    const input = positional[0];
+    if (!input) {
+      console.error('用法: bun src/cli.ts analyze <本地视频> [--json] [--scenes-only]'
+        + ' [--max-frames N] [--threshold N] [-o 输出目录]');
+      process.exit(2);
+    }
+    const { analyzeFile } = await import('./analyze');
+    try {
+      const result = await analyzeFile(input, {
+        outDir: flag('-o') || undefined,
+        maxFrames: flag('--max-frames') ? Number(flag('--max-frames')) : undefined,
+        threshold: flag('--threshold') ? Number(flag('--threshold')) : undefined,
+        scenesOnly: has('--scenes-only'),
+      });
+      if (has('--json')) {
+        console.log(JSON.stringify(result, null, 2));
+        process.exit(0);
+      }
+      const m = result.metrics;
+      console.log(result.source.path);
+      console.log(`  ${m.width}×${m.height} ${m.fps}fps ${m.vcodec}/${m.acodec || '无音轨'} `
+        + `${(m.duration_ms / 1000).toFixed(1)}s ${(m.bytes / 1048576).toFixed(2)} MB`);
+      console.log(`  分镜 ${result.scenes.length} 段，帧 ${result.frames.length} 张 → ${result.outDir}`);
+      console.log(`  台词：${result.transcript.source === 'none'
+        ? '无同名字幕（未做语音识别）'
+        : `${result.transcript.cues} 条（${result.transcript.source}）`}`);
+      for (const scene of result.scenes.slice(0, 20)) {
+        const span = `${(scene.start_ms / 1000).toFixed(1)}–${(scene.end_ms / 1000).toFixed(1)}s`;
+        const luma = scene.luma === null ? '' : ` 亮度 ${scene.luma}`;
+        const text = scene.text ? ` 「${scene.text.slice(0, 40)}」` : '';
+        console.log(`   ${String(scene.index).padStart(2)} ${span.padStart(15)}${luma}${text}`);
+      }
+      if (result.scenes.length > 20) {
+        console.log(`   …另有 ${result.scenes.length - 20} 段，见 result.json`);
+      }
+      for (const warning of result.warnings) console.error(`提示：${warning}`);
+      process.exit(0);
+    } catch (err) {
+      const e = err as VdlError;
+      if (has('--json')) {
+        console.log(JSON.stringify({
+          schema: 1, ok: false,
+          error: { code: e.code || 'error', message: e.message || String(err) },
+        }, null, 2));
+      } else {
+        console.error(e.message || String(err));
+      }
+      process.exit(1);
+    }
+  }
+
   const url = positional[0];
   if (!url || !['probe', 'get'].includes(cmd)) {
     console.error('用法: bun src/cli.ts probe|get <url> [--format id] [-o dir] [--limit 2M] [--json]'

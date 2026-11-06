@@ -545,6 +545,19 @@ const server = Bun.serve({
       }
     }
 
+    // 成品预览地址：界面不再自己拼 URL（手机壳里会拼成 `file:///api/preview…`，必然播不出来）。
+    // 桌面回一个带 token 的本地地址，端上由 `.local-api.js` 回 `content://`，两边同一个入口。
+    if (path === '/api/preview-url' && req.method === 'POST') {
+      const body = (await req.json().catch(() => null)) || {};
+      const raw = String(body.path || '');
+      const target = jailedPath(OUT, raw);
+      if (!target) {
+        return json({ ok: false, error: { code: 'bad_input', message: '路径不在输出目录内' } }, 400);
+      }
+      const q = new URLSearchParams({ token: TOKEN, path: raw });
+      return json({ ok: true, url: `/api/preview?${q}` });
+    }
+
     if (path === '/api/preview' && req.method === 'POST') {
       const body = (await req.json().catch(() => null)) || {};
       const target = String(body.url || '').trim();
