@@ -68,8 +68,15 @@ async function getUifid(jar: CookieJar): Promise<string> {
     const value = jar.get(name);
     if (value) return value;
   }
+  // 取 x-tt-trace-host 时**不要带 cookie**。
+  // 实测 2026-11-08：带 ttwid 请求首页拿到的值与不带 cookie 拿到的值不同
+  //（前 32 字符相同、后面分叉）。用不带 cookie 的那个值构造签名，在未被限流的窗口内
+  // 能稳定拿到详情（73563 字节）。带 cookie 的版本未能单独对照验证，因为验证期间
+  // 触发了按 IP 的限流——而限流的表现同样是 HTTP 200 + 空 body，与签名错误无法区分。
+  // 所以这里采取更保守的取法；若将来又出现空 body，先用 VDL_DOUYIN_DEBUG=1 看参数，
+  // 再确认是不是限流（等 10–30 分钟同一请求能否恢复）。
   const res = await request(HOST + '/', {
-    jar, headers: { Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' },
+    headers: { Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' },
   });
   const value = res.headers.get('x-tt-trace-host') || '';
   if (!value) throw new VdlError('no_uifid', '拿不到 uifid（cookie 与 x-tt-trace-host 都为空）');
@@ -77,8 +84,9 @@ async function getUifid(jar: CookieJar): Promise<string> {
 }
 
 const DETAIL_ATTEMPTS = 3;
-/** 被风控挡是概率性的，短间隔换一套身份重试往往就过；退避避免连续撞同一策略。 */
-const DETAIL_BACKOFF_MS = [300, 900];
+/** 被风控挡是概率性的，短间隔换一套身份重试往往就过；退避避免连续撞同一策略。
+ *  2026-11-08：识别到限流时重试反而加剧，退避从 300/900ms 放宽到 1s/3s。 */
+const DETAIL_BACKOFF_MS = [1000, 3000];
 
 /**
  * 抖音 Argus 风控会概率性拦截详情请求，有两种表现（2026-10-26 实测）：
@@ -115,15 +123,24 @@ async function fetchDetail(jar: CookieJar, vid: string): Promise<{ status: numbe
     const res = await request(url, {
       jar, headers: { Accept: 'application/json, text/plain, */*', Referer: `${HOST}/video/${vid}` },
     });
+    if (process.env.VDL_DOUYIN_DEBUG) {
+      console.error(`[douyin] url=${url}`);
+      console.error(`[douyin] cookie=${jar.header()}`);
+    }
     const text = await res.text();
     lastStatus = res.status;
     lastBytes = text.length;
+    if (process.env.VDL_DOUYIN_DEBUG) {
+      console.error(`[douyin] attempt ${attempt}: status=${res.status} bytes=${text.length} ` +
+        `ttwid=${jar.get('ttwid').length} uifid=${uifid.length} prefix=${uifid.slice(0, 40)} ` +
+        `cookies=${jar.header().split('; ').map(s => s.split('=')[0]).join(',')}`);
+    }
     if (!isBlockedResponse(res.status, text)) return { status: res.status, text };
   }
   throw new VdlError(
     'blocked',
-    `抖音详情接口连续 ${DETAIL_ATTEMPTS} 次被风控拦截（最后一次 HTTP ${lastStatus}，body ${lastBytes} 字节）`,
-    '稍后重试；若持续失败，换网络或关掉代理再试，也可用浏览器兜底（legacy/python/dy_dl.py --engine browser）',
+    `抖音详情接口连续 ${DETAIL_ATTEMPTS} 次返回空响应或被拦截（最后 HTTP ${lastStatus}，body ${lastBytes} 字节）`,
+    '若刚连续下载过多个视频，多半是频率限制，等 10–30 分钟再试；若持续失败，改用浏览器兜底（legacy/python/dy_dl.py --engine browser）',
   );
 }
 
