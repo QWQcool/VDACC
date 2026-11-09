@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
-  aggregateProgress, chooseFormat, countDanmaku, parseContentRangeTotal, srtTime, toSrt,
+  aggregateProgress, chooseFormat, countDanmaku, parseContentRangeTotal, pickSubtitle,
+  srtTime, subtitleFits, toSrt,
 } from '../src/engines/bilibili_api';
 
 describe('选档：缺档位不静默换档', () => {
@@ -89,5 +90,48 @@ describe('B站 进度折算', () => {
     }
     expect(pcts[pcts.length - 1]).toBe(1);
     expect(pcts.filter((p) => p >= 0.999).length).toBe(1);
+  });
+});
+
+describe('字幕：选轨与「是不是这个视频的字幕」', () => {
+  test('人工中文优先于 AI（就是这一条害得用户拿到 AI 版）', () => {
+    const list = [
+      { lan: 'ai-zh', name: '中文' },
+      { lan: 'zh-CN', name: '中文（简体）' },
+      { lan: 'en-US', name: 'English' },
+    ];
+    expect(pickSubtitle(list)!.lan).toBe('zh-CN');
+  });
+
+  test('没有人工中文时用任意人工轨，再退 ai-zh，最后才退第一条', () => {
+    expect(pickSubtitle([{ lan: 'ai-zh' }, { lan: 'ja' }])!.lan).toBe('ja');
+    expect(pickSubtitle([{ lan: 'ai-en' }, { lan: 'ai-zh' }])!.lan).toBe('ai-zh');
+    expect(pickSubtitle([{ lan: 'ai-en' }, { lan: 'ai-ja' }])!.lan).toBe('ai-en');
+    expect(pickSubtitle([])).toBeUndefined();
+  });
+
+  test('时间轴对得上才放行', () => {
+    const body = [{ from: 0, to: 184 }, { from: 185, to: 187.5 }];
+    expect(subtitleFits(body, 188_000).ok).toBe(true);
+  });
+
+  test('拿别的稿件的字幕：跨度远超片长 → 拒绝并给出数字', () => {
+    // 实测事故：207s 的 MV 拿到跨度 1606s 的字幕
+    const body = [{ from: 0, to: 1606 }];
+    const verdict = subtitleFits(body, 207_000);
+    expect(verdict.ok).toBe(false);
+    expect(verdict.reason).toContain('1606');
+    expect(verdict.reason).toContain('207');
+  });
+
+  test('只覆盖前半段 → 视为不完整', () => {
+    const verdict = subtitleFits([{ from: 0, to: 20 }], 200_000);
+    expect(verdict.ok).toBe(false);
+    expect(verdict.reason).toContain('不完整');
+  });
+
+  test('空正文拒绝；片长未知时不拦（只有平台自己说了算）', () => {
+    expect(subtitleFits([], 100_000).ok).toBe(false);
+    expect(subtitleFits([{ from: 0, to: 1 }], 0).ok).toBe(true);
   });
 });

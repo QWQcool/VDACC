@@ -292,7 +292,14 @@ if (cmd === 'auth') {
         if ('warnings' in out) for (const warning of out.warnings) console.error(`提示：${warning}`);
         if (has('--subs')) {
           const srt = (out as any).srt as string | null;
-          console.log(srt ? `字幕 ${srt}` : '字幕：该视频没有可用字幕（含 AI 字幕）');
+          const lang = (out as any).srtLang as string | null;
+          const reason = (out as any).srtReason as string | null;
+          if (srt) {
+            const kind = lang && /^ai-/i.test(lang) ? 'AI 自动生成' : '人工';
+            console.log(`字幕 ${srt}（${kind} · ${lang || '未知轨'} · ${(out as any).srtCount || 0} 行）`);
+          } else {
+            console.log(`字幕：没有可用字幕${reason ? `（${reason}）` : ''}`);
+          }
         }
         if (has('--danmaku')) {
           const dm = out as any;

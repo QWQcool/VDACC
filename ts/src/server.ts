@@ -478,6 +478,8 @@ const server = Bun.serve({
         scheduleSave();
         return json({
           ok: true, job, srt: out.srt, srtCount: out.srtCount,
+          // 轨与失败原因都要回：字幕拿不到时界面要能说清是「平台没有」还是「给的是别人的，已丢弃」
+          srtLang: out.srtLang || null, srtReason: out.srtReason || null,
           danmaku: out.danmaku, danmakuCount: out.danmakuCount,
           danmakuSupported: out.danmakuSupported,
         });

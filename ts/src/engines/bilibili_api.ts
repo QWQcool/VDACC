@@ -4,6 +4,7 @@ import type { DownloadOptions } from '../core/types';
 import { releaseDest, reserveDest } from '../core/dest';
 import { runFfmpeg } from '../core/ffmpeg';
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { open } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -21,8 +22,16 @@ const BUCKETS: Array<[number, string]> = [
 ];
 
 const urlCache = operationState(() => new Map<string, { video: string; audio: string }>());
-/** 字幕接口要 bvid+cid（普通视频）或 ep_id（番剧）；探测时顺手记下，下载带 --subs 时才请求。 */
-const subtitleState = operationState(() => ({ value: null as { bvid?: string; cid?: number; epId?: string } | null }));
+/**
+ * 字幕接口要 aid+cid（普通视频）或 ep_id（番剧）；探测时顺手记下，下载带 --subs 时才请求。
+ *
+ * `durationMs` 是**校验用的**：B站 的 `/x/player/v2` 会概率性返回**别的稿件**的字幕
+ * （2026-11-09 实测：207s 的 MV 连续三次拿到跨度 746s / 1606s / 1337s、内容完全不同且与 MV 无关的字幕），
+ * 直接写进 `.srt` 就是用户看到的「字幕全是错的」。拿到正文后必须核对时间轴跨度。
+ */
+const subtitleState = operationState(() => ({
+  value: null as { bvid?: string; cid?: number; aid?: number; epId?: string; durationMs?: number } | null,
+}));
 
 /** 供下载前预览：只取视频轨（浏览器预览不需要音轨）。 */
 export function previewBilibili(formatId: string): string {
@@ -285,7 +294,9 @@ async function probeVideo(target: Target): Promise<ProbeResult> {
   const formats = foldDash(play.dash, durationMs);
   if (!formats.length) throw new VdlError('no_stream', '没有视频轨');
   const warnings = dashWarnings(play.dash);
-  subtitleState().value = { bvid, cid: Number(current.cid) };
+  subtitleState().value = {
+    bvid, cid: Number(current.cid), aid: Number(view.aid || 0), durationMs,
+  };
 
   const parts: Part[] = pages.length > 1 ? pages.map((p) => ({
     index: Number(p.page || 0),
@@ -338,7 +349,7 @@ async function probeBangumi(target: Target): Promise<ProbeResult> {
   const formats = foldDash(ssr.length ? mergeDash(dash, ssr) : dash, durationMs);
   if (!formats.length) throw new VdlError('no_stream', '没有视频轨');
   const warnings = dashWarnings(dash);
-  subtitleState().value = { epId: String(ep.id) };
+  subtitleState().value = { epId: String(ep.id), durationMs };
 
   const parts: Part[] = episodes.map((e, i) => ({
     index: i + 1,
@@ -466,17 +477,69 @@ async function saveDanmaku(videoPath: string): Promise<{
 interface SubEntry { lan: string; name: string; url: string }
 
 /**
+ * wbi 签名（B站 web 播放器同款）：把 nav 里两张图的名字拼起来，按固定表打散取前 32 位当密钥，
+ * 再对「排序后的 query + 密钥」取 md5 作为 `w_rid`。
+ *
+ * 为什么必须签：`/x/player/v2`（未签名）对同一稿件会**概率性返回别的稿件的字幕**——
+ * 2026-11-09 实测 207s 的 MV 连续三次拿到跨度 746s/1606s/1337s 的无关字幕；
+ * 而签名的 `/x/player/wbi/v2` 与页面播放器一致，同一稿件重复请求结果稳定。
+ */
+const MIXIN_KEY_TAB = [
+  46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49,
+  33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13, 37, 48, 7, 16, 24, 55, 40, 61,
+  26, 17, 0, 1, 60, 51, 30, 4, 22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11, 36, 20, 34, 44, 52,
+];
+let wbiCache: { key: string; at: number } | null = null;
+
+async function wbiMixinKey(): Promise<string> {
+  if (wbiCache && Date.now() - wbiCache.at < 30 * 60_000) return wbiCache.key;
+  try {
+    const headers: Record<string, string> = { 'User-Agent': UA, Referer: 'https://www.bilibili.com/' };
+    const cookie = cookieHeader();
+    if (cookie) headers.Cookie = cookie;
+    const res = await fetch(`${API}/x/web-interface/nav`, { headers });
+    const nav = await res.json() as any;
+    const base = (u: string) => String(u).slice(String(u).lastIndexOf('/') + 1).split('.')[0];
+    const raw = base(nav?.data?.wbi_img?.img_url || '') + base(nav?.data?.wbi_img?.sub_url || '');
+    if (raw.length < 64) return '';
+    const key = MIXIN_KEY_TAB.map((i) => raw[i]).join('').slice(0, 32);
+    wbiCache = { key, at: Date.now() };
+    return key;
+  } catch {
+    // 拿不到密钥就退回未签名请求（配合下面的时长校验，宁可没有字幕也不写错的）
+    return '';
+  }
+}
+
+async function signedQuery(params: Record<string, string | number>): Promise<string> {
+  const all: Record<string, string> = {
+    ...Object.fromEntries(Object.entries(params).map(([k, v]) => [k, String(v)])),
+    wts: String(Math.floor(Date.now() / 1000)),
+  };
+  const query = Object.keys(all).sort()
+    .map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(all[k].replace(/[!'()*]/g, ''))}`)
+    .join('&');
+  const key = await wbiMixinKey();
+  if (!key) return query;
+  const wRid = createHash('md5').update(query + key).digest('hex');
+  return `${query}&w_rid=${wRid}`;
+}
+
+/**
  * 拉字幕列表（含 AI 字幕）。失败返回空数组——
  * 字幕是附属产物，不能因为它把已经下好的视频判成失败。
  */
 async function fetchSubtitleList(): Promise<SubEntry[]> {
   const subCtx = subtitleState().value;
   if (!subCtx) return [];
-  const query = subCtx.bvid ? `bvid=${subCtx.bvid}&cid=${subCtx.cid}` : `ep_id=${subCtx.epId}`;
-  // player/v2 偶发返回空（风控/抖动），空一次就重试一次，别把「暂时没拿到」当成「没有字幕」
+  const params: Record<string, string | number> = subCtx.aid
+    ? { aid: subCtx.aid, cid: subCtx.cid || 0 }
+    : { ep_id: subCtx.epId || '' };
+  // 空列表有两种可能：真的没有字幕，或风控抖动。抖一次就重试一次，别把「暂时没拿到」当成「没有字幕」
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      const data = await apiJson(`/x/player/v2?${query}`, 'https://www.bilibili.com/');
+      const query = await signedQuery(params);
+      const data = await apiJson(`/x/player/wbi/v2?${query}`, 'https://www.bilibili.com/');
       const list = (data?.subtitle?.subtitles || [])
         .map((s: any) => ({
           lan: String(s.lan || ''),
@@ -491,6 +554,42 @@ async function fetchSubtitleList(): Promise<SubEntry[]> {
     if (attempt === 0) await new Promise((r) => setTimeout(r, 400));
   }
   return [];
+}
+
+/**
+ * 选轨：**人工优先**，AI 只兜底。
+ *
+ * 以前是 `list.find(/^(ai-)?zh/)`，列表顺序里 ai-zh 常常排在前面，于是有人工中文字幕的稿件
+ * 也会被换成 AI 版（质量差一截）。顺序：人工中文 → 任意人工 → ai-zh → 第一条。
+ */
+export function pickSubtitle<T extends { lan: string }>(list: T[]): T | undefined {
+  const manual = list.filter((s) => !/^ai-/i.test(s.lan));
+  return manual.find((s) => /^zh/i.test(s.lan)) || manual[0]
+    || list.find((s) => /^ai-zh/i.test(s.lan)) || list[0];
+}
+
+/**
+ * 字幕正文与该视频是否对得上——这是「字幕全是错的」的兜底闸门。
+ *
+ * 判据只用时间轴：最后一行必须落在片长附近（容许 max(8s, 2%)），
+ * 且不能只覆盖前一半（>=60s 的片子，最后一行至少要到片长一半）。
+ * 对不上就丢弃并说清数字，绝不写一个看起来正常的错文件。
+ */
+export function subtitleFits(
+  body: Array<{ from: number; to: number; content?: string }>, durationMs: number,
+): { ok: boolean; reason?: string } {
+  if (!body.length) return { ok: false, reason: '字幕正文是空的' };
+  if (!durationMs || durationMs < 5000) return { ok: true };
+  const duration = durationMs / 1000;
+  const last = Math.max(...body.map((l) => Number(l.to) || 0));
+  const tolerance = Math.max(8, duration * 0.02);
+  if (last > duration + tolerance) {
+    return { ok: false, reason: `字幕时间轴到 ${last.toFixed(0)}s，而视频只有 ${duration.toFixed(0)}s` };
+  }
+  if (duration >= 60 && last < duration / 2) {
+    return { ok: false, reason: `字幕只覆盖到 ${last.toFixed(0)}s / ${duration.toFixed(0)}s，明显不完整` };
+  }
+  return { ok: true };
 }
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
@@ -509,24 +608,35 @@ export function toSrt(body: Array<{ from: number; to: number; content: string }>
     `${String(line.content || '').replace(/\r/g, '')}\n`).join('\n');
 }
 
-async function saveSubtitle(videoPath: string): Promise<{ srt: string | null; count: number }> {
+async function saveSubtitle(videoPath: string): Promise<{
+  srt: string | null; count: number; lang?: string; reason?: string;
+}> {
   const list = await fetchSubtitleList();
-  if (!list.length) return { srt: null, count: 0 };
-  const pick = list.find((s) => /^(ai-)?zh/i.test(s.lan)) || list[0];
+  if (!list.length) return { srt: null, count: 0, reason: '平台没有给出任何字幕轨' };
+  const pick = pickSubtitle(list);
+  if (!pick) return { srt: null, count: 0 };
   const url = pick.url.startsWith('//') ? `https:${pick.url}` : pick.url;
   try {
     const res = await fetch(url, { headers: { 'User-Agent': UA, Referer: 'https://www.bilibili.com/' } });
-    if (!res.ok) return { srt: null, count: 0 };
+    if (!res.ok) return { srt: null, count: 0, lang: pick.lan, reason: `字幕正文 HTTP ${res.status}` };
     const json = await res.json() as any;
-    const lines: Array<{ from: number; to: number; content: string }> = json?.body || [];
+    const lines: Array<{ from: number; to: number; content: string }> = (json?.body || [])
+      .filter((l: any) => l && Number.isFinite(Number(l.from)) && Number.isFinite(Number(l.to)))
+      .map((l: any) => ({ from: Number(l.from), to: Number(l.to), content: String(l.content ?? '') }))
+      .sort((a, b) => a.from - b.from);
+    // 闸门：内容再像也不能替代时间轴证据，对不上就丢弃（B站 会返回别的稿件的字幕）
+    const fits = subtitleFits(lines, Number(subtitleState().value?.durationMs || 0));
+    if (!fits.ok) {
+      return { srt: null, count: 0, lang: pick.lan, reason: `平台返回的字幕与本视频对不上：${fits.reason}` };
+    }
     const text = toSrt(lines);
-    if (!text.trim()) return { srt: null, count: 0 };
-    const target = videoPath.replace(/\.mp4$/i, '.srt');
+    if (!text.trim()) return { srt: null, count: 0, lang: pick.lan, reason: '字幕正文是空的' };
+    const target = videoPath.replace(/\.(mp4|mkv|flv|webm|mov|m4v|ts)$/i, '.srt');
     writeFileSync(target, text, 'utf8');
     // count 是字幕行数（跟弹幕条数同量纲），不是字幕轨数
-    return { srt: target, count: lines.length };
-  } catch {
-    return { srt: null, count: 0 };
+    return { srt: target, count: lines.length, lang: pick.lan };
+  } catch (err) {
+    return { srt: null, count: 0, lang: pick.lan, reason: (err as Error).message };
   }
 }
 
@@ -541,7 +651,7 @@ export async function refetchSidecars(
   const sub = opts.subs === false ? { srt: null, count: 0 } : await saveSubtitle(videoPath);
   const dm = opts.danmaku ? await saveDanmaku(videoPath) : null;
   return {
-    srt: sub.srt, srtCount: sub.count,
+    srt: sub.srt, srtCount: sub.count, srtLang: sub.lang || null, srtReason: sub.reason || null,
     danmaku: dm?.xml || null, danmakuCount: dm?.count || 0,
     danmakuSupported: dm ? dm.supported : null,
   };
@@ -588,12 +698,16 @@ async function getBilibiliApiImpl(
     const cover = opts.cover ? await saveCover(dest, probe.media!.thumbnail, probe.media!.source_url)
       : { cover: null, warnings: [] };
     const warnings = [...cover.warnings];
-    if (opts.subs && !sub.srt) warnings.push('没有可用字幕或字幕获取失败，主文件已保留');
+    // 字幕失败要说清原因：是「平台没有」还是「平台给的是别人的字幕，已丢弃」
+    if (opts.subs && !sub.srt) warnings.push(`没有可用字幕：${sub.reason || '未知原因'}（主文件已保留）`);
+    if (sub.srt && /^ai-/i.test(sub.lang || '')) {
+      warnings.push(`字幕来自平台 AI 自动生成（${sub.lang}），可能与音频不完全一致`);
+    }
     if (opts.danmaku && !dm?.xml) warnings.push(dm?.supported
       ? '没有可用弹幕或弹幕获取失败，主文件已保留' : '番剧弹幕暂不支持，主文件已保留');
     return {
       path: dest, bytes: statSync(dest).size, skipped, cover: cover.cover, warnings,
-      srt: sub.srt, srtCount: sub.count,
+      srt: sub.srt, srtCount: sub.count, srtLang: sub.lang || null, srtReason: sub.reason || null,
       danmaku: dm?.xml || null, danmakuCount: dm?.count || 0,
       danmakuSupported: dm ? dm.supported : null,
     };

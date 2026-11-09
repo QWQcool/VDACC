@@ -448,7 +448,12 @@ createApp({
       const data = await api(`/api/jobs/${job.id}/sidecar`, { method: 'POST' });
       if (data.ok) {
         upsert(data.job);
-        message.value = `${t('sidecarDone')}：${data.srtCount || 0} / ${data.danmakuCount || 0}`;
+        // 字幕拿不到时要说原因：是「平台没有」还是「平台给的是别的稿件的字幕，已丢弃」
+        const parts = [];
+        if (data.srt) parts.push(`${data.srtCount || 0} 行（${data.srtLang || '未知轨'}）`);
+        else if (data.srtReason) parts.push(`字幕未写入：${data.srtReason}`);
+        if (data.danmaku) parts.push(`弹幕 ${data.danmakuCount || 0} 条`);
+        message.value = `${t('sidecarDone')}：${parts.join(' · ') || '无变化'}`;
       } else {
         message.value = (data.error && data.error.message) || 'failed';
       }

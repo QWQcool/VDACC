@@ -67,7 +67,14 @@ function mockBili(onSubtitle: () => Promise<void> = async () => {}, subtitleFail
         baseUrl: 'https://media.invalid/video' }],
       audio: [{ bandwidth: 10, codecs: 'mp4a', baseUrl: 'https://media.invalid/audio' }],
     } });
-    if (url.pathname === '/x/player/v2') {
+    // 字幕列表改成走签名的 wbi/v2：先取 nav 里的两张图名拼密钥
+    if (url.pathname === '/x/web-interface/nav') {
+      return reply({ wbi_img: {
+        img_url: 'https://i0.hdslb.com/bfs/wbi/7cd084941338484aae1ad9425b84077c.png',
+        sub_url: 'https://i0.hdslb.com/bfs/wbi/4932caff0ff746eab6f01bf08b70ac45.png',
+      } });
+    }
+    if (url.pathname === '/x/player/wbi/v2' || url.pathname === '/x/player/v2') {
       await onSubtitle();
       return reply({ subtitle: { subtitles: [{ lan: 'zh', subtitle_url: 'https://media.invalid/sub' }] } });
     }
