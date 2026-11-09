@@ -195,6 +195,11 @@ export async function login(site: string, timeoutMs = 300000) {
     channel: 'msedge',
     headless: false,
     viewport: null,
+    // 登录页一律直连：B站/网易云/QQ 都是国内站点，直连 0.3s 量级；
+    // 而系统代理常常是给 GitHub 用的（可能指向一个已失效的端口，或绕到境外很慢），
+    // Edge 会照读系统代理，结果 page.goto 30s 超时，用户只看到一个 about:blank 的白窗。
+    // 2026-11-10 实测：系统代理指向 127.0.0.1:7892 时，登录窗口开出来就是空白页。
+    args: ['--no-proxy-server'],
   });
   try {
     const page = context.pages()[0] || await context.newPage();
