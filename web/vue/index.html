@@ -506,6 +506,21 @@
               : analysis.transcript.source.toUpperCase() + ' · ' + analysis.transcript.cues }}</span>
             <span v-if="analysis.frames.length"> · {{ t('seekHint') }}</span>
           </p>
+          <div class="an-actions" v-if="analysis.frames.length">
+            <button class="btn ghost sm" v-if="!descConfirm" :disabled="analysisBusy" @click="descConfirm = true">
+              {{ t('describeShots') }}
+            </button>
+            <template v-else>
+              <span class="an-cost">{{ t('describeCost') }} {{ analysis.frames.length }} × ~2.2k tokens</span>
+              <button class="btn ghost sm" :disabled="analysisBusy" @click="describeShots">{{ t('confirm') }}</button>
+              <button class="btn ghost sm" @click="descConfirm = false">{{ t('cancel') }}</button>
+            </template>
+            <span class="an-cost" v-if="analysis.describe">
+              {{ analysis.describe.shots }} 镜已描述<template v-if="analysis.describe.source === 'file'">（来自文件）</template>
+              <template v-if="analysis.describe.failed"> · {{ analysis.describe.failed }} 镜失败</template>
+              <template v-if="analysis.describe.tokens"> · {{ analysis.describe.tokens }} tokens</template>
+            </span>
+          </div>
           <div class="an-frames" v-if="analysis.frames.length">
             <figure v-for="f in analysis.frames" :key="f.path">
               <img v-if="f.url" :src="f.url" :alt="t('framesUnit') + ' ' + f.scene" loading="lazy" @click="seekToFrame(f)" />
@@ -520,6 +535,15 @@
               </button>
               <span class="an-luma" v-if="s.luma !== null">{{ t('lumaLabel') }} {{ s.luma }}</span>
               <span class="an-text" v-if="s.text">{{ s.text }}</span>
+              <span class="an-visual" v-if="s.visual">
+                <span class="an-v-tag">{{ s.visual.shotSize || '—' }}</span>
+                <span>{{ s.visual.subject }}</span>
+                <span v-if="s.visual.action"> · {{ s.visual.action }}</span>
+                <span v-if="s.visual.setting"> · {{ s.visual.setting }}</span>
+                <span v-if="s.visual.lighting"> · {{ s.visual.lighting }}</span>
+                <span v-if="s.visual.composition"> · {{ s.visual.composition }}</span>
+                <span v-if="s.visual.onScreenText" class="an-v-text">「{{ s.visual.onScreenText }}」</span>
+              </span>
             </li>
           </ol>
           <p class="an-warn" v-if="(analysis.warnings || []).length">{{ analysis.warnings.join('；') }}</p>

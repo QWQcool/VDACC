@@ -7,7 +7,7 @@ import { buildScenes, MIN_SCENE_MS, parseScdet } from '../src/analyze/scenes';
 import { frameBudget, LONG_FRAMES, lumaOfGray, planFrames, SHORT_FRAMES } from '../src/analyze/frames';
 import { cuesForScenes, loadTranscript, parseLrc, parseSrt } from '../src/analyze/transcript';
 import { summarizeFfprobe } from '../src/analyze/metrics';
-import { analyzeFile } from '../src/analyze';
+import { analyzeFile, readVisualsFile } from '../src/analyze';
 import { buildDescribePrompt, parseShotDescription } from '../src/analyze/describe';
 import { ffmpegBin } from '../src/core/ffmpeg';
 
@@ -220,6 +220,43 @@ describe('A2 逐镜描述：解析与提示词约束（不联网）', () => {
   test('截断（只有开括号）与完全不返回 JSON 分开报', () => {
     expect(() => parseShotDescription('{"shotSize": "全景", "')).toThrow(/截断/);
     expect(() => parseShotDescription('抱歉我不能描述这张图')).toThrow(/没有返回 JSON/);
+  });
+});
+
+describe('外部描述文件（Agent/人工写好的语义描述）', () => {
+  const write = (body: unknown): string => {
+    const dir = mkdtempSync(join(tmpdir(), 'vdacc-visuals-'));
+    const file = join(dir, 'visuals.json');
+    writeFileSync(file, JSON.stringify(body), 'utf8');
+    return file;
+  };
+
+  test('镜号键 / 数组 / scenes 包装三种形状都认', () => {
+    const viaKeys = readVisualsFile(write({ 1: { shotSize: '中景', subject: '两个人' } }));
+    expect(viaKeys.get(1)!.shotSize).toBe('中景');
+
+    const viaArray = readVisualsFile(write([{ index: 2, subject: '猫' }]));
+    expect(viaArray.get(2)!.subject).toBe('猫');
+
+    const viaScenes = readVisualsFile(write({ scenes: [{ index: 3, visual: { subject: '舞台' } }] }));
+    expect(viaScenes.get(3)!.subject).toBe('舞台');
+  });
+
+  test('未知字段被丢掉，全空的记录不当作「描述过」', () => {
+    const map = readVisualsFile(write({
+      1: { subject: '两个人', camera: '推镜头', confidence: 0.9 },
+      2: { shotSize: '', subject: '   ' },
+    }));
+    expect(map.get(1)).toEqual({
+      shotSize: '', subject: '两个人', action: '', setting: '', lighting: '', composition: '', onScreenText: '',
+    });
+    expect(map.has(2)).toBe(false);
+  });
+
+  test('镜号非法或文件坏了都如实报错，不静默', () => {
+    const map = readVisualsFile(write({ '0': { subject: 'x' }, abc: { subject: 'y' } }));
+    expect(map.size).toBe(0);
+    expect(() => readVisualsFile(join(tmpdir(), 'definitely-missing-visuals.json'))).toThrow();
   });
 });
 

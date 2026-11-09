@@ -9,7 +9,7 @@
  *   result.json        本轮全部结果（契约见下）
  *   frame-001.jpg…     抽出来的帧（给人看，也给将来的 VLM 用）
  */
-import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 
 import { VdlError } from '../core/errors';
@@ -18,7 +18,7 @@ import { buildScenes, parseScdet, type Scene } from './scenes';
 import { lumaOfGray, planFrames } from './frames';
 import { cuesForScenes, loadTranscript, type Transcript } from './transcript';
 import { summarizeFfprobe, type VideoMetrics } from './metrics';
-import { describeShot, type ShotVisual } from './describe';
+import { describeShot, EMPTY_VISUAL, VISUAL_FIELDS, type ShotVisual } from './describe';
 import { apiKey, VlmError } from './vlm';
 
 export interface AnalyzeOptions {
@@ -34,6 +34,12 @@ export interface AnalyzeOptions {
   describe?: boolean;
   /** 只描述前 N 镜（试跑/省钱用） */
   maxDescribe?: number;
+  /**
+   * 外部提供的语义描述（JSON 文件）。格式三选一：
+   *   `{ "1": {shotSize…}, "2": … }` / `[{ "index": 1, … }]` / `{ "scenes": [{ "index": 1, "visual": {…} }] }`
+   * 用途：让 Agent（或人）逐帧看完再写进来，不花 API 额度，也不破坏 `result.json` 的契约。
+   */
+  visuals?: string;
 }
 
 export interface AnalyzedScene extends Scene {
@@ -44,13 +50,15 @@ export interface AnalyzedScene extends Scene {
 }
 
 export interface DescribeInfo {
-  /** 实际使用的模型 id；没跑为 null */
+  /** 实际使用的模型 id；没跑（或描述来自文件）为 null */
   model: string | null;
   /** 成功描述的镜头数 */
   shots: number;
   /** 失败镜头数（逐条原因进 warnings） */
   failed: number;
   tokens: number;
+  /** 描述来源：model=调用视觉模型，file=外部 JSON（Agent/人工），mixed=两者都有 */
+  source?: 'model' | 'file' | 'mixed';
   /** 整体没跑起来的原因（没有 key / 模型不认图…） */
   reason?: string;
 }
@@ -84,6 +92,54 @@ async function shot(video: string, tMs: number, jpg: string): Promise<Buffer> {
   if (res.code === -2) throw new VdlError('ffmpeg_missing', '找不到 ffmpeg，无法抽帧');
   // 灰度取不到就返回空 Buffer（亮度留 null），但不能因为「算不出亮度」让整次分析失败
   return res.code === 0 ? res.stdout : Buffer.alloc(0);
+}
+
+/**
+ * 外部描述文件 → 每镜 visual。
+ *
+ * 为什么要有这条路：逐帧看画面的工作不一定要花 API 额度——Agent 自己能读图，
+ * 人也能填。但结果必须落回**同一个契约**（`scenes[].visual`），否则界面与下游
+ * 又要多一套读取逻辑。三种常见形状都吃，字段按 `VISUAL_FIELDS` 收窄，
+ * 认不出的键不会混进结果。
+ */
+export function readVisualsFile(file: string): Map<number, ShotVisual> {
+  let json: any;
+  try {
+    json = JSON.parse(readFileSync(file, 'utf8'));
+  } catch (err) {
+    throw new VdlError('bad_input', `读不了描述文件 ${file}：${(err as Error).message}`);
+  }
+
+  const normalize = (raw: any): ShotVisual | null => {
+    if (!raw || typeof raw !== 'object') return null;
+    const out = { ...EMPTY_VISUAL };
+    let filled = false;
+    for (const key of VISUAL_FIELDS) {
+      const value = raw[key];
+      if (typeof value === 'string' && value.trim()) {
+        out[key] = value.trim();
+        filled = true;
+      }
+    }
+    return filled ? out : null;
+  };
+
+  const map = new Map<number, ShotVisual>();
+  const put = (index: any, value: any) => {
+    const at = Number(index);
+    if (!Number.isInteger(at) || at <= 0) return;
+    const visual = normalize(value && typeof value === 'object' && 'visual' in value ? value.visual : value);
+    if (visual) map.set(at, visual);
+  };
+
+  if (Array.isArray(json)) {
+    for (const item of json) put(item?.index, item);
+  } else if (Array.isArray(json?.scenes)) {
+    for (const item of json.scenes) put(item?.index, item?.visual);
+  } else if (json && typeof json === 'object') {
+    for (const [key, value] of Object.entries(json)) put(key, value);
+  }
+  return map;
 }
 
 /**
@@ -139,7 +195,10 @@ async function describeFrames(
   }
 
   if (failed) warnings.push(`${failed}/${targets.length} 镜没描述成功：${errors.join('；')}`);
-  return { model, shots, failed, tokens, ...(shots === 0 ? { reason: 'all_failed' } : {}) };
+  return {
+    model, shots, failed, tokens, source: 'model',
+    ...(shots === 0 ? { reason: 'all_failed' } : {}),
+  };
 }
 
 export async function analyzeFile(file: string, options: AnalyzeOptions = {}): Promise<AnalysisResult> {
@@ -218,10 +277,53 @@ export async function analyzeFile(file: string, options: AnalyzeOptions = {}): P
     text: texts.find((t) => t.index === s.index)?.text || '',
   }));
 
-  // 5) A2 语义描述（可选、花额度）：逐帧问视觉模型，失败只算「这一镜没描述」
-  const describeInfo: DescribeInfo | undefined = options.describe
+  // 5) A2 语义描述：要么逐帧问视觉模型（花额度），要么读外部描述文件（Agent/人工）
+  let describeInfo: DescribeInfo | undefined = options.describe
     ? await describeFrames(frames, analyzedScenes, warnings, options.maxDescribe)
     : undefined;
+
+  /*
+   * 描述文件的两条来源：
+   * - `--visuals` 显式指定（Agent/人工写好的）；
+   * - 没指定、也没要求调模型时，读上一次留下的 `<outDir>/visuals.json`。
+   *   没有这一条，界面里点一次「分析」就会把之前合并好的描述冲掉（重新分析=重写 result.json）。
+   */
+  const snapshot = join(outDir, 'visuals.json');
+  const visualsPath = options.visuals
+    || (!options.describe && existsSync(snapshot) ? snapshot : '');
+
+  if (visualsPath) {
+    const fromFile = readVisualsFile(visualsPath);
+    let applied = 0;
+    for (const scene of analyzedScenes) {
+      const visual = fromFile.get(scene.index);
+      if (!visual) continue;
+      scene.visual = visual;
+      applied += 1;
+    }
+    if (!applied) {
+      warnings.push(`描述文件里没有能对上分镜的记录：${visualsPath}`);
+    } else {
+      const unknown = [...fromFile.keys()].filter((i) => !analyzedScenes.some((s) => s.index === i));
+      if (unknown.length) warnings.push(`描述文件里有 ${unknown.length} 个镜号不在本次分镜里（已忽略）`);
+      if (applied < analyzedScenes.length) {
+        warnings.push(`描述文件覆盖 ${applied}/${analyzedScenes.length} 镜，其余没有语义描述`);
+      }
+      const fromModel = describeInfo?.shots || 0;
+      describeInfo = {
+        model: describeInfo?.model || null,
+        shots: 0, // 下面按最终画面数重算
+        failed: describeInfo?.failed || 0,
+        tokens: describeInfo?.tokens || 0,
+        source: fromModel ? 'mixed' : 'file',
+      };
+      // 留一份快照：下次在界面里点「分析」是重新跑一遍，没有它描述会被冲掉
+      const dump: Record<string, ShotVisual> = {};
+      for (const scene of analyzedScenes) if (scene.visual) dump[String(scene.index)] = scene.visual;
+      writeFileSync(snapshot, `${JSON.stringify(dump, null, 2)}\n`, 'utf8');
+    }
+  }
+  if (describeInfo) describeInfo.shots = analyzedScenes.filter((s) => s.visual).length;
 
   const result: AnalysisResult = {
     schema: 1,

@@ -488,21 +488,22 @@ createApp({
     function analyzable(job) {
       return canAnalyze.value && !!job.path && VIDEO_EXT.test(job.path);
     }
+    const descConfirm = ref(false);
     const analysisName = computed(() => {
       const path = (analysis.value && analysis.value.source && analysis.value.source.path) || '';
       return path.split(/[\\/]/).pop() || path;
     });
 
-    async function analyzeJob(job) {
-      if (!job.path || analysisBusy.value) return;
+    async function runAnalyze(path, extra = {}) {
       analysisBusy.value = true;
       const data = await api('/api/analyze', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { path: job.path },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: { path, ...extra },
       });
       analysisBusy.value = false;
       if (!data.ok) {
         message.value = (data.error && data.error.message) || t('analyzeFailed');
-        return;
+        return null;
       }
       // 帧的显示地址同样问 API：桌面回 /api/preview?token=…，手机回 content://
       // （自己拼相对路径在手机壳里会变成 file:///api/preview…，图全裂）
@@ -512,9 +513,28 @@ createApp({
         });
         return { ...frame, url: resolved.ok ? resolved.url : '' };
       }));
-      analysis.value = { ...data, frames };
+      return { ...data, frames };
     }
-    function closeAnalysis() { analysis.value = null; }
+
+    async function analyzeJob(job) {
+      if (!job.path || analysisBusy.value) return;
+      const result = await runAnalyze(job.path);
+      if (result) analysis.value = result;
+    }
+
+    /** A2：逐帧语义描述。要花 API 额度，所以先让用户确认一遍（面板里内联确认，不用原生弹窗）。 */
+    async function describeShots() {
+      const current = analysis.value;
+      if (!current || analysisBusy.value) return;
+      const result = await runAnalyze(current.source.path, {
+        describe: true, maxDescribe: current.frames.length,
+      });
+      if (result) {
+        analysis.value = result;
+        descConfirm.value = false;
+      }
+    }
+    function closeAnalysis() { analysis.value = null; descConfirm.value = false; }
 
     /** 从分析面板跳到成品的某一刻：复用预览浮层，不用再开一个播放器。 */
     async function seekTo(tMs) {
@@ -614,6 +634,7 @@ createApp({
       toggleLang, toggleTheme, toggleFormat, persistSidecars, probe, probePart, download, cancel, retry,
       openSettings, saveSettings, installComponent, previewSelected, previewJob, closePreview,
       analysis, analysisBusy, analysisName, analyzable, analyzeJob, closeAnalysis,
+      descConfirm, describeShots,
       seekToFrame, seekToScene, applySeek, videoEl,
     };
   },

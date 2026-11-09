@@ -516,9 +516,18 @@
 }
 .an-scenes { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
 .an-scenes li {
-  display: flex; align-items: baseline; gap: 10px;
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
   padding: 5px 6px; border-radius: 8px; font-size: 12px;
 }
+.an-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 10px; }
+.an-cost { font-size: 11px; color: var(--text-light); }
+/* 语义描述独占一行、缩进对齐镜号，避免把时间轴挤散 */
+.an-visual { flex-basis: 100%; padding-left: 3.2em; color: var(--text); }
+.an-v-tag {
+  padding: 0 6px; margin-right: 4px; border-radius: 999px;
+  background: var(--hover, rgba(127, 127, 127, .12)); font-size: 11px;
+}
+.an-v-text { color: var(--text-light); }
 .an-scenes li:hover { background: var(--hover, rgba(127, 127, 127, .08)); }
 .an-jump {
   display: flex; align-items: baseline; gap: 8px; background: none; border: 0; padding: 0;

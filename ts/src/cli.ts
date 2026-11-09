@@ -136,7 +136,8 @@ if (cmd === 'auth') {
     const input = positional[0];
     if (!input) {
       console.error('用法: bun src/cli.ts analyze <本地视频> [--json] [--scenes-only]'
-        + ' [--max-frames N] [--threshold N] [--describe [--max-describe N]] [-o 输出目录]');
+        + ' [--max-frames N] [--threshold N] [--describe [--max-describe N]]'
+        + ' [--visuals 描述.json] [-o 输出目录]');
       process.exit(2);
     }
     const { analyzeFile } = await import('./analyze');
@@ -148,6 +149,7 @@ if (cmd === 'auth') {
         scenesOnly: has('--scenes-only'),
         describe: has('--describe'),
         maxDescribe: flag('--max-describe') ? Number(flag('--max-describe')) : undefined,
+        visuals: flag('--visuals') || undefined,
       });
       if (has('--json')) {
         console.log(JSON.stringify(result, null, 2));
@@ -163,7 +165,9 @@ if (cmd === 'auth') {
         : `${result.transcript.cues} 条（${result.transcript.source}）`}`);
       if (result.describe) {
         const d = result.describe;
-        console.log(`  语义描述：${d.shots} 镜${d.failed ? `（${d.failed} 镜失败）` : ''}`
+        const source = d.source === 'file' ? '（来自描述文件）'
+          : d.source === 'mixed' ? '（模型 + 文件）' : '';
+        console.log(`  语义描述：${d.shots} 镜${source}${d.failed ? `（${d.failed} 镜失败）` : ''}`
           + `${d.model ? ` · ${d.model}` : ''}${d.tokens ? ` · ${d.tokens} tokens` : ''}`
           + `${d.reason ? ` · 未完成：${d.reason}` : ''}`);
       }
