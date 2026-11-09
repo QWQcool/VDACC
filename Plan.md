@@ -319,8 +319,21 @@ parity 稳定后再决定 Python 是否退化为 yt-dlp helper。
   AI 轨额外提示「可能与音频不完全一致」。实测：`BV1UB4v67Exr` 62 行（跨度 184s/片长 188s）；
   `BV1j5nj68E48`（K/DA MV）从未签名的「600 行别人的字幕」变成「没有可用字幕」。
 
+- **N13 · A2 逐镜语义描述（DeepSeek 视觉）**：✅ 2026-11-09。A0 第一项（VLM 连通性）实测通过：
+  账号可用模型两个，只有 `deepseek-flash` 支持图像输入（`input_modalities: text+image`）。
+  实现 `analyze --describe [--max-describe N]`：逐帧串行调模型，产出 7 字段
+  （景别/主体/动作/场景/光线/构图/画面文字），写进 `result.json` 的 `scenes[].visual` 与 `describe` 汇总
+  （model / shots / failed / tokens）。提示词要求只写看得见的、不确定留空、不推测剧情、忽略平台角标水印；
+  全字段留空按失败处理（不伪造内容）。默认关闭（花额度），API 侧 `POST /api/analyze {describe:true}` 同样可用。
+  **实测 3 镜**：3/3 成功、6792 tokens；字段与画面逐一核对一致，连画面左下角小徽章上的韩文
+  「남자 417」都读对了（不是编的，已对照原帧确认）。成本 ≈ 2.2k tokens/镜。
+  **踩坑**：该模型是推理模型，`max_tokens` 同时覆盖 reasoning 与答案——500 预算会被推理吃光
+  （`finish_reason=length`、content 空），半截 JSON 也会解析失败。现在固定 `reasoning_effort: low`、
+  默认 1200 预算，并在 `finish_reason=length` 时自动加倍重试一次（上限 4000）。
+  **未做**：UI 里还没有这个开关（CLI/API 先行）；A3 风格卡与 A4/A5 仍等 H3 通道。
+
 执行依赖：F01–F07 → N01/N02 → N03/N04；N05 可在稳定源码上独立推进；N06 依赖设备和稳定连接恢复。
-N08–N12 于 2026-11-06/09 收口，互不依赖。
+N08–N13 于 2026-11-06/09 收口，N13 依赖 DeepSeek 额度（无 key 时自动跳过，不影响其余结果）。
 
 **付费限制与 DRM 研究（2026-10-27 决策更新）**：取消此前对付费绕过和 DRM 的项目禁令，允许将付费限制、会员凭证及 DRM 相关机制纳入研究。该方向目前仅为研究意向，尚无经验证的实现或支持承诺；工作步骤、证据与未验证项见 [ReversePlan.md](ReversePlan.md)。DRM、普通加密、付费限制和版权权限分别判断，不可混为一谈。
 **QQ 第一批（工作包 1–2）已完成，仅离线验证**：数据流与已知/未知清单见
