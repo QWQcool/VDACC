@@ -8,6 +8,7 @@ import { frameBudget, LONG_FRAMES, lumaOfGray, planFrames, SHORT_FRAMES } from '
 import { cuesForScenes, loadTranscript, parseLrc, parseSrt } from '../src/analyze/transcript';
 import { summarizeFfprobe } from '../src/analyze/metrics';
 import { analyzeFile } from '../src/analyze';
+import { buildDescribePrompt, parseShotDescription } from '../src/analyze/describe';
 import { ffmpegBin } from '../src/core/ffmpeg';
 
 describe('分镜：scdet 解析', () => {
@@ -185,6 +186,40 @@ describe('指标：ffprobe 归一化', () => {
   test('没有视频轨返回 null', () => {
     expect(summarizeFfprobe({ format: { duration: '1' }, streams: [{ codec_type: 'audio' }] })).toBeNull();
     expect(summarizeFfprobe(null)).toBeNull();
+  });
+});
+
+describe('A2 逐镜描述：解析与提示词约束（不联网）', () => {
+  test('提示词要求只写看得见的、不确定留空、忽略平台水印', () => {
+    const prompt = buildDescribePrompt({ index: 3, startMs: 5200, endMs: 7000, subtitle: '你好' });
+    expect(prompt).toContain('5.2s–7.0s');
+    expect(prompt).toContain('你好');
+    expect(prompt).toContain('不确定就留空');
+    expect(prompt).toContain('bilibili');   // 明确要求忽略平台角标
+    expect(prompt).toContain('不要推测剧情');
+  });
+
+  test('吃掉 ```json 围栏与前后解释文字', () => {
+    const text = '好的，这是结果：\n```json\n{"shotSize":"中景","subject":"两个人"}\n```\n希望有帮助';
+    const visual = parseShotDescription(text);
+    expect(visual.shotSize).toBe('中景');
+    expect(visual.subject).toBe('两个人');
+    expect(visual.setting).toBe('');       // 缺失字段补空串，不是 undefined
+  });
+
+  test('非字符串字段归空，不把数字塞进描述', () => {
+    const visual = parseShotDescription('{"shotSize":3,"subject":"猫"}');
+    expect(visual.shotSize).toBe('');
+    expect(visual.subject).toBe('猫');
+  });
+
+  test('全字段留空视为失败：不能假装「这一镜什么都没有」', () => {
+    expect(() => parseShotDescription('{"shotSize":"","subject":""}')).toThrow();
+  });
+
+  test('截断（只有开括号）与完全不返回 JSON 分开报', () => {
+    expect(() => parseShotDescription('{"shotSize": "全景", "')).toThrow(/截断/);
+    expect(() => parseShotDescription('抱歉我不能描述这张图')).toThrow(/没有返回 JSON/);
   });
 });
 

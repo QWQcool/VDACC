@@ -136,7 +136,7 @@ if (cmd === 'auth') {
     const input = positional[0];
     if (!input) {
       console.error('用法: bun src/cli.ts analyze <本地视频> [--json] [--scenes-only]'
-        + ' [--max-frames N] [--threshold N] [-o 输出目录]');
+        + ' [--max-frames N] [--threshold N] [--describe [--max-describe N]] [-o 输出目录]');
       process.exit(2);
     }
     const { analyzeFile } = await import('./analyze');
@@ -146,6 +146,8 @@ if (cmd === 'auth') {
         maxFrames: flag('--max-frames') ? Number(flag('--max-frames')) : undefined,
         threshold: flag('--threshold') ? Number(flag('--threshold')) : undefined,
         scenesOnly: has('--scenes-only'),
+        describe: has('--describe'),
+        maxDescribe: flag('--max-describe') ? Number(flag('--max-describe')) : undefined,
       });
       if (has('--json')) {
         console.log(JSON.stringify(result, null, 2));
@@ -159,11 +161,22 @@ if (cmd === 'auth') {
       console.log(`  台词：${result.transcript.source === 'none'
         ? '无同名字幕（未做语音识别）'
         : `${result.transcript.cues} 条（${result.transcript.source}）`}`);
+      if (result.describe) {
+        const d = result.describe;
+        console.log(`  语义描述：${d.shots} 镜${d.failed ? `（${d.failed} 镜失败）` : ''}`
+          + `${d.model ? ` · ${d.model}` : ''}${d.tokens ? ` · ${d.tokens} tokens` : ''}`
+          + `${d.reason ? ` · 未完成：${d.reason}` : ''}`);
+      }
       for (const scene of result.scenes.slice(0, 20)) {
         const span = `${(scene.start_ms / 1000).toFixed(1)}–${(scene.end_ms / 1000).toFixed(1)}s`;
         const luma = scene.luma === null ? '' : ` 亮度 ${scene.luma}`;
         const text = scene.text ? ` 「${scene.text.slice(0, 40)}」` : '';
         console.log(`   ${String(scene.index).padStart(2)} ${span.padStart(15)}${luma}${text}`);
+        if (scene.visual) {
+          const v = scene.visual;
+          console.log(`      ${v.shotSize || '—'} · ${v.subject || '—'} · ${v.action || '—'}`
+            + `${v.lighting ? ` · ${v.lighting}` : ''}${v.composition ? ` · ${v.composition}` : ''}`);
+        }
       }
       if (result.scenes.length > 20) {
         console.log(`   …另有 ${result.scenes.length - 20} 段，见 result.json`);

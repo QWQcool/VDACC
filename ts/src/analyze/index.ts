@@ -18,6 +18,8 @@ import { buildScenes, parseScdet, type Scene } from './scenes';
 import { lumaOfGray, planFrames } from './frames';
 import { cuesForScenes, loadTranscript, type Transcript } from './transcript';
 import { summarizeFfprobe, type VideoMetrics } from './metrics';
+import { describeShot, type ShotVisual } from './describe';
+import { apiKey, VlmError } from './vlm';
 
 export interface AnalyzeOptions {
   /** 产物目录；默认 `下载/_analysis/<文件名>` */
@@ -28,11 +30,29 @@ export interface AnalyzeOptions {
   threshold?: number;
   /** 只出分镜，不抽帧（省时间与磁盘） */
   scenesOnly?: boolean;
+  /** A2：对每一帧调视觉模型做语义描述（花 API 额度，默认关闭） */
+  describe?: boolean;
+  /** 只描述前 N 镜（试跑/省钱用） */
+  maxDescribe?: number;
 }
 
 export interface AnalyzedScene extends Scene {
   /** 该镜台词（字幕重叠最多的几条，没有字幕就是空串） */
   text: string;
+  /** A2 语义描述；没跑或这一镜失败时为 undefined（不写空对象冒充） */
+  visual?: ShotVisual;
+}
+
+export interface DescribeInfo {
+  /** 实际使用的模型 id；没跑为 null */
+  model: string | null;
+  /** 成功描述的镜头数 */
+  shots: number;
+  /** 失败镜头数（逐条原因进 warnings） */
+  failed: number;
+  tokens: number;
+  /** 整体没跑起来的原因（没有 key / 模型不认图…） */
+  reason?: string;
 }
 
 export interface AnalysisResult {
@@ -44,6 +64,8 @@ export interface AnalysisResult {
   scenes: AnalyzedScene[];
   frames: Array<{ scene: number; t_ms: number; path: string }>;
   transcript: { source: Transcript['source']; cues: number; file?: string };
+  /** A2 的汇总；没请求 `describe` 时不存在这个键（不用空对象冒充「跑过了」） */
+  describe?: DescribeInfo;
   warnings: string[];
 }
 
@@ -62,6 +84,62 @@ async function shot(video: string, tMs: number, jpg: string): Promise<Buffer> {
   if (res.code === -2) throw new VdlError('ffmpeg_missing', '找不到 ffmpeg，无法抽帧');
   // 灰度取不到就返回空 Buffer（亮度留 null），但不能因为「算不出亮度」让整次分析失败
   return res.code === 0 ? res.stdout : Buffer.alloc(0);
+}
+
+/**
+ * 逐帧调视觉模型。
+ *
+ * 串行而不是并发：一帧 2–5 秒，串行能给出稳定顺序与可预测的花费；
+ * 并发既可能撞上未公开的限流，也会让 `result.json` 里的镜序变得不可复现。
+ * 单镜失败只记一笔，不推翻整次分析——描述是附加信息，不是主产物。
+ */
+async function describeFrames(
+  frames: AnalysisResult['frames'],
+  scenes: AnalyzedScene[],
+  warnings: string[],
+  maxDescribe?: number,
+): Promise<DescribeInfo> {
+  if (!apiKey()) {
+    warnings.push('没有配 DEEPSEEK_API_KEY：跳过语义描述（其余结果不受影响）');
+    return { model: null, shots: 0, failed: 0, tokens: 0, reason: 'no_api_key' };
+  }
+
+  const targets = maxDescribe && maxDescribe > 0 ? frames.slice(0, maxDescribe) : frames;
+  let model: string | null = null;
+  let shots = 0;
+  let failed = 0;
+  let tokens = 0;
+  const errors: string[] = [];
+
+  for (const frame of targets) {
+    const scene = scenes.find((s) => s.index === frame.scene);
+    if (!scene) continue;
+    try {
+      const out = await describeShot(frame.path, {
+        index: scene.index,
+        startMs: scene.start_ms,
+        endMs: scene.end_ms,
+        subtitle: scene.text,
+      });
+      scene.visual = out.visual;
+      model = out.model;
+      tokens += out.tokens;
+      shots += 1;
+    } catch (err) {
+      failed += 1;
+      const code = err instanceof VlmError ? err.code : 'vlm_error';
+      const message = (err as Error).message;
+      // 整批不可用（没 key / 401 / 402 欠费）：后面的不用再试，省时间也省日志
+      if (shots === 0 && ['no_api_key', 'http_401', 'http_402'].includes(code)) {
+        warnings.push(`语义描述整体不可用（${message}），其余结果不受影响`);
+        return { model: null, shots: 0, failed, tokens, reason: code };
+      }
+      if (errors.length < 3) errors.push(`镜 ${scene.index}: ${message}`);
+    }
+  }
+
+  if (failed) warnings.push(`${failed}/${targets.length} 镜没描述成功：${errors.join('；')}`);
+  return { model, shots, failed, tokens, ...(shots === 0 ? { reason: 'all_failed' } : {}) };
 }
 
 export async function analyzeFile(file: string, options: AnalyzeOptions = {}): Promise<AnalysisResult> {
@@ -135,22 +213,30 @@ export async function analyzeFile(file: string, options: AnalyzeOptions = {}): P
     }
   }
 
+  const analyzedScenes: AnalyzedScene[] = scenes.map((s) => ({
+    ...s,
+    text: texts.find((t) => t.index === s.index)?.text || '',
+  }));
+
+  // 5) A2 语义描述（可选、花额度）：逐帧问视觉模型，失败只算「这一镜没描述」
+  const describeInfo: DescribeInfo | undefined = options.describe
+    ? await describeFrames(frames, analyzedScenes, warnings, options.maxDescribe)
+    : undefined;
+
   const result: AnalysisResult = {
     schema: 1,
     ok: true,
     source: { path: target, bytes: stat.size },
     outDir,
     metrics,
-    scenes: scenes.map((s) => ({
-      ...s,
-      text: texts.find((t) => t.index === s.index)?.text || '',
-    })),
+    scenes: analyzedScenes,
     frames,
     transcript: {
       source: transcript.source,
       cues: transcript.cues.length,
       ...(transcript.file ? { file: transcript.file } : {}),
     },
+    ...(describeInfo ? { describe: describeInfo } : {}),
     warnings,
   };
 
