@@ -49,14 +49,33 @@ function headers(cookie: string): Record<string, string> {
   return h;
 }
 
-function extractId(url: string): string {
+/**
+ * 从各种网易云歌曲链接里取 id。
+ *
+ * 手机端「分享」出来的链接几乎都是 `https://music.163.com/#/song?id=123`：
+ * id 在 **hash** 里，`u.searchParams` 是空的。以前只读 searchParams，
+ * 这类链接一律报「识别不出歌曲 ID」——用户照抄分享链接就必然踩到。
+ */
+export function extractId(url: string): string {
   const raw = (url || '').trim();
   if (/^\d+$/.test(raw)) return raw;
   try {
     const u = new URL(raw);
-    const id = u.searchParams.get('id');
-    if (id && /^\d+$/.test(id)) return id;
-    const m = /\/song\/(\d+)/.exec(u.pathname);
+    // 专辑/歌单链接不在这里处理：把专辑 id 当歌曲 id 会下错东西
+    if (/\/(album|playlist)\b/.test(`${u.pathname}${u.hash}`)) return '';
+    const pickId = (params: URLSearchParams): string => {
+      const id = params.get('id');
+      return id && /^\d+$/.test(id) ? id : '';
+    };
+    const fromSearch = pickId(u.searchParams);
+    if (fromSearch) return fromSearch;
+    const hash = u.hash.replace(/^#/, '');
+    if (hash) {
+      const query = hash.includes('?') ? hash.slice(hash.indexOf('?') + 1) : hash;
+      const fromHash = pickId(new URLSearchParams(query));
+      if (fromHash) return fromHash;
+    }
+    const m = /\/song\/(\d+)/.exec(`${u.pathname}${u.hash}`);
     if (m) return m[1];
   } catch {
     return '';

@@ -1,0 +1,33 @@
+{
+  "manifestVersion": 2,
+  "packageId": "vdacc.media-acquire",
+  "name": "VDACC 媒体获取",
+  "version": "0.1.0",
+  "trust": "user",
+  "description": "调用本机 VDACC 服务解析/下载 抖音、B站、网易云、QQ音乐 等站点的媒体，并可读取本地成品的镜头分析结果。",
+  "contributions": [
+    {
+      "id": "usage-skill",
+      "kind": "skill",
+      "entry": "skills/vdacc-usage"
+    },
+    {
+      "id": "probe",
+      "kind": "tool",
+      "entry": "tools/probe.mjs"
+    },
+    {
+      "id": "get",
+      "kind": "tool",
+      "entry": "tools/get.mjs"
+    },
+    {
+      "id": "jobs",
+      "kind": "tool",
+      "entry": "tools/jobs.mjs"
+    }
+  ],
+  "permissions": [
+    "runtime:execute"
+  ]
+}

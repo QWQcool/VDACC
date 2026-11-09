@@ -1,0 +1,8 @@
+{
+  "name": "vdacc-infos-package",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "description": "infOS Package: 通过本机 VDACC HTTP 服务解析/下载/查询任务",
+  "dependencies": {}
+}

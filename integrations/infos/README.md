@@ -24,7 +24,8 @@
 
 ## 2. 因此推荐路线（按可交付顺序）
 
-**Phase 1 · 现在能做：Package（skill + tool），调本机服务**
+**Phase 1 · 现在能做：Package（skill + tool），调本机服务** —— ✅ 骨架已实现，见
+[`package/`](package/)（`manifest.json` + `tools/{probe,get,jobs}.mjs` + `skills/vdacc-usage/`）。
 
 - `skill` 贡献放我们已有的 `ts/skill/SKILL.md`（什么时候该用、错误码怎么读）。
 - `tool` 贡献放 2–3 个薄函数：`vdl_probe` / `vdl_get` / `vdl_jobs`，

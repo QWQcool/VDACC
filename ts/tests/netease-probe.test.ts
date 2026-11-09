@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { runOperation } from '../src/core/operation';
-import { getNetease, previewNetease, probeNetease } from '../src/engines/netease';
+import { extractId, getNetease, previewNetease, probeNetease } from '../src/engines/netease';
 
 const SID = '1901371647';
 const CDN = 'https://m701.music.126.net/';
@@ -335,5 +335,24 @@ describe('预览地址：作用域机制（/api/preview 依赖它）', () => {
 
   test('作用域外取不到（说明必须共用同一个 runOperation）', () => {
     expect(() => previewNetease('exhigh')).toThrow(/作用域/);
+  });
+});
+
+describe('歌曲链接解析：手机分享出来的 id 在 hash 里', () => {
+  test('三种常见形式都认', () => {
+    expect(extractId(`https://music.163.com/#/song?id=${SID}`)).toBe(SID);
+    expect(extractId(`https://music.163.com/song?id=${SID}`)).toBe(SID);
+    expect(extractId(`https://music.163.com/#/song/${SID}`)).toBe(SID);
+    expect(extractId(SID)).toBe(SID);
+  });
+
+  test('专辑/歌单链接不返回歌曲 id（否则会下错东西）', () => {
+    expect(extractId('https://music.163.com/#/album?id=18905')).toBe('');
+    expect(extractId('https://music.163.com/#/playlist?id=3778678')).toBe('');
+  });
+
+  test('认不出的链接返回空串，由上层报 bad_input', () => {
+    expect(extractId('https://music.163.com/')).toBe('');
+    expect(extractId('随便一句话')).toBe('');
   });
 });
