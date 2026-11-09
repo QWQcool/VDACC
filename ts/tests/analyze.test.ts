@@ -9,6 +9,7 @@ import { cuesForScenes, loadTranscript, parseLrc, parseSrt } from '../src/analyz
 import { summarizeFfprobe } from '../src/analyze/metrics';
 import { analyzeFile, readVisualsFile } from '../src/analyze';
 import { downsample, findSilences, parseEbur128, sceneLevels } from '../src/analyze/audio';
+import { buildStyleCard, cameraFamily, renderStyleCardMarkdown } from '../src/analyze/stylecard';
 import { buildDescribePrompt, parseShotDescription } from '../src/analyze/describe';
 import { ffmpegBin } from '../src/core/ffmpeg';
 
@@ -187,6 +188,72 @@ describe('指标：ffprobe 归一化', () => {
   test('没有视频轨返回 null', () => {
     expect(summarizeFfprobe({ format: { duration: '1' }, streams: [{ codec_type: 'audio' }] })).toBeNull();
     expect(summarizeFfprobe(null)).toBeNull();
+  });
+});
+
+describe('A3 风格卡：只归纳测得的东西', () => {
+  const shot = (index: number, duration: number, extra: any = {}) => ({
+    index, start_ms: 0, end_ms: duration, duration_ms: duration, luma: null, text: '', ...extra,
+  });
+  const makeResult = (scenes: any[], audio: any = null, durationMs = 120_000) => ({
+    schema: 1, ok: true, source: { path: '/x/clip.mp4', bytes: 1 }, outDir: '/x',
+    metrics: { duration_ms: durationMs },
+    scenes, frames: [], transcript: { source: 'none', cues: 0 },
+    ...(audio ? { audio } : {}), warnings: [],
+  }) as any;
+
+  test('节奏按实测算，不四舍五入到整秒', () => {
+    const card = buildStyleCard(makeResult([
+      shot(1, 1000), shot(2, 2000), shot(3, 3000), shot(4, 4000),
+    ]));
+    expect(card.pacing.shots).toBe(4);
+    expect(card.pacing.mean_ms).toBe(2500);
+    expect(card.pacing.median_ms).toBe(2500);
+    expect(card.pacing.min_ms).toBe(1000);
+    expect(card.pacing.max_ms).toBe(4000);
+    expect(card.pacing.cuts_per_minute).toBe(2); // 4 镜 / 2 分钟
+  });
+
+  test('运镜按主类归并：拉/拉（轻微）/拉（大幅拉远）算一类', () => {
+    const card = buildStyleCard(makeResult([
+      shot(1, 1000, { visual: { camera: '拉' } }),
+      shot(2, 1000, { visual: { camera: '拉（轻微）' } }),
+      shot(3, 1000, { visual: { camera: '拉（大幅拉远）' } }),
+      shot(4, 1000, { visual: { camera: '固定' } }),
+    ]));
+    expect(card.cameras).toEqual([['拉', 3], ['固定', 1]]);
+    expect(cameraFamily('多机位（本镜内疑似有切换）')).toBe('多机位');
+  });
+
+  test('亮度只报测得值，并给出偏暗/偏亮计数', () => {
+    const card = buildStyleCard(makeResult([
+      shot(1, 1000, { luma: 20 }), shot(2, 1000, { luma: 90 }), shot(3, 1000, { luma: 120 }),
+    ]));
+    expect(card.luma.mean).toBe(76.7);
+    expect(card.luma.dark).toBe(1);
+    expect(card.luma.bright).toBe(1);
+  });
+
+  test('没有描述/音轨时降级成「无法统计」，不写 0 冒充', () => {
+    const card = buildStyleCard(makeResult([shot(1, 1000)], null));
+    expect(card.shotSizes).toEqual([]);
+    expect(card.cameras).toEqual([]);
+    expect(card.luma.mean).toBeNull();
+    expect(card.sound.has_track).toBe(false);
+    expect(card.coverage.with_visual).toBe(0);
+    const md = renderStyleCardMarkdown(card);
+    expect(md).toContain('没有视觉描述');
+    expect(md).toContain('无音轨');
+    expect(md).toContain('不含 H3 三字段成品提示词');
+  });
+
+  test('高频词只做词频统计，不承诺语义', () => {
+    const card = buildStyleCard(makeResult([
+      shot(1, 1000, { visual: { setting: '舞台、红色 LED' } }),
+      shot(2, 1000, { visual: { setting: '舞台、观众席' } }),
+    ]));
+    expect(card.keywords.setting[0]).toEqual(['舞台', 2]); // 两镜各写了一次，按词频计 2
+    expect(cameraFamily('')).toBe('');
   });
 });
 

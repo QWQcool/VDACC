@@ -1,3 +1,6 @@
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { getDouyin, probeDouyin } from './engines/douyin';
 import { MAX_ALBUM_TRACKS, planAlbum } from './core/album';
 import { albumTracks as neteaseAlbum, getNetease, probeNetease } from './engines/netease';
@@ -153,6 +156,13 @@ if (cmd === 'auth') {
         pairFrames: has('--pair-frames'),
         audio: !has('--no-audio'),
       });
+
+      if (has('--style-card')) {
+        const { buildStyleCard, renderStyleCardMarkdown } = await import('./analyze/stylecard');
+        const card = buildStyleCard(result);
+        writeFileSync(join(result.outDir, 'style-card.json'), `${JSON.stringify(card, null, 2)}\n`, 'utf8');
+        writeFileSync(join(result.outDir, 'style-card.md'), renderStyleCardMarkdown(card), 'utf8');
+      }
       if (has('--json')) {
         console.log(JSON.stringify(result, null, 2));
         process.exit(0);
