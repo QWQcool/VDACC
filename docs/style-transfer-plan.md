@@ -91,6 +91,22 @@ non_diegetic_music: ...（角色听不到、只有观众听到的背景音乐）
 
 这条分界让风格卡既便宜又更准：`avg_shot_length = 2.3s` 是量出来的，不是模型猜的。
 
+## 4.1 现有分析 vs H3 提示词要的字段（2026-11-09，对照 `h3-prompt-writing` skill）
+
+skill 要求每条提示词按「composition / subjects / environment / actions / camera / sound」逐镜写，
+并且三字段（`integrated_multimodal_description` / `overall_soundscape` / `non_diegetic_music`）齐全、
+时长 4–15 秒。拿现在的 A1+A2 对一遍：
+
+| H3 要的 | 我们现在有 | 差距 |
+|---|---|---|
+| composition / subjects / environment / actions | ✅ `shotSize` / `subject` / `setting` / `action` | 基本够用 |
+| **camera（运镜）** | ❌ 只有静态构图（`composition`），单帧看不出推拉摇移 | 需要**每镜抽首尾两帧**再让模型对比，成本 ×2；这也是当前最该补的一项 |
+| **sound（`overall_soundscape`）** | ❌ 完全没有音频分析 | 最低成本：ffmpeg 取音量包络 + 有无对白（`astats`/`silencedetect`）；要逐句台词仍需 Whisper，未接 |
+| 时长 4–15s 且多条拼接 | 分镜段 0.3–9s 不等 | 属于 A4：一条 H3 提示词最多 15s，长片要按镜头组拼接，而不是一句到底 |
+
+结论：**A3 风格卡之前先把「运镜」和「声音」补上**，否则写出来的提示词会缺两整类信息，
+A5 又验证不了，做出来就是技术债。这两项不依赖 H3，可以等真正需要时再做。
+
 ## 5. 风格卡字段（v1 草案）
 
 ```json
@@ -194,6 +210,9 @@ yt-dlp 查字幕 → 只下需要的部分 → ffmpeg 抽帧 → 带时间戳的
 
 - 2026-11-02：初版。方向解冻，范围收窄到「同风格新内容 + H3 提示词」；确定 DeepSeek 做 VLM、
   MiniMax H3 做生成、参考 claude-video；定 A0–A5 六阶段与验收标准。
+- 2026-11-09（补）：对照 `h3-prompt-writing` skill 盘了一遍字段（见 §4.1）——
+  现有 A2 的 7 个字段覆盖了 composition/subjects/environment/actions，但**没有运镜、没有声音**。
+  这两项不依赖 H3，是做 A3 之前该补的；不做的话风格卡会缺两整类信息，而 A5 又验证不出来。
 - 2026-11-09：**A0 前两项 + A2 落地**。DeepSeek 账号实测只有 `deepseek-flash` 支持图像输入；
   逐镜描述已实现（`analyze --describe`），提示词强制「不确定就留空」，全空算失败。
   两处必须记住的实现约束：①它是**推理模型**，`max_tokens` 要同时覆盖 reasoning 与答案，
