@@ -2,12 +2,13 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { createHash, randomBytes } from 'node:crypto';
 import { networkInterfaces } from 'node:os';
-import { dirname, join, normalize, resolve } from 'node:path';
+import { basename, dirname, join, normalize, resolve } from 'node:path';
 
 import { planAlbum } from './core/album';
 import { DownloadCancelled } from './core/cancel';
 import { configPath, loadConfig, saveConfig } from './core/config';
 import { fail, VdlError } from './core/errors';
+import { ffmpegBin } from './core/ffmpeg';
 import { fetchMediaStream, jailedPath, originAllowed } from './core/security';
 import { writeJsonAtomic } from './core/storage';
 import { UA } from './core/http';
@@ -329,6 +330,8 @@ const server = Bun.serve({
         jobs: order.length, engine: 'ts',
         theme: (loadConfig().theme || 'light'),
         limitRate: currentLimitBytesPerSec(),
+        // 能力位：界面据此决定要不要显示「分析」（端上没有 ffmpeg，按钮就不该出现）
+        capabilities: { analyze: !!Bun.which(ffmpegBin()) },
         warnings: persistenceWarning ? [persistenceWarning] : [],
       });
     }
@@ -556,6 +559,36 @@ const server = Bun.serve({
       }
       const q = new URLSearchParams({ token: TOKEN, path: raw });
       return json({ ok: true, url: `/api/preview?${q}` });
+    }
+
+    // A1 分析：成品 → 分镜 / 帧 / 台词 / 客观指标。只跑 ffmpeg，不调任何模型。
+    // 同步返回（不排队）：一次分析是秒级、并且只读文件，失败要能立刻告诉用户为什么。
+    if (path === '/api/analyze' && req.method === 'POST') {
+      const body = (await req.json().catch(() => null)) || {};
+      const raw = String(body.path || '');
+      const target = jailedPath(OUT, raw);
+      if (!target) {
+        return json({ ok: false, error: { code: 'bad_input', message: '路径不在输出目录内' } }, 400);
+      }
+      const { analyzeFile } = await import('./analyze');
+      const maxFrames = Number(body.maxFrames);
+      try {
+        const result = await analyzeFile(target, {
+          // 产物跟着**配置的输出目录**走：默认落在 cwd/下载 会让自定义 outDir 的用户
+          // 在「成品旁边」找不到帧，也让 /api/preview 的 jail 之外的路径无法显示
+          outDir: join(OUT, '_analysis', basename(target).replace(/\.[^.]+$/, '')),
+          // 上限 200：再多也没人看，但别让请求方一句话把磁盘塞满
+          ...(Number.isFinite(maxFrames) && maxFrames > 0 ? { maxFrames: Math.min(200, Math.round(maxFrames)) } : {}),
+          scenesOnly: body.scenesOnly === true,
+        });
+        return json(result);
+      } catch (err) {
+        const e = err as VdlError;
+        return json({
+          ok: false,
+          error: { code: e.code || 'analyze_failed', message: e.message || String(err) },
+        });
+      }
     }
 
     if (path === '/api/preview' && req.method === 'POST') {

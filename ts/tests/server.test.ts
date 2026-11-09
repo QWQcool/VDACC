@@ -238,3 +238,61 @@ describe('队列持久化与事件重连', () => {
     expect(stored.length).toBe(0);
   });
 });
+
+describe('A1 分析接口', () => {
+  const hasFfmpeg = !!Bun.which('ffmpeg');
+
+  test.skipIf(!hasFfmpeg)('成品能出分镜与帧，帧图片能直接显示', async () => {
+    const clip = join(TMP, 'out', 'clip.mp4');
+    const made = Bun.spawn([
+      'ffmpeg', '-hide_banner', '-loglevel', 'error', '-y',
+      '-f', 'lavfi', '-i', 'testsrc=duration=2:size=160x120:rate=10',
+      '-pix_fmt', 'yuv420p', clip,
+    ], { stdout: 'ignore', stderr: 'ignore', windowsHide: true });
+    expect(await made.exited).toBe(0);
+
+    const res = await authed('/api/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: clip, maxFrames: 5 }),
+    });
+    expect(res.status).toBe(200);
+    const data = await res.json() as any;
+    expect(data.ok).toBe(true);
+    expect(data.metrics.width).toBe(160);
+    expect(data.scenes.length).toBeGreaterThan(0);
+    expect(data.frames.length).toBeGreaterThan(0);
+    expect(data.frames.length).toBeLessThanOrEqual(5);
+
+    // 产物必须落在配置的输出目录内，否则 /api/preview 的 jail 会拒掉（图全裂）
+    expect(data.frames[0].path.startsWith(join(TMP, 'out'))).toBe(true);
+
+    // 界面就是用这个地址显示帧的，必须真的能取到字节
+    const img = await fetch(`${BASE}/api/preview?token=${TOKEN}&path=${encodeURIComponent(data.frames[0].path)}`);
+    expect(img.status).toBe(200);
+    expect(String(img.headers.get('content-type'))).toStartWith('image/');
+    expect((await img.arrayBuffer()).byteLength).toBeGreaterThan(0);
+  });
+
+  test('越界路径 400，非视频文件如实报错', async () => {
+    const outside = join(TMP, 'out-neighbor', 'outside.txt');
+    const bad = await authed('/api/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: outside }),
+    });
+    expect(bad.status).toBe(400);
+
+    if (!hasFfmpeg) return;
+    const notVideo = await authed('/api/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: join(TMP, 'out', 'inside.txt') }),
+    });
+    const data = await notVideo.json() as any;
+    expect(data.ok).toBe(false);
+    // 文本文件不是「没有视频轨」，是 ffprobe 根本读不了——如实这么报，不伪装成坏输入
+    expect(String(data.error.code)).toBe('ffprobe_failed');
+    expect(String(data.error.message)).toContain('ffprobe');
+  });
+});

@@ -215,6 +215,12 @@ describe('端到端：真跑 ffmpeg（没装就跳过）', () => {
       expect(result.scenes.some((s) => (s.luma ?? 0) > 0)).toBe(true);
       expect(existsSync(join(out, 'result.json'))).toBe(true);
       expect(result.transcript.source).toBe('none');
+
+      // 同一个成品分析第二次：帧文件已存在，ffmpeg 必须覆盖而不是卡在「要覆盖吗」，
+      // 否则亮度全变 null、图片还是上一次的（2026-11-09 浏览器验收踩到的真 bug）
+      const again = await analyzeFile(clip, { outDir: out });
+      expect(again.frames.length).toBe(result.frames.length);
+      expect(again.scenes.some((s) => (s.luma ?? 0) > 0)).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

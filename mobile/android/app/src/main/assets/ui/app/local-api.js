@@ -202,6 +202,8 @@
         engine: 'mobile',
         theme: localStorage.getItem('vdl-theme') || 'light',
         limitRate: 0,
+        // 端上没有 ffmpeg（MediaMuxer 只能封装，不能解码抽帧），分析入口不该出现
+        capabilities: { analyze: false },
         warnings: [],
       });
     }

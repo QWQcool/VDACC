@@ -48,6 +48,12 @@ createApp({
     const compStatus = ref('');
     const compBusy = ref(false);
     const previewUrl = ref('');
+    // A1 分析结果（/api/analyze）；analysisBusy 只用于按钮转圈，不阻塞其它操作
+    const analysis = ref(null);
+    const analysisBusy = ref(false);
+    const canAnalyze = ref(true);
+    const previewSeek = ref(null);
+    const videoEl = ref(null);
     // 账号状态（/api/auth）：本地凭据 + 在线校验结果
     const authRows = ref([]);
     const authBusy = ref(false);
@@ -460,14 +466,78 @@ createApp({
       const data = await api('/api/preview-url', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { path: job.path },
       });
-      if (data.ok && data.url) previewUrl.value = data.url;
-      else message.value = (data.error && data.error.message) || 'failed';
+      if (data.ok && data.url) {
+        previewSeek.value = null; // 普通预览从头放；只有从分析面板跳过来才带时间
+        previewUrl.value = data.url;
+      } else message.value = (data.error && data.error.message) || 'failed';
     }
     function closePreview() { previewUrl.value = ''; }
 
+    /**
+     * A1 分析：只对视频文件发请求。
+     *
+     * 音频没有视频轨，`analyzeFile` 会报 `bad_input`；按钮就不该出现在那里。
+     * 端上没有 ffmpeg（health.capabilities.analyze = false），也不显示。
+     */
+    const VIDEO_EXT = /\.(mp4|m4v|mkv|mov|webm|flv|ts)$/i;
+    function analyzable(job) {
+      return canAnalyze.value && !!job.path && VIDEO_EXT.test(job.path);
+    }
+    const analysisName = computed(() => {
+      const path = (analysis.value && analysis.value.source && analysis.value.source.path) || '';
+      return path.split(/[\\/]/).pop() || path;
+    });
+
+    async function analyzeJob(job) {
+      if (!job.path || analysisBusy.value) return;
+      analysisBusy.value = true;
+      const data = await api('/api/analyze', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { path: job.path },
+      });
+      analysisBusy.value = false;
+      if (!data.ok) {
+        message.value = (data.error && data.error.message) || t('analyzeFailed');
+        return;
+      }
+      // 帧的显示地址同样问 API：桌面回 /api/preview?token=…，手机回 content://
+      // （自己拼相对路径在手机壳里会变成 file:///api/preview…，图全裂）
+      const frames = await Promise.all((data.frames || []).map(async (frame) => {
+        const resolved = await api('/api/preview-url', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { path: frame.path },
+        });
+        return { ...frame, url: resolved.ok ? resolved.url : '' };
+      }));
+      analysis.value = { ...data, frames };
+    }
+    function closeAnalysis() { analysis.value = null; }
+
+    /** 从分析面板跳到成品的某一刻：复用预览浮层，不用再开一个播放器。 */
+    async function seekTo(tMs) {
+      if (!analysis.value) return;
+      const data = await api('/api/preview-url', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: { path: analysis.value.source.path },
+      });
+      if (!data.ok || !data.url) {
+        message.value = (data.error && data.error.message) || 'failed';
+        return;
+      }
+      previewSeek.value = tMs;
+      previewUrl.value = data.url;
+    }
+    const seekToFrame = (frame) => seekTo(frame.t_ms);
+    const seekToScene = (scene) => seekTo(Math.round((scene.start_ms + scene.end_ms) / 2));
+
+    /** `loadedmetadata` 时才允许写 currentTime；更早赋值会被浏览器丢掉。 */
+    function applySeek() {
+      const video = videoEl.value;
+      if (!video || previewSeek.value === null) return;
+      try { video.currentTime = previewSeek.value / 1000; } catch { /* 还没就绪就交给下一次事件 */ }
+    }
+
     // Esc / 焦点循环 / 背景 inert / 滚动锁都交给 overlays.js
     const teardownOverlays = window.VDACC_OVERLAYS.install({
-      settingsOpen, previewUrl, watch, nextTick,
+      settingsOpen, previewUrl, analysis, watch, nextTick,
     });
 
     let events = null;
@@ -484,6 +554,8 @@ createApp({
         connected.value = true;
         outDir.value = health.outDir || '';
         limitRate.value = health.limitRate || 0;
+        // 缺 ffmpeg 的机器（端上一定没有）直接不显示「分析」，别让人点了才被告知不能
+        if (health.capabilities && health.capabilities.analyze === false) canAnalyze.value = false;
         document.documentElement.dataset.theme =
           localStorage.getItem('vdl-theme') || health.theme || 'light';
       } else {
@@ -536,6 +608,8 @@ createApp({
       loadingMore, loadMoreTracks,
       toggleLang, toggleTheme, toggleFormat, persistSidecars, probe, probePart, download, cancel, retry,
       openSettings, saveSettings, installComponent, previewSelected, previewJob, closePreview,
+      analysis, analysisBusy, analysisName, analyzable, analyzeJob, closeAnalysis,
+      seekToFrame, seekToScene, applySeek, videoEl,
     };
   },
 }).mount('#app');

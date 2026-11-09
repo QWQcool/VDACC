@@ -51,6 +51,10 @@ export interface AnalysisResult {
 async function shot(video: string, tMs: number, jpg: string): Promise<Buffer> {
   const seconds = (tMs / 1000).toFixed(3);
   const res = await ffmpeg([
+    // `-y` 不能省：同一成品分析第二次时帧文件已存在，ffmpeg 会在 stdin 上问「覆盖吗」，
+    // 而我们是把它当子进程跑的、没人回答 → 退出码非 0、stdout 空 → 亮度全部变 null，
+    // 图片还留着上一次的（看起来正常，其实是旧的）。2026-11-09 浏览器验收踩到。
+    '-y',
     '-ss', seconds, '-i', video, '-frames:v', '1', '-q:v', '3', jpg,
     '-ss', seconds, '-i', video, '-frames:v', '1',
     '-vf', 'scale=16:16', '-pix_fmt', 'gray', '-f', 'rawvideo', 'pipe:1',

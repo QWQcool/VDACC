@@ -323,6 +323,9 @@
                   <button class="btn ghost sm" v-if="isBiliJob(j)" @click="refetchJobSidecars(j)">
                     {{ t('refetchSidecars') }}
                   </button>
+                  <button class="btn ghost sm" v-if="analyzable(j)" :disabled="analysisBusy" @click="analyzeJob(j)">
+                    {{ analysisBusy ? t('analyzing') : t('analyze') }}
+                  </button>
                   <button class="btn ghost sm" v-if="j.path" @click="revealJob(j)">{{ t('reveal') }}</button>
                   <button class="btn ghost sm" @click="previewJob(j)">▶ {{ t('preview') }}</button>
                   <button class="btn ghost sm" @click="removeJob(j)">{{ t('remove') }}</button>
@@ -478,7 +481,49 @@
           <span>{{ t('preview') }}</span>
           <button class="icon-btn" :aria-label="t('close')" @click="closePreview">✕</button>
         </div>
-        <video :src="previewUrl" controls autoplay></video>
+        <video ref="videoEl" :src="previewUrl" controls autoplay @loadedmetadata="applySeek"></video>
+      </div>
+    </div>
+
+    <!-- 镜头分析（A1）：分镜 + 帧 + 台词 + 客观指标；全部来自本地 ffmpeg，不调模型 -->
+    <div v-if="analysis" class="analysis-scrim" @click.self="closeAnalysis">
+      <div class="analysis-box" role="dialog" aria-modal="true" :aria-label="t('analysis')">
+        <div class="phead">
+          <span>{{ t('analysis') }} · {{ analysisName }}</span>
+          <button class="icon-btn" :aria-label="t('close')" @click="closeAnalysis">✕</button>
+        </div>
+        <div class="an-body">
+          <div class="an-metrics">
+            <span>{{ analysis.metrics.width }}×{{ analysis.metrics.height }}</span>
+            <span>{{ analysis.metrics.fps }} fps</span>
+            <span>{{ (analysis.metrics.duration_ms / 1000).toFixed(1) }}s</span>
+            <span>{{ size(analysis.metrics.bytes) }}</span>
+            <span>{{ analysis.metrics.vcodec }} / {{ analysis.metrics.acodec || '—' }}</span>
+            <span>{{ analysis.scenes.length }} {{ t('scenesUnit') }} · {{ analysis.frames.length }} {{ t('framesUnit') }}</span>
+          </div>
+          <p class="an-hint">
+            <span>{{ analysis.transcript.source === 'none' ? t('noTranscript')
+              : analysis.transcript.source.toUpperCase() + ' · ' + analysis.transcript.cues }}</span>
+            <span v-if="analysis.frames.length"> · {{ t('seekHint') }}</span>
+          </p>
+          <div class="an-frames" v-if="analysis.frames.length">
+            <figure v-for="f in analysis.frames" :key="f.path">
+              <img v-if="f.url" :src="f.url" :alt="t('framesUnit') + ' ' + f.scene" loading="lazy" @click="seekToFrame(f)" />
+              <figcaption>{{ (f.t_ms / 1000).toFixed(1) }}s</figcaption>
+            </figure>
+          </div>
+          <ol class="an-scenes">
+            <li v-for="s in analysis.scenes" :key="s.index">
+              <button class="an-jump" @click="seekToScene(s)">
+                <span class="an-idx">{{ s.index }}</span>
+                <span class="an-span">{{ (s.start_ms / 1000).toFixed(1) }}–{{ (s.end_ms / 1000).toFixed(1) }}s</span>
+              </button>
+              <span class="an-luma" v-if="s.luma !== null">{{ t('lumaLabel') }} {{ s.luma }}</span>
+              <span class="an-text" v-if="s.text">{{ s.text }}</span>
+            </li>
+          </ol>
+          <p class="an-warn" v-if="(analysis.warnings || []).length">{{ analysis.warnings.join('；') }}</p>
+        </div>
       </div>
     </div>
   </div>
