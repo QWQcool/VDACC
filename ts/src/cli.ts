@@ -137,7 +137,7 @@ if (cmd === 'auth') {
     if (!input) {
       console.error('用法: bun src/cli.ts analyze <本地视频> [--json] [--scenes-only]'
         + ' [--max-frames N] [--threshold N] [--describe [--max-describe N]]'
-        + ' [--visuals 描述.json] [-o 输出目录]');
+        + ' [--visuals 描述.json] [--pair-frames] [-o 输出目录]');
       process.exit(2);
     }
     const { analyzeFile } = await import('./analyze');
@@ -150,6 +150,7 @@ if (cmd === 'auth') {
         describe: has('--describe'),
         maxDescribe: flag('--max-describe') ? Number(flag('--max-describe')) : undefined,
         visuals: flag('--visuals') || undefined,
+        pairFrames: has('--pair-frames'),
       });
       if (has('--json')) {
         console.log(JSON.stringify(result, null, 2));

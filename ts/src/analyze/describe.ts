@@ -22,16 +22,22 @@ export interface ShotVisual {
   lighting: string;
   /** 构图与镜头感（对称/三分/俯拍/手持…） */
   composition: string;
+  /**
+   * 运镜：固定 / 推 / 拉 / 摇（左右） / 移（跟移） / 升降 / 环绕 / 手持晃动。
+   * **单帧判断不了**，要同一镜的首尾两帧对比（见 `pairFrames`）。
+   */
+  camera: string;
   /** 画面内可见文字（字幕、招牌、水印都算；没有就空串） */
   onScreenText: string;
 }
 
 export const VISUAL_FIELDS: Array<keyof ShotVisual> = [
-  'shotSize', 'subject', 'action', 'setting', 'lighting', 'composition', 'onScreenText',
+  'shotSize', 'subject', 'action', 'setting', 'lighting', 'composition', 'camera', 'onScreenText',
 ];
 
 export const EMPTY_VISUAL: ShotVisual = {
-  shotSize: '', subject: '', action: '', setting: '', lighting: '', composition: '', onScreenText: '',
+  shotSize: '', subject: '', action: '', setting: '', lighting: '', composition: '',
+  camera: '', onScreenText: '',
 };
 
 export interface ShotContext {
@@ -40,13 +46,18 @@ export interface ShotContext {
   endMs: number;
   /** 该镜台词（来自字幕）；没有就空串 */
   subtitle: string;
+  /** 传进来的图是不是「首帧|尾帧」并排图 */
+  pair?: boolean;
 }
 
 export function buildDescribePrompt(ctx: ShotContext): string {
   const from = (ctx.startMs / 1000).toFixed(1);
   const to = (ctx.endMs / 1000).toFixed(1);
   const lines = [
-    '你是一个镜头记录员。给你一张视频截图，只记录画面里**看得见**的东西，不要推测剧情、人物关系、台词或画外信息。',
+    ctx.pair
+      ? '你是一个镜头记录员。给你的图是**同一镜的首帧（左）与尾帧（右）并排**：左半边是开场、右半边是收尾。'
+        + '只记录画面里看得见的东西，不要推测剧情。'
+      : '你是一个镜头记录员。给你一张视频截图，只记录画面里**看得见**的东西，不要推测剧情、人物关系、台词或画外信息。',
     '',
     `这一镜是 ${from}s–${to}s${ctx.subtitle ? `，该镜台词：「${ctx.subtitle}」` : ''}。`,
     '',
@@ -58,6 +69,9 @@ export function buildDescribePrompt(ctx: ShotContext): string {
     '  "setting": "场景与环境（室内/室外、具体场所）",',
     '  "lighting": "光线与主色调（如：暖黄侧光、冷蓝夜景）",',
     '  "composition": "构图与镜头感（对称/三分/俯拍/手持/浅景深）",',
+    ctx.pair
+      ? '  "camera": "对比左右两帧得出的运镜，只能取：固定/推/拉/摇/移/升降/环绕/手持晃动"'
+      : '  "camera": "单帧看不出运镜，请留空字符串"',
     '  "onScreenText": "画面内的字幕/招牌/包装文字；忽略平台角标水印（bilibili/抖音/douyin/快手等）；没有就空字符串"',
     '}',
     '',
@@ -65,6 +79,9 @@ export function buildDescribePrompt(ctx: ShotContext): string {
     '- **不确定就留空字符串**，不要猜、不要编；',
     '- 不要描述你在这一帧里看不到的东西（比如人物身份、剧情前因后果）；',
     '- 台词只作为上下文参考，不要把台词内容写进 subject/action。',
+    ...(ctx.pair
+      ? ['- 只有左右两帧的主体位置/景别/背景有可见变化时才写 camera；两帧几乎一致就写「固定」。']
+      : []),
   ];
   return lines.join('\n');
 }

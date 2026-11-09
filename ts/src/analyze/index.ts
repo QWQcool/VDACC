@@ -35,6 +35,11 @@ export interface AnalyzeOptions {
   /** 只描述前 N 镜（试跑/省钱用） */
   maxDescribe?: number;
   /**
+   * 每镜再抽「首帧 | 尾帧」并排图（`pair-XXX.jpg`）。
+   * 用途只有一个：**判断运镜**——单帧看不出推拉摇移。
+   */
+  pairFrames?: boolean;
+  /**
    * 外部提供的语义描述（JSON 文件）。格式三选一：
    *   `{ "1": {shotSize…}, "2": … }` / `[{ "index": 1, … }]` / `{ "scenes": [{ "index": 1, "visual": {…} }] }`
    * 用途：让 Agent（或人）逐帧看完再写进来，不花 API 额度，也不破坏 `result.json` 的契约。
@@ -71,6 +76,8 @@ export interface AnalysisResult {
   metrics: VideoMetrics;
   scenes: AnalyzedScene[];
   frames: Array<{ scene: number; t_ms: number; path: string }>;
+  /** `pairFrames` 打开时才有：每镜一段「首帧 | 尾帧」并排图，用来判断运镜 */
+  pairs?: Array<{ scene: number; first_ms: number; last_ms: number; path: string }>;
   transcript: { source: Transcript['source']; cues: number; file?: string };
   /** A2 的汇总；没请求 `describe` 时不存在这个键（不用空对象冒充「跑过了」） */
   describe?: DescribeInfo;
@@ -92,6 +99,27 @@ async function shot(video: string, tMs: number, jpg: string): Promise<Buffer> {
   if (res.code === -2) throw new VdlError('ffmpeg_missing', '找不到 ffmpeg，无法抽帧');
   // 灰度取不到就返回空 Buffer（亮度留 null），但不能因为「算不出亮度」让整次分析失败
   return res.code === 0 ? res.stdout : Buffer.alloc(0);
+}
+
+/**
+ * 一镜的「首帧 | 尾帧」并排图。
+ *
+ * 为什么并成一张而不是给两张：判断运镜只需要「开头在哪、结尾在哪」，
+ * 并排后一次读图就能对比；分成两张既费一次调用，模型还得在两次之间记住前一张。
+ * 两头各内缩 8%（至少 120ms）避开转场的第一/最后一帧——那里常是黑场或叠化。
+ */
+async function pairShot(video: string, firstMs: number, lastMs: number, jpg: string): Promise<void> {
+  const res = await ffmpeg([
+    '-y',
+    // `-t` 必须跟在各自 `-ss` 后面、并且写在 `-i` 之前：它是**输入选项**。
+    // 把 `-frames:v 1` 放在两个输入之间会被当成第二个输入的选项，直接报错（踩过）。
+    '-ss', (firstMs / 1000).toFixed(3), '-t', '0.12', '-i', video,
+    '-ss', (lastMs / 1000).toFixed(3), '-t', '0.12', '-i', video,
+    '-filter_complex', '[0:v]scale=800:-2[a];[1:v]scale=800:-2[b];[a][b]hstack=inputs=2',
+    '-frames:v', '1', '-update', '1', '-q:v', '3', jpg,
+  ], 60_000);
+  if (res.code === -2) throw new VdlError('ffmpeg_missing', '找不到 ffmpeg，无法抽首尾帧');
+  if (res.code !== 0) throw new VdlError('ffmpeg_failed', `抽首尾帧失败 code=${res.code}`);
 }
 
 /**
@@ -154,11 +182,14 @@ async function describeFrames(
   scenes: AnalyzedScene[],
   warnings: string[],
   maxDescribe?: number,
+  pairs: NonNullable<AnalysisResult['pairs']> = [],
 ): Promise<DescribeInfo> {
   if (!apiKey()) {
     warnings.push('没有配 DEEPSEEK_API_KEY：跳过语义描述（其余结果不受影响）');
     return { model: null, shots: 0, failed: 0, tokens: 0, reason: 'no_api_key' };
   }
+  // 有首尾帧对时优先用它：同一张图里能同时判断构图与运镜，省一次调用
+  const pairOf = new Map(pairs.map((p) => [p.scene, p]));
 
   const targets = maxDescribe && maxDescribe > 0 ? frames.slice(0, maxDescribe) : frames;
   let model: string | null = null;
@@ -171,11 +202,13 @@ async function describeFrames(
     const scene = scenes.find((s) => s.index === frame.scene);
     if (!scene) continue;
     try {
-      const out = await describeShot(frame.path, {
+      const pair = pairOf.get(scene.index);
+      const out = await describeShot(pair?.path || frame.path, {
         index: scene.index,
         startMs: scene.start_ms,
         endMs: scene.end_ms,
         subtitle: scene.text,
+        pair: !!pair,
       });
       scene.visual = out.visual;
       model = out.model;
@@ -277,51 +310,91 @@ export async function analyzeFile(file: string, options: AnalyzeOptions = {}): P
     text: texts.find((t) => t.index === s.index)?.text || '',
   }));
 
+  // 4.5) 首尾帧对：只为了判断运镜（单帧看不出推拉摇移）
+  const pairs: NonNullable<AnalysisResult['pairs']> = [];
+  if (options.pairFrames) {
+    const seen = new Set<number>();
+    for (const frame of frames) {
+      if (seen.has(frame.scene)) continue;
+      seen.add(frame.scene);
+      const scene = scenes.find((s) => s.index === frame.scene);
+      if (!scene) continue;
+      const inset = Math.max(120, Math.round(scene.duration_ms * 0.08));
+      const firstMs = scene.start_ms + inset;
+      const lastMs = Math.max(firstMs + 40, scene.end_ms - inset);
+      const jpg = join(outDir, `pair-${String(pairs.length + 1).padStart(3, '0')}.jpg`);
+      try {
+        await pairShot(target, firstMs, lastMs, jpg);
+        pairs.push({ scene: scene.index, first_ms: firstMs, last_ms: lastMs, path: jpg });
+      } catch (err) {
+        // 抽不到就不给这一镜的运镜依据，但不能让整次分析失败
+        warnings.push(`镜 ${scene.index} 首尾帧抽取失败：${(err as Error).message}`);
+      }
+    }
+  }
+
   // 5) A2 语义描述：要么逐帧问视觉模型（花额度），要么读外部描述文件（Agent/人工）
   let describeInfo: DescribeInfo | undefined = options.describe
-    ? await describeFrames(frames, analyzedScenes, warnings, options.maxDescribe)
+    ? await describeFrames(frames, analyzedScenes, warnings, options.maxDescribe, pairs)
     : undefined;
 
   /*
-   * 描述文件的两条来源：
-   * - `--visuals` 显式指定（Agent/人工写好的）；
-   * - 没指定、也没要求调模型时，读上一次留下的 `<outDir>/visuals.json`。
-   *   没有这一条，界面里点一次「分析」就会把之前合并好的描述冲掉（重新分析=重写 result.json）。
+   * 描述文件的三条规则：
+   * 1. 没调模型时，先把上次的快照 `<outDir>/visuals.json` 当基线——否则界面里点一次「分析」
+   *    （重新跑、重写 result.json）会把之前合并好的描述冲掉；
+   * 2. `--visuals` 显式文件**叠加**在基线之上，按字段覆盖：一份只写了 camera 的文件
+   *    不该把已有的主体/场景清空（踩过：先合并 7 个字段、再单独合并运镜，结果只剩运镜）；
+   * 3. 合并完把最终结果写回快照，供下次复用。
    */
   const snapshot = join(outDir, 'visuals.json');
-  const visualsPath = options.visuals
-    || (!options.describe && existsSync(snapshot) ? snapshot : '');
-
-  if (visualsPath) {
-    const fromFile = readVisualsFile(visualsPath);
+  const applyVisuals = (file: string, quiet: boolean): number => {
+    const fromFile = readVisualsFile(file);
     let applied = 0;
     for (const scene of analyzedScenes) {
-      const visual = fromFile.get(scene.index);
-      if (!visual) continue;
-      scene.visual = visual;
+      const incoming = fromFile.get(scene.index);
+      if (!incoming) continue;
+      if (scene.visual) {
+        const merged = { ...scene.visual };
+        for (const key of VISUAL_FIELDS) if (incoming[key]) merged[key] = incoming[key];
+        scene.visual = merged;
+      } else {
+        scene.visual = incoming;
+      }
       applied += 1;
     }
     if (!applied) {
-      warnings.push(`描述文件里没有能对上分镜的记录：${visualsPath}`);
-    } else {
+      warnings.push(`描述文件里没有能对上分镜的记录：${file}`);
+      return 0;
+    }
+    if (!quiet) {
       const unknown = [...fromFile.keys()].filter((i) => !analyzedScenes.some((s) => s.index === i));
       if (unknown.length) warnings.push(`描述文件里有 ${unknown.length} 个镜号不在本次分镜里（已忽略）`);
       if (applied < analyzedScenes.length) {
         warnings.push(`描述文件覆盖 ${applied}/${analyzedScenes.length} 镜，其余没有语义描述`);
       }
-      const fromModel = describeInfo?.shots || 0;
-      describeInfo = {
-        model: describeInfo?.model || null,
-        shots: 0, // 下面按最终画面数重算
-        failed: describeInfo?.failed || 0,
-        tokens: describeInfo?.tokens || 0,
-        source: fromModel ? 'mixed' : 'file',
-      };
-      // 留一份快照：下次在界面里点「分析」是重新跑一遍，没有它描述会被冲掉
-      const dump: Record<string, ShotVisual> = {};
-      for (const scene of analyzedScenes) if (scene.visual) dump[String(scene.index)] = scene.visual;
-      writeFileSync(snapshot, `${JSON.stringify(dump, null, 2)}\n`, 'utf8');
     }
+    return applied;
+  };
+
+  const explicit = options.visuals ? resolve(options.visuals) : '';
+  let fromFiles = 0;
+  if (!options.describe && existsSync(snapshot) && resolve(snapshot) !== explicit) {
+    fromFiles += applyVisuals(snapshot, true);
+  }
+  if (explicit) fromFiles += applyVisuals(explicit, false);
+
+  if (fromFiles) {
+    const fromModel = describeInfo?.shots || 0;
+    describeInfo = {
+      model: describeInfo?.model || null,
+      shots: 0, // 下面按最终画面数重算
+      failed: describeInfo?.failed || 0,
+      tokens: describeInfo?.tokens || 0,
+      source: fromModel ? 'mixed' : 'file',
+    };
+    const dump: Record<string, ShotVisual> = {};
+    for (const scene of analyzedScenes) if (scene.visual) dump[String(scene.index)] = scene.visual;
+    writeFileSync(snapshot, `${JSON.stringify(dump, null, 2)}\n`, 'utf8');
   }
   if (describeInfo) describeInfo.shots = analyzedScenes.filter((s) => s.visual).length;
 
@@ -333,6 +406,7 @@ export async function analyzeFile(file: string, options: AnalyzeOptions = {}): P
     metrics,
     scenes: analyzedScenes,
     frames,
+    ...(pairs.length ? { pairs } : {}),
     transcript: {
       source: transcript.source,
       cues: transcript.cues.length,

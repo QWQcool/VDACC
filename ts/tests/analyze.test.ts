@@ -244,11 +244,12 @@ describe('外部描述文件（Agent/人工写好的语义描述）', () => {
 
   test('未知字段被丢掉，全空的记录不当作「描述过」', () => {
     const map = readVisualsFile(write({
-      1: { subject: '两个人', camera: '推镜头', confidence: 0.9 },
+      1: { subject: '两个人', motion: '推镜头', confidence: 0.9 },
       2: { shotSize: '', subject: '   ' },
     }));
     expect(map.get(1)).toEqual({
-      shotSize: '', subject: '两个人', action: '', setting: '', lighting: '', composition: '', onScreenText: '',
+      shotSize: '', subject: '两个人', action: '', setting: '', lighting: '',
+      composition: '', camera: '', onScreenText: '',
     });
     expect(map.has(2)).toBe(false);
   });
@@ -293,6 +294,18 @@ describe('端到端：真跑 ffmpeg（没装就跳过）', () => {
       const again = await analyzeFile(clip, { outDir: out });
       expect(again.frames.length).toBe(result.frames.length);
       expect(again.scenes.some((s) => (s.luma ?? 0) > 0)).toBe(true);
+
+      // 先合并一份「只有主体」的描述，再合并一份「只有运镜」的：
+      // 第二次必须是**字段级叠加**，不能把主体清空（真踩过：合并运镜后只剩运镜）
+      const full = join(dir, 'full.json');
+      writeFileSync(full, JSON.stringify({ 1: { subject: '两个人' } }), 'utf8');
+      await analyzeFile(clip, { outDir: out, visuals: full });
+      const camOnly = join(dir, 'cam.json');
+      writeFileSync(camOnly, JSON.stringify({ 1: { camera: '推' } }), 'utf8');
+      const merged = await analyzeFile(clip, { outDir: out, visuals: camOnly });
+      const scene1 = merged.scenes.find((s) => s.index === 1)!;
+      expect(scene1.visual!.camera).toBe('推');
+      expect(scene1.visual!.subject).toBe('两个人');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

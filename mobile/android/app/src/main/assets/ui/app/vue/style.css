@@ -528,6 +528,7 @@
   background: var(--hover, rgba(127, 127, 127, .12)); font-size: 11px;
 }
 .an-v-text { color: var(--text-light); }
+.an-v-cam { color: var(--text); font-weight: 600; }
 .an-scenes li:hover { background: var(--hover, rgba(127, 127, 127, .08)); }
 .an-jump {
   display: flex; align-items: baseline; gap: 8px; background: none; border: 0; padding: 0;
