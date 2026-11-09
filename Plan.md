@@ -370,8 +370,18 @@ parity 稳定后再决定 Python 是否退化为 yt-dlp helper。
   卡尾固定列出三条边界。实测本片：47 镜 / 2.61s 均长 / 23 次切每分；运镜 固定 12 / 移 10 / 推 8 / 拉 8 / 环绕 2 / 多机位 1。
   单测覆盖节奏、归并、降级（无描述/无音轨时写「无法统计」而不是 0）。
 
+- **N18 · infOS Package（Phase 1）**：✅ 2026-11-09 骨架落地。按 `.docs/A06_EXTENSION_SYSTEM.md`
+  的 Manifest V2 写了 `integrations/infos/package/`：`skill` ×1 + `tool` ×3
+  （`vdl_probe` / `vdl_get` / `vdl_jobs`），`createContribution(host)` 形态、返回 JSON 字符串、
+  token 只从 `host.dataDirectory/config.json` 读。零依赖、纯 `.mjs`。
+  验证分两层：①仓库内静态契约测试（manifest 字段、允许的 kind、entry 不出包、无 `node_modules`、
+  体积 < 20 MiB、`definition` 形状）；②对真实本机服务的冒烟——解析「孤勇者」得 3 档、
+  真下到 `done`（53.7 MB，验完删除）、错误档位异步 `no_stream`、缺 token 给出带路径的提示。
+  **未验证**：在真实 infOS 宿主里安装/激活（本机没有宿主）；`application` 仍是受控入口，
+  子应用路线不变。见 `integrations/infos/README.md`。
+
 执行依赖：F01–F07 → N01/N02 → N03/N04；N05 可在稳定源码上独立推进；N06 依赖设备和稳定连接恢复。
-N08–N17 于 2026-11-06/09 收口，N13 依赖 DeepSeek 额度（无 key 时自动跳过，不影响其余结果）。
+N08–N18 于 2026-11-06/09 收口，N13 依赖 DeepSeek 额度（无 key 时自动跳过，不影响其余结果）。
 
 **付费限制与 DRM 研究（2026-10-27 决策更新）**：取消此前对付费绕过和 DRM 的项目禁令，允许将付费限制、会员凭证及 DRM 相关机制纳入研究。该方向目前仅为研究意向，尚无经验证的实现或支持承诺；工作步骤、证据与未验证项见 [ReversePlan.md](ReversePlan.md)。DRM、普通加密、付费限制和版权权限分别判断，不可混为一谈。
 **QQ 第一批（工作包 1–2）已完成，仅离线验证**：数据流与已知/未知清单见

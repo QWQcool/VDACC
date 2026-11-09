@@ -72,7 +72,18 @@
   以及覆盖度（多少镜有描述/运镜/响度）。
   **不含 H3 三字段成品提示词**：4–15s 拼接与 soundscape 措辞要人写，且没有 H3 通道无法验证；
   「对白还是音乐」仍未判定。卡尾专门写了一节「这张卡不含什么」，避免被当成自动生成器。
-- 测试：`bun test ts/tests` **201 pass / 0 fail**；端上自检 75 + 落盘 8 + 标签 8 + 专辑 16。
+- **修网易云「分享链接识别不出歌曲」**：手机端分享出来的链接是
+  `https://music.163.com/#/song?id=…`，id 在 **hash** 里，而我们只读 `searchParams`，
+  所以照抄分享链接必然报「识别不出歌曲 ID」。现在 search / hash / `/song/123` 三种都认，
+  并明确拒绝把专辑、歌单链接的 id 当歌曲 id（那会下错东西）。
+- **新增 infOS Package 骨架**（`integrations/infos/package/`，Manifest V2）：
+  `skill` 一份（怎么用）+ 三个 `tool`（`vdl_probe` / `vdl_get` / `vdl_jobs`），
+  都是调用本机 VDACC 服务，包里零依赖、只有 `.mjs`，符合「只收已编译 ESM、拒绝 node_modules、
+  20 MiB / 64 MiB」的安装规则。token 只从 Package 数据目录的 `config.json` 读
+  （VDACC 每次启动都会换 token，写死必然过期）。
+  真机路径没测（本机没有 infOS 宿主），但按 A06 契约做了静态检查 + 对真实服务的功能冒烟：
+  解析「孤勇者」拿到 3 档、下载到 `done`（53.7 MB，验完即删）、错误档位异步报 `no_stream`、缺 token 给出可照做的提示。
+- 测试：`bun test ts/tests` **209 pass / 0 fail**；端上自检 75 + 落盘 8 + 标签 8 + 专辑 16。
 
 ## v3.5.0 — 2026-11-02
 
