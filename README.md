@@ -120,7 +120,9 @@ Playwright 起一个独立 Edge（独立 profile，不碰你正在用的）
 - 每个档位可「预览」（同源接口现取直链，不落盘）；B站 可勾选字幕 / 弹幕；
 - 任务进度走 SSE 实时更新，完成后可直接预览；
 - 设置以右侧 Slide-over 打开；主题 / 语言即时切换；「账号」区显示登录是否有效并可重新登录；
-- 已完成的 B站 任务可「重取字幕/弹幕」，不重新下载视频。
+- 已完成的 B站 任务可「重取字幕/弹幕」，不重新下载视频；
+- 已完成的**视频**任务可「分析」：本地 ffmpeg 切分镜、每镜抽帧、逐镜亮度、同名 `.srt/.lrc` 台词与 ffprobe 指标，
+  点帧或分镜直接跳到成品的对应时刻（缺 ffmpeg 的机器不显示这个入口，端上同理）。
 
 ![界面](docs/design/screenshots/vdl-web-v2.png)
 
@@ -178,7 +180,9 @@ vdl serve --allow-origin http://localhost:5173   # 允许 infOS 开发源调用
 - Android 原生壳**已构建**（本地引擎 + 连电脑双模式，见上文「手机（Android）」）；
   HarmonyOS NEXT 仍在等华为开发者账号与 DevEco 签名。
   三种移动路线的边界与构建前提见 [`integrations/mobile/README.md`](integrations/mobile/README.md)。
-- infOS 的接入方式见 [`integrations/infos/README.md`](integrations/infos/README.md)（薄页面，不改宿主代码）。
+- infOS 的接入方式见 [`integrations/infos/README.md`](integrations/infos/README.md)
+  （2026-11-09 复核：子应用仍是宿主编译期内置、第三方拿不到；可走的是 Package 的 tool/skill 贡献，
+  Application Adapter 要等 `@infos/application-sdk` 发布）。
 
 ## 做成 Skill（给其它 Agent 用）
 

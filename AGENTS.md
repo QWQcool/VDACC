@@ -94,7 +94,7 @@
 | MiniMax H3 | 提示词是**三字段结构**：`integrated_multimodal_description` / `overall_soundscape` / `non_diegetic_music`（官方 guide）；纯文本生成直接从三字段开始，用首/尾帧才加 instruction 行。时长 **4–15s**；原生 32kHz 立体声，声音必须写进提示词；**2K 不是超分**，是 768P 的 in-context regeneration。详见 `docs/style-transfer-plan.md` §3 |
 | Android 端二期（2026-11-06 真机） | 专辑批量可用（20 首/批 + `nextOffset`，界面本来就有「加载下一批」）；QQ 登录通道已通（`auth.uin` **只给账号数字**，`qm_keyst` 不出原生），**档位未用真实账号验证**；打开/预览走 `content://`（`ui.reveal` = 用系统默认应用打开，手机没有「在文件夹中显示」），`<video>` 实测 `readyState=4` |
 | B站 番剧 4K | API（含 wbi 签名、fnval/qn 共 20+ 组合实测）最高只给 `id=120`（4K 5978k）；`id=122`（8554k）**只在页面 SSR `playurlSSRData` 里**，yt-dlp 也是先读 SSR。我们从页面补这一档后 4K = 1.52 GB / 8731k（地址 `…-100198.m4s`） |
-| 分析 A1（`cli analyze`） | `bun ts/src/cli.ts analyze <本地文件>` → `下载/_analysis/<文件名>/{result.json,frame-*.jpg}`；台词**只读同名 `.srt/.lrc`**，没接语音识别；122s/1080P 实测 47 段 / 41 帧 / 10.9s。A2–A5（VLM/H3）仍冻结 |
+| 分析 A1（`cli analyze` + 界面「分析」） | CLI：`bun ts/src/cli.ts analyze <本地文件>`；界面：已完成视频任务卡的「分析」→ `POST /api/analyze`。产物 `下载/_analysis/<文件名>/{result.json,frame-*.jpg}`；台词**只读同名 `.srt/.lrc`**，没接语音识别；122s/1080P 实测 47 段 / 41 帧 / 10.9s，点第 3 帧预览跳到 6.1s。缺 ffmpeg 时 `/api/health` 的 `capabilities.analyze=false`（端上恒 false）。**抽帧必须带 `-y`**：否则第二次分析时 ffmpeg 等「是否覆盖」，亮度全 null 而截图还是旧的。A2–A5（VLM/H3）仍冻结 |
 
 ffmpeg 为什么是硬前提：B站/YouTube 全是 DASH 音视频分离，yt-dlp 下完会得到
 `.fXXX.mp4` + `.fXXX.m4a` 两个文件然后警告 ffmpeg 不存在，结果是**无声视频**。
