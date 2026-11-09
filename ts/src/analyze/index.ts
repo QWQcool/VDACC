@@ -19,6 +19,7 @@ import { lumaOfGray, planFrames } from './frames';
 import { cuesForScenes, loadTranscript, type Transcript } from './transcript';
 import { summarizeFfprobe, type VideoMetrics } from './metrics';
 import { describeShot, EMPTY_VISUAL, VISUAL_FIELDS, type ShotVisual } from './describe';
+import { analyzeAudio, type AudioSummary } from './audio';
 import { apiKey, VlmError } from './vlm';
 
 export interface AnalyzeOptions {
@@ -34,6 +35,10 @@ export interface AnalyzeOptions {
   describe?: boolean;
   /** 只描述前 N 镜（试跑/省钱用） */
   maxDescribe?: number;
+  /** 声音分析（响度包络/静音段/每镜响度）。默认开：一次解码很快，且没有它写不了 soundscape。 */
+  audio?: boolean;
+  /** 判静音的响度阈值（LUFS），默认 -50 */
+  silenceThreshold?: number;
   /**
    * 每镜再抽「首帧 | 尾帧」并排图（`pair-XXX.jpg`）。
    * 用途只有一个：**判断运镜**——单帧看不出推拉摇移。
@@ -50,6 +55,8 @@ export interface AnalyzeOptions {
 export interface AnalyzedScene extends Scene {
   /** 该镜台词（字幕重叠最多的几条，没有字幕就是空串） */
   text: string;
+  /** 该镜平均瞬时响度（LUFS）；没有音轨时不设置 */
+  db?: number;
   /** A2 语义描述；没跑或这一镜失败时为 undefined（不写空对象冒充） */
   visual?: ShotVisual;
 }
@@ -81,6 +88,8 @@ export interface AnalysisResult {
   transcript: { source: Transcript['source']; cues: number; file?: string };
   /** A2 的汇总；没请求 `describe` 时不存在这个键（不用空对象冒充「跑过了」） */
   describe?: DescribeInfo;
+  /** 声音客观量；`audio:false` 或分析失败时不存在 */
+  audio?: AudioSummary;
   warnings: string[];
 }
 
@@ -310,6 +319,25 @@ export async function analyzeFile(file: string, options: AnalyzeOptions = {}): P
     text: texts.find((t) => t.index === s.index)?.text || '',
   }));
 
+  // 5) 声音：只给客观量（响度包络/静音/每镜响度）。默认开——没有它写不了 soundscape。
+  let audioInfo: AudioSummary | undefined;
+  if (options.audio !== false) {
+    try {
+      audioInfo = await analyzeAudio(target, scenes, { silenceThreshold: options.silenceThreshold });
+      if (!audioInfo.hasTrack) {
+        warnings.push('这个文件没有音轨：声音相关字段为空');
+      } else {
+        for (const level of audioInfo.sceneLevels) {
+          const scene = analyzedScenes.find((s) => s.index === level.index);
+          if (scene) scene.db = level.meanLufs;
+        }
+      }
+    } catch (err) {
+      // 声音失败不推翻分镜/描述：它们不依赖音频
+      warnings.push(`声音分析失败：${(err as Error).message}`);
+    }
+  }
+
   // 4.5) 首尾帧对：只为了判断运镜（单帧看不出推拉摇移）
   const pairs: NonNullable<AnalysisResult['pairs']> = [];
   if (options.pairFrames) {
@@ -407,6 +435,7 @@ export async function analyzeFile(file: string, options: AnalyzeOptions = {}): P
     scenes: analyzedScenes,
     frames,
     ...(pairs.length ? { pairs } : {}),
+    ...(audioInfo ? { audio: audioInfo } : {}),
     transcript: {
       source: transcript.source,
       cues: transcript.cues.length,

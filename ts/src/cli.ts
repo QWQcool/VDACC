@@ -151,6 +151,7 @@ if (cmd === 'auth') {
         maxDescribe: flag('--max-describe') ? Number(flag('--max-describe')) : undefined,
         visuals: flag('--visuals') || undefined,
         pairFrames: has('--pair-frames'),
+        audio: !has('--no-audio'),
       });
       if (has('--json')) {
         console.log(JSON.stringify(result, null, 2));
@@ -164,6 +165,13 @@ if (cmd === 'auth') {
       console.log(`  台词：${result.transcript.source === 'none'
         ? '无同名字幕（未做语音识别）'
         : `${result.transcript.cues} 条（${result.transcript.source}）`}`);
+      if (result.audio) {
+        const a = result.audio;
+        console.log(a.hasTrack
+          ? `  声音：${a.integratedLufs ?? '—'} LUFS · LRA ${a.loudnessRange ?? '—'} · 真峰 ${a.truePeakDb ?? '—'} dBFS`
+            + ` · 静音 ${(a.silentRatio * 100).toFixed(1)}%（阈值 ${a.silenceThreshold} LUFS）`
+          : '  声音：这个文件没有音轨');
+      }
       if (result.describe) {
         const d = result.describe;
         const source = d.source === 'file' ? '（来自描述文件）'
@@ -175,8 +183,9 @@ if (cmd === 'auth') {
       for (const scene of result.scenes.slice(0, 20)) {
         const span = `${(scene.start_ms / 1000).toFixed(1)}–${(scene.end_ms / 1000).toFixed(1)}s`;
         const luma = scene.luma === null ? '' : ` 亮度 ${scene.luma}`;
+        const db = scene.db === undefined ? '' : ` 音量 ${scene.db}`;
         const text = scene.text ? ` 「${scene.text.slice(0, 40)}」` : '';
-        console.log(`   ${String(scene.index).padStart(2)} ${span.padStart(15)}${luma}${text}`);
+        console.log(`   ${String(scene.index).padStart(2)} ${span.padStart(15)}${luma}${db}${text}`);
         if (scene.visual) {
           const v = scene.visual;
           console.log(`      ${v.shotSize || '—'} · ${v.subject || '—'} · ${v.action || '—'}`

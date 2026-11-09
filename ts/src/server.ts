@@ -585,6 +585,7 @@ const server = Bun.serve({
           // A2 要花 API 额度：必须显式传 describe:true，且最多 100 镜
           describe: body.describe === true,
           pairFrames: body.pairFrames === true,
+          audio: body.audio !== false,
           ...(Number(body.maxDescribe) > 0 ? { maxDescribe: Math.min(100, Math.round(Number(body.maxDescribe))) } : {}),
         });
         return json(result);

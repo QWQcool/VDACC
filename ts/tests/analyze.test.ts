@@ -8,6 +8,7 @@ import { frameBudget, LONG_FRAMES, lumaOfGray, planFrames, SHORT_FRAMES } from '
 import { cuesForScenes, loadTranscript, parseLrc, parseSrt } from '../src/analyze/transcript';
 import { summarizeFfprobe } from '../src/analyze/metrics';
 import { analyzeFile, readVisualsFile } from '../src/analyze';
+import { downsample, findSilences, parseEbur128, sceneLevels } from '../src/analyze/audio';
 import { buildDescribePrompt, parseShotDescription } from '../src/analyze/describe';
 import { ffmpegBin } from '../src/core/ffmpeg';
 
@@ -189,6 +190,58 @@ describe('指标：ffprobe 归一化', () => {
   });
 });
 
+describe('声音：ebur128 解析与静音判定', () => {
+  const log = [
+    '[Parsed_ebur128_0 @ x] t: 0.0999773  TARGET:-23 LUFS    M:-120.7 S:-120.7     I: -70.0 LUFS       LRA: 0.0 LU',
+    '[Parsed_ebur128_0 @ x] t: 0.199977   TARGET:-23 LUFS    M:-20.1 S:-22.0     I: -30.0 LUFS       LRA: 0.0 LU',
+    '[Parsed_ebur128_0 @ x] t: 0.299977   TARGET:-23 LUFS    M:-18.4 S:-19.1     I: -25.0 LUFS       LRA: 0.5 LU',
+    '    I:         -18.2 LUFS',
+    '    LRA:         3.3 LU',
+    '    Peak:       -6.2 dBFS',
+  ].join('\n');
+
+  test('逐帧点与汇总都解析得出来', () => {
+    const parsed = parseEbur128(log);
+    expect(parsed.points.length).toBe(3);
+    expect(parsed.points[0]).toEqual({ t_ms: 100, momentary: -120.7, short: -120.7 });
+    expect(parsed.integratedLufs).toBe(-18.2);   // 取最后一次，不是过程中的 -70
+    expect(parsed.loudnessRange).toBe(3.3);
+    expect(parsed.truePeakDb).toBe(-6.2);
+  });
+
+  test('静音段要够长才算，占比按采样跨度算', () => {
+    const points = [
+      { t_ms: 0, momentary: -120, short: -120 },
+      { t_ms: 100, momentary: -120, short: -120 },
+      { t_ms: 200, momentary: -120, short: -120 },
+      { t_ms: 300, momentary: -120, short: -120 },
+      { t_ms: 400, momentary: -18, short: -18 },
+      { t_ms: 500, momentary: -18, short: -18 },
+    ];
+    const { silences, ratio } = findSilences(points, -50, 300);
+    expect(silences).toEqual([{ start_ms: 0, end_ms: 400 }]);
+    expect(ratio).toBe(0.8);
+    // 200ms 的安静不算静音段
+    expect(findSilences(points.slice(0, 3), -50, 300).silences).toEqual([]);
+  });
+
+  test('每镜响度只统计落在区间内的点', () => {
+    const levels = sceneLevels(
+      [{ t_ms: 0, momentary: -20, short: -20 }, { t_ms: 500, momentary: -40, short: -40 }],
+      [{ index: 1, start_ms: 0, end_ms: 400 }, { index: 2, start_ms: 400, end_ms: 900 }],
+    );
+    expect(levels[0]).toEqual({ index: 1, meanLufs: -20, silentRatio: 0 });
+    expect(levels[1]).toEqual({ index: 2, meanLufs: -40, silentRatio: 0 });
+  });
+
+  test('降采样到上限以内且保留首点', () => {
+    const points = Array.from({ length: 2000 }, (_, i) => ({ t_ms: i * 100, momentary: -20, short: -20 }));
+    const out = downsample(points, 600);
+    expect(out.length).toBeLessThanOrEqual(600);
+    expect(out[0]).toEqual(points[0]);
+  });
+});
+
 describe('A2 逐镜描述：解析与提示词约束（不联网）', () => {
   test('提示词要求只写看得见的、不确定留空、忽略平台水印', () => {
     const prompt = buildDescribePrompt({ index: 3, startMs: 5200, endMs: 7000, subtitle: '你好' });
@@ -270,7 +323,9 @@ describe('端到端：真跑 ffmpeg（没装就跳过）', () => {
       const made = Bun.spawn([
         ffmpegBin(), '-hide_banner', '-loglevel', 'error', '-y',
         '-f', 'lavfi', '-i', 'testsrc=duration=3:size=160x120:rate=10',
-        '-pix_fmt', 'yuv420p', clip,
+        // 带一条正弦音轨：声音分析要有东西可测，纯视频只能验「没有音轨」那条分支
+        '-f', 'lavfi', '-i', 'sine=frequency=440:duration=3',
+        '-shortest', '-pix_fmt', 'yuv420p', clip,
       ], { stdout: 'ignore', stderr: 'pipe', windowsHide: true });
       expect(await made.exited).toBe(0);
 
@@ -288,6 +343,12 @@ describe('端到端：真跑 ffmpeg（没装就跳过）', () => {
       expect(result.scenes.some((s) => (s.luma ?? 0) > 0)).toBe(true);
       expect(existsSync(join(out, 'result.json'))).toBe(true);
       expect(result.transcript.source).toBe('none');
+
+      // 声音：正弦波应当测出真实响度与包络，且每镜能拿到响度
+      expect(result.audio?.hasTrack).toBe(true);
+      expect(typeof result.audio?.integratedLufs).toBe('number');
+      expect(result.audio!.points.length).toBeGreaterThan(0);
+      expect(result.scenes[0].db).toBeTypeOf('number');
 
       // 同一个成品分析第二次：帧文件已存在，ffmpeg 必须覆盖而不是卡在「要覆盖吗」，
       // 否则亮度全变 null、图片还是上一次的（2026-11-09 浏览器验收踩到的真 bug）
