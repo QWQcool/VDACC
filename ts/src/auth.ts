@@ -1,10 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { chromium } from 'playwright-core';
-
 const BASE = join(process.env.LOCALAPPDATA || '', 'vdl');
-const PROFILE = join(BASE, 'profile');
 const AUTH = join(BASE, 'auth');
 
 export const SITES: Record<string, { url: string; keys: string[]; label: string; domain: string }> = {
@@ -174,62 +172,36 @@ export async function verify(): Promise<VerifyRow[]> {
   return rows;
 }
 
-function toNetscape(state: any): string {
-  const lines = ['# Netscape HTTP Cookie File', ''];
-  for (const c of state.cookies || []) {
-    const domain = c.domain || '';
-    const includeSub = domain.startsWith('.') ? 'TRUE' : 'FALSE';
-    const expiry = Math.round(Number(c.expires || 0) > 0 ? c.expires : 0);
-    lines.push([domain, includeSub, c.path || '/', c.secure ? 'TRUE' : 'FALSE',
-      String(expiry), c.name, c.value].join('\t'));
-  }
-  return lines.join('\n') + '\n';
-}
-
 export async function login(site: string, timeoutMs = 300000) {
   const info = SITES[site];
   if (!info) throw new Error(`不认识这个站点: ${site}`);
   mkdirSync(AUTH, { recursive: true });
 
-  const context = await chromium.launchPersistentContext(PROFILE, {
-    channel: 'msedge',
-    headless: false,
-    viewport: null,
-    // 登录页一律直连：B站/网易云/QQ 都是国内站点，直连 0.3s 量级；
-    // 而系统代理常常是给 GitHub 用的（可能指向一个已失效的端口，或绕到境外很慢），
-    // Edge 会照读系统代理，结果 page.goto 30s 超时，用户只看到一个 about:blank 的白窗。
-    // 2026-11-10 实测：系统代理指向 127.0.0.1:7892 时，登录窗口开出来就是空白页。
-    args: ['--no-proxy-server'],
+  // 真正的浏览器操作放在 auth-node.mjs，必须由 **node** 执行，不能用 bun。
+  // 2026-11-10 实测（同机同版本 Edge 157）：node 下 connectOverCDP 成功、goto 拿到
+  // 「哔哩哔哩」标题；bun 下 connectOverCDP 直接 30s 超时。原因是 playwright-core 的
+  // WebSocket 依赖 Node 的 ws 语义，官方也只支持 Node。所以 Bun 侧只负责起子进程收结果。
+  const script = join(import.meta.dir, 'auth-node.mjs');
+  const child = spawn('node', [script, site, String(timeoutMs)], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', (d) => { stdout += d.toString(); });
+  child.stderr.on('data', (d) => { stderr += d.toString(); });
+
+  const code = await new Promise<number>((resolve, reject) => {
+    child.on('error', (err) => reject(new Error(`无法启动 node（登录依赖它）：${err.message}`)));
+    child.on('close', (c) => resolve(c ?? 1));
   });
-  try {
-    const page = context.pages()[0] || await context.newPage();
-    await page.goto(info.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    if (site === 'qq') {
-      // 尽量把二维码弹出来，省得用户自己找入口；找不到也不影响手动登录
-      await page.locator('text=登录').first().click({ timeout: 5000 }).catch(() => {});
-    }
 
-    const deadline = Date.now() + timeoutMs;
-    let ok = false;
-    while (Date.now() < deadline) {
-      const cookies = await context.cookies();
-      const names = new Set(cookies.map((c) => c.name));
-      if (info.keys.every((k) => names.has(k))) { ok = true; break; }
-      await new Promise((r) => setTimeout(r, 2000));
-    }
-    if (!ok) throw new Error('等待登录超时');
+  const last = stdout.trim().split('\n').pop() || '';
+  let parsed: { ok: boolean; cookies?: number; error?: string } | null = null;
+  try { parsed = JSON.parse(last); } catch { /* 落到下面统一报错 */ }
 
-    const state = await context.storageState();
-    // 只落本站域名，避免把 B站 与网易云的 cookie 混进同一个文件
-    const filtered = {
-      ...state,
-      cookies: (state.cookies || []).filter((c) =>
-        String(c.domain || '').includes(info.domain)),
-    };
-    writeFileSync(join(AUTH, `${site}.json`), JSON.stringify(filtered, null, 2), 'utf8');
-    writeFileSync(join(AUTH, `${site}.cookies.txt`), toNetscape(filtered), 'utf8');
-    return { ok: true, site, cookies: filtered.cookies.length };
-  } finally {
-    await context.close();
+  if (!parsed) {
+    const tail = (stderr.trim().split('\n').pop() || '').trim();
+    throw new Error(`登录子进程退出码 ${code}，没有返回结果${tail ? '：' + tail : ''}`);
   }
+  if (!parsed.ok) throw new Error(parsed.error || '登录失败');
+  return { ok: true, site, cookies: Number(parsed.cookies || 0) };
 }
+
