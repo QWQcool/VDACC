@@ -57,9 +57,21 @@ createApp({
     // 账号状态（/api/auth）：本地凭据 + 在线校验结果
     const authRows = ref([]);
     const authBusy = ref(false);
+    // B站 扫码登录：二维码与轮询状态都在前端，关掉弹层就停轮询（服务端不挂后台任务）
+    const qrOpen = ref(false);
+    // 哪些站点支持扫码由 /api/health 的能力位给（前端不写死，后端加站点这里自动跟上）
+    const qrSites = ref([]);
+    const qrSite = ref('bilibili');
+    const qrKey = ref('');
+    const qrImage = ref('');
+    const qrState = ref('idle');
+    const qrMessage = ref('');
+    let qrTimer = null;
     const diagRows = ref([]);
     const diagBusy = ref(false);
     const checkedParts = ref([]);
+    // 每 P 的附属产物选择：{ [index]: { cover, subs, danmaku } }
+    const partOpts = ref({});
     const isBatch = computed(() =>
       !!(result.value && result.value.media.parts.length > 1));
     const allChecked = computed(() =>
@@ -97,6 +109,122 @@ createApp({
       if (at >= 0) { checkedParts.value.splice(at, 1); return; }
       if (checkedParts.value.length >= 20) { message.value = t('limitHint'); return; }
       checkedParts.value.push(index);
+    }
+
+    // ── 每 P 的附属产物（弹幕 / 字幕 / 封面）──
+    // 全局开关的作用是「一键设置所有 P」，单 P 还能再改；只让全局说了算会把
+    // 「这一 P 不要弹幕」这种需求逼回命令行。
+    const enabledSidecars = (platform) => ({
+      cover: withCover.value && ['douyin', 'bilibili'].includes(platform),
+      subs: withSubs.value && platform === 'bilibili',
+      danmaku: withDanmaku.value && platform === 'bilibili',
+    });
+
+    function initPartOpts(parts, platform) {
+      const next = { ...partOpts.value };
+      for (const p of parts || []) {
+        // 已有条目保留：换 P 重新解析不该抹掉用户刚调好的勾选
+        if (!next[p.index]) next[p.index] = { ...enabledSidecars(platform) };
+      }
+      partOpts.value = next;
+    }
+
+    const optOf = (index) => partOpts.value[index] || enabledSidecars(result.value?.platform);
+
+    function togglePartOpt(index, kind) {
+      const current = { ...optOf(index) };
+      current[kind] = !current[kind];
+      partOpts.value = { ...partOpts.value, [index]: current };
+    }
+
+    /** 改全局开关 = 把当前值套到所有 P（界面上要说明这是"全部"语义）。 */
+    function applySidecarsToAll() {
+      const platform = result.value?.platform;
+      const base = enabledSidecars(platform);
+      const next = {};
+      for (const p of result.value?.media.parts || []) next[p.index] = { ...base };
+      if (Object.keys(next).length) partOpts.value = next;
+    }
+
+    const chosenFormat = computed(() => (result.value?.formats || [])
+      .find((f) => f.id === (selected.value[0] || '')));
+
+    // ── 收藏夹 / 合集：列表入口，逐条勾选后下载 ──
+    const collection = ref(null);
+    const collectionChecked = ref([]);
+    const collectionBusy = ref(false);
+    const collectionMore = ref(false);
+
+    // 只认明确是"列表页"的链接；纯数字不当收藏夹（用户更可能贴裸编号）
+    const isCollectionUrl = (v) => /favlist|collectiondetail|seriesdetail|media_id=|\/channel\/collection/i.test(String(v || ''));
+
+    const collableItems = computed(() => (collection.value?.items || []).filter((i) => i.state === 'ok'));
+    const allCollChecked = computed(() => collableItems.value.length > 0
+      && collectionChecked.value.length === collableItems.value.length);
+    const someCollChecked = computed(() => collectionChecked.value.length > 0 && !allCollChecked.value);
+
+    async function loadCollection(value, page = 1) {
+      if (page === 1) collectionBusy.value = true; else collectionMore.value = true;
+      const data = await api('/api/collection', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: { url: value, page },
+      });
+      collectionBusy.value = false;
+      collectionMore.value = false;
+      if (!data.ok) { message.value = errorText(data); return; }
+      if (page === 1) {
+        collection.value = { ...data };
+        collectionChecked.value = [];
+        result.value = null;
+        album.value = null;
+        url.value = value;
+      } else {
+        collection.value = { ...data, items: [...(collection.value?.items || []), ...(data.items || [])] };
+      }
+    }
+
+    function toggleColl(bvid) {
+      const at = collectionChecked.value.indexOf(bvid);
+      if (at >= 0) { collectionChecked.value.splice(at, 1); return; }
+      collectionChecked.value.push(bvid);
+    }
+
+    function toggleAllColl() {
+      collectionChecked.value = allCollChecked.value ? [] : collableItems.value.map((i) => i.bvid);
+    }
+
+    const loadMoreCollection = () => {
+      if (!collection.value) return;
+      loadCollection(url.value, (collection.value.page || 1) + 1);
+    };
+
+    async function downloadCollection() {
+      if (submitting.value || !collection.value) return;
+      const picked = collableItems.value.filter((i) => collectionChecked.value.includes(i.bvid));
+      if (!picked.length) return;
+      submitting.value = true;
+      let ok = 0; let deduped = 0; const errors = [];
+      try {
+        for (const item of picked) {
+          const data = await api('/api/jobs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            // 档位留空 = 用引擎推荐档；资源开关沿用账号面板里的全局偏好
+            body: { url: item.url, formatIds: [''], ...enabledSidecars('bilibili') },
+          });
+          if (data.ok) {
+            for (const job of data.jobs || []) upsert(job);
+            deduped += (data.reused || []).length;
+            ok += 1;
+          } else errors.push(errorText(data));
+        }
+        message.value = `${t('queued')} ${ok}/${picked.length}`
+          + (deduped ? ` · ${t('deduped')} ${deduped}` : '')
+          + (errors.length ? ` · ${[...new Set(errors)].join('；')}` : '');
+      } finally {
+        submitting.value = false;
+      }
     }
     const statusLabel = (status) => ({
       queued: t('queued_s'), running: t('running'),
@@ -173,6 +301,15 @@ createApp({
       albumTracks.value = [];
       checkedTracks.value = [];
 
+      // 收藏夹 / 合集：这不是"一个视频"，走列表入口；由用户勾选后逐条建任务
+      if (isCollectionUrl(value)) {
+        busy.value = false;
+        await loadCollection(value);
+        return;
+      }
+      collection.value = null;
+      collectionChecked.value = [];
+
       const data = await api('/api/probe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -193,6 +330,7 @@ createApp({
       checkedParts.value = data.media.parts.length > 1
         ? (data.media.parts.length <= 20 ? data.media.parts.map((p) => p.index) : [])
         : [];
+      initPartOpts(data.media.parts, data.platform);
     }
 
     const probe = () => probeUrl(url.value);
@@ -248,9 +386,17 @@ createApp({
           requests.push({ url: track.url, formatIds: [''] });
         }
       } else if (result.value && selected.value.length) {
+        const parts = result.value.media.parts || [];
         if (isBatch.value) {
-          const parts = result.value.media.parts.filter((p) => checkedParts.value.includes(p.index));
-          for (const part of parts) requests.push({ url: part.url, formatIds: [selected.value[0]], ...sidecars });
+          const picked = parts.filter((p) => checkedParts.value.includes(p.index));
+          for (const part of picked) {
+            // 每条分P 用自己那套附属开关，不用全局——否则单 P 的细调等于白设
+            requests.push({ url: part.url, formatIds: [selected.value[0]], ...optOf(part.index) });
+          }
+        } else if (parts.length && platform === 'bilibili') {
+          // 单 P 也走 parts[0]：cid/url 来自同一次探测，且能带上这一 P 的附属选择
+          const part = parts.find((p) => p.selected) || parts[0];
+          requests.push({ url: part.url || result.value.media.source_url || url.value, formatIds: [...selected.value], ...optOf(part.index) });
         } else {
           requests.push({ url: result.value.media.source_url || url.value, formatIds: [...selected.value], ...sidecars });
         }
@@ -281,6 +427,8 @@ createApp({
     function persistSidecars() {
       localStorage.setItem('vdl-subs', withSubs.value ? '1' : '0');
       localStorage.setItem('vdl-danmaku', withDanmaku.value ? '1' : '0');
+      // 全局开关同时是「套用到所有 P」，界面上写了这句，行为就得对上
+      applySidecarsToAll();
     }
 
     function upsert(job) {
@@ -429,6 +577,87 @@ createApp({
         // 扫码在电脑上完成，这里过几秒自动刷新一次，用户也可以手动点刷新
         setTimeout(() => { loadAuth(); }, 6000);
       }
+    }
+
+    // ---- B站 扫码登录 ----
+    // 为什么轮询放在前端：服务端一旦持有循环，页面关掉/切 tab 都还在打接口；
+    // 放前端则生命周期跟着弹层走，散架也不留后台请求。
+    function stopQrTimer() {
+      if (qrTimer) { clearTimeout(qrTimer); qrTimer = null; }
+    }
+
+    async function startQr() {
+      stopQrTimer();
+      qrState.value = 'loading';
+      qrMessage.value = '';
+      const data = await api(`/api/auth/${qrSite.value}/qrcode`, { method: 'POST' });
+      if (!data.ok) {
+        qrState.value = 'error';
+        qrMessage.value = errorText(data);
+        return;
+      }
+      qrKey.value = data.key;
+      qrImage.value = data.qrDataUrl;
+      qrState.value = 'pending';
+      qrMessage.value = t('qrPending');
+      qrTimer = setTimeout(pollQr, 1500);
+    }
+
+    async function openQr(site = 'bilibili') {
+      qrSite.value = site;
+      qrOpen.value = true;
+      await startQr();
+    }
+
+    function closeQr() {
+      stopQrTimer();
+      qrOpen.value = false;
+      qrKey.value = '';
+      qrImage.value = '';
+    }
+
+    async function pollQr() {
+      qrTimer = null;
+      if (!qrOpen.value || !qrKey.value) return;
+      const data = await api(`/api/auth/${qrSite.value}/qrcode?key=${encodeURIComponent(qrKey.value)}`);
+      if (!data.ok) {
+        qrState.value = 'error';
+        qrMessage.value = errorText(data);
+        return;
+      }
+      qrState.value = data.state;
+      qrMessage.value = data.message || '';
+      if (data.state === 'ok' || data.state === 'unverified') {
+        // unverified 也要刷新账号面板：凭据已经落盘，只是没验通
+        loadAuth();
+        if (data.state === 'ok') setTimeout(closeQr, 1200);
+        return;
+      }
+      if (data.state === 'expired') {
+        // 过期不打扰用户，直接换一张
+        startQr();
+        return;
+      }
+      if (data.state === 'error') return;
+      qrTimer = setTimeout(pollQr, 1500);
+    }
+
+    async function logoutSite(site) {
+      const data = await api(`/api/auth/${site}/logout`, { method: 'POST' });
+      if (!data.ok) { message.value = errorText(data); return; }
+      message.value = data.removed ? t('loggedOut') : t('authNone');
+      loadAuth();
+    }
+
+    /** 该站点的登录按钮是走扫码弹层，还是走电脑上的 Edge。 */
+    const usesQr = (a) => qrSites.value.includes(a.site);
+
+
+    /** 扫码这条路平台不给面子时，退回电脑上的 Edge——不留在死路上。 */
+    async function fallbackToEdge() {
+      const site = qrSite.value;
+      closeQr();
+      await loginSite(site);
     }
 
     const authBadge = (a) => (a.online && a.online.ok ? 'ok'
@@ -581,6 +810,8 @@ createApp({
         limitRate.value = health.limitRate || 0;
         // 缺 ffmpeg 的机器（端上一定没有）直接不显示「分析」，别让人点了才被告知不能
         if (health.capabilities && health.capabilities.analyze === false) canAnalyze.value = false;
+        // 支持扫码的站点由后端给：前端不写死，加站点时这里自动跟上
+        qrSites.value = Array.isArray(health.capabilities?.qrSites) ? health.capabilities.qrSites : [];
         document.documentElement.dataset.theme =
           localStorage.getItem('vdl-theme') || health.theme || 'light';
       } else {
@@ -624,9 +855,15 @@ createApp({
       settingsOpen, sOutDir, sTheme, sLimitRateMB, sConcurrency, sGeneric,
       compStatus, compBusy, previewUrl,
       authRows, authBusy, loadAuth, loginSite, authBadge, authText,
+      qrOpen, qrSites, qrSite, qrImage, qrState, qrMessage,
+      openQr, closeQr, startQr, logoutSite, usesQr, fallbackToEdge,
       diagRows, diagBusy, runDiagnostics,
       isBiliJob, refetchJobSidecars,
       checkedParts, isBatch, allChecked, someChecked, estimated, toggleAll, togglePart,
+      partOpts, optOf, togglePartOpt, applySidecarsToAll, chosenFormat,
+      collection, collectionChecked, collectionBusy, collectionMore,
+      allCollChecked, someCollChecked, collableItems, toggleColl, toggleAllColl,
+      loadMoreCollection, downloadCollection, loadCollection,
       activeJobs, finishedJobs, failedJobs, orderedJobs,
       removeJob, clearFinished, retryFailed, revealJob,
       album, albumTracks, checkedTracks, allTracks, toggleTrack, toggleAllTracks,

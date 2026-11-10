@@ -3,7 +3,9 @@ import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync } from 'node:
 import { join } from 'node:path';
 
 const BASE = join(process.env.LOCALAPPDATA || '', 'vdl');
-const AUTH = join(BASE, 'auth');
+// VDL_AUTH_DIR 只用于测试/冒烟隔离：默认仍是用户目录。
+// 没有这个开关时，对着运行中的服务点一次"退出登录"就会删掉真人凭据（本轮踩过）。
+const AUTH = process.env.VDL_AUTH_DIR || join(BASE, 'auth');
 
 export const SITES: Record<string, { url: string; keys: string[]; label: string; domain: string }> = {
   bilibili: {

@@ -482,6 +482,32 @@
 }
 .preview-box video { display: block; width: 100%; max-height: 70vh; background: #000; }
 
+/* ── B站 扫码登录 ───────────────────────── */
+.qr-scrim {
+  position: fixed; inset: 0; z-index: 46;
+  background: rgba(9, 12, 18, .62);
+  display: grid; place-items: center; padding: 18px;
+}
+.qr-box {
+  width: min(340px, 92vw); background: var(--surface);
+  border: 1px solid var(--line); border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg); overflow: hidden;
+}
+.qr-box .phead {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 14px; border-bottom: 1px solid var(--line); font-weight: 600; font-size: 13px;
+}
+.qr-body { padding: 16px; text-align: center; }
+.qr-img {
+  display: block; width: 240px; height: 240px; margin: 0 auto 10px;
+  image-rendering: pixelated; background: #fff; border-radius: 8px;
+}
+.qr-msg { margin: 0 0 6px; font-size: 13px; }
+.qrs-pending, .qrs-loading { color: var(--text-muted, #6b7280); }
+.qrs-scanned { color: #b45309; }
+.qrs-ok { color: #15803d; }
+.qrs-unverified, .qrs-error { color: #b91c1c; }
+
 /* ── 镜头分析（A1） ─────────────────────── */
 .analysis-scrim {
   position: fixed; inset: 0; z-index: 44; /* 比预览低一层：从分析跳播放时播放器盖在上面 */
@@ -577,4 +603,33 @@
   * { animation: none !important; transition: none !important; }
   /* 兜底：以后若有人给容器加 scroll-behavior: smooth，这里统一压掉 */
   html, body { scroll-behavior: auto !important; }
+}
+
+/* ── 分析页：动作行 / 简介 / 分P 资源 ─────── */
+.analyze-actions {
+  display: flex; align-items: center; gap: 8px; justify-content: flex-end;
+  margin-top: 10px; flex-wrap: wrap;
+}
+.media-desc {
+  margin: 8px 0 0; font-size: 12px; line-height: 1.6; color: var(--text-2);
+  /* 简介可能很长：视觉上收成 3 行，原文仍可选中复制（不截字符串） */
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+  overflow: hidden; white-space: pre-wrap; word-break: break-word;
+}
+.part-row { align-items: center; }
+.part-row .name { min-width: 120px; }
+.part-opts { display: flex; align-items: center; gap: 4px; flex: none; }
+.chip {
+  font-size: 11px; line-height: 1; padding: 5px 8px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--surface);
+  color: var(--text-3); cursor: pointer;
+}
+.chip.on { border-color: var(--ok); background: var(--ok-soft); color: var(--ok); }
+.chip.dim { opacity: .5; cursor: not-allowed; }
+
+/* ── 收藏夹 / 合集列表 ───────────────────── */
+.coll-row .name { flex: 1; min-width: 160px; }
+.coll-cover {
+  width: 64px; height: 40px; flex: none; object-fit: cover;
+  border-radius: 4px; background: var(--surface-soft); border: 1px solid var(--line);
 }

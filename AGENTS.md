@@ -85,6 +85,7 @@
 | 网易云播放地址 | `GET /api/song/enhance/player/url?ids=[id]&br=999000` + `MUSIC_U` 直接返回 `level=lossless` 的 FLAC；**不需要 eapi/weapi 加密** |
 | B站清晰度归档 | 必须按**宽度**（3840/2560/1920/1280/854）；宽银幕（1920×816、4096×1740）按高度会整体下移一档 |
 | B站格式结构 | 全部是 video-only + audio-only，必须成对合并；带 cookie 才看得到 4K/1080P |
+| B站扫码登录 | 只需两个 GET、**不需要 cookie 也不需要浏览器**：`passport-login/web/qrcode/generate` → `{url, qrcode_key}`（32 位 hex）；`/qrcode/poll?qrcode_key=` 的**外层 `code` 恒 0，状态在内层 `data.code`**（86101 未扫码 / 86090 已扫码待确认 / 86038 已过期 / 0 成功）。2026-11-10 实测前两条，后两条待首次真实扫码确认。现有 `vdl auth` 仍走 Edge，改造见 Plan §2.7 N19 |
 | 路由顺序 | 专用引擎（抖音/网易云/QQ/酷我/酷狗/B站）→ L2 直链/m3u8（`sniff`）→ `ytdlp-generic` 兜底。抖音裸 ID 规则最宽，必须排最前；QQ/酷我/酷狗 只认域名（裸串不路由）；L2 只认媒体扩展名，不跑页面 JS |
 | ffmpeg | 本机 **9.0.2-full_build**（`winget install Gyan.FFmpeg`，shim 在 `%LOCALAPPDATA%\Microsoft\WinGet\Links`，在用户 PATH）。TS 主线用 `VDL_FFMPEG` 或 PATH；legacy 的查找顺序 `venv\Scripts` → `PATH`（`legacy/python/vdl/core/env.py`）。缺失会让 B站/YouTube 变无声视频 |
 | Bun | 本机 **1.4.4**（`winget install Oven-sh.Bun`，shim 同目录）。装在用户 PATH 的目录里，**已开着的终端不会刷新**，新装后 `where bun` 报找不到属正常，新开窗口或直接探 `%LOCALAPPDATA%\Microsoft\WinGet\Links\bun.exe` 即可 |
@@ -182,6 +183,8 @@ ffmpeg 已改异步可取消。**限速仍是「每条流」**，总带宽 ≈ �
 - **凭据只在用户目录。** `bun ts/src/cli.ts auth`（legacy：`python -m vdl auth`）写
   `%LOCALAPPDATA%\vdl\auth\`（`storage_state` 里是 HttpOnly cookie），profile 在
   `%LOCALAPPDATA%\vdl\profile`。两者永不入库、永不打印值——日志只报 cookie 名与数量。
+  **测试/冒烟必须设 `VDL_AUTH_DIR` 指到临时目录**：`POST /api/auth/bilibili/logout` 会真删
+  `auth/bilibili.json`（2026-11-10 误删过一次，靠同目录 `bilibili.cookies.txt` 还原）。
 - **Skill 只能由构建脚本组装。** TS 版：`python tools/build_skill_ts.py --zip`（单文件 `vdl.exe`
   + `ts/skill/SKILL.md`）；legacy 版：`legacy/python/tools/build_skill.py`。别手工往 `dist/` 拷代码。
   legacy 包刻意排除 `legacy/python/vdl/web` 与 `server.py`（Agent 不需要，且含授权受限的插画）；

@@ -39,8 +39,9 @@ export function previewBilibili(formatId: string): string {
 }
 
 /** 关键：不能把所有 cookie 拼进去（实测 64 条 / 8.9KB 会被 WAF 判 400），
- *  只带 bilibili 域名下、未过期的，约 27 条 / 1.7KB。 */
-function cookieHeader(): string {
+ *  只带 bilibili 域名下、未过期的，约 27 条 / 1.7KB。
+ *  收藏夹接口复用同一份（私密收藏夹必须带 cookie）。 */
+export function cookieHeader(): string {
   const dir = join(process.env.LOCALAPPDATA || '', 'vdl', 'auth');
   const txt = join(dir, 'bilibili.cookies.txt');
   if (existsSync(txt)) {
@@ -191,8 +192,17 @@ function mergeDash(primary: any, extra: any[]): any {
   return { ...primary, video: videos };
 }
 
-function bucketOf(width: number): [number, string] {
-  for (const [limit, label] of BUCKETS) if (width >= limit) return [limit, label];
+/**
+ * 档位按**长边**归档：横屏用宽，竖屏用高。
+ *
+ * 2026-11-10 实测（竖屏 BV1smWt6EE9L，1080×1920 / 60fps / 10.3Mbps）：
+ * 只按宽看，1080 落在 854 与 1280 之间 → 被标成「480P」，界面上一个 1080P 级的流
+ * 显示成 480P，用户会以为登录没生效。横屏不受影响（长边就是宽），
+ * 4096×1740 这类宽银幕仍然按 4096 归档，跟 AGENTS 里「按宽度」的结论一致。
+ */
+function bucketOf(width: number, height = 0): [number, string] {
+  const span = Math.max(Number(width || 0), Number(height || 0));
+  for (const [limit, label] of BUCKETS) if (span >= limit) return [limit, label];
   return [0, '标清'];
 }
 
@@ -211,7 +221,7 @@ function foldDash(dash: any, durationMs: number): Format[] {
 
   const groups = new Map<number, any[]>();
   for (const v of videos) {
-    const [limit] = bucketOf(Number(v.width || 0));
+    const [limit] = bucketOf(Number(v.width || 0), Number(v.height || 0));
     if (!groups.has(limit)) groups.set(limit, []);
     groups.get(limit)!.push(v);
   }
@@ -298,13 +308,21 @@ async function probeVideo(target: Target): Promise<ProbeResult> {
     bvid, cid: Number(current.cid), aid: Number(view.aid || 0), durationMs,
   };
 
-  const parts: Part[] = pages.length > 1 ? pages.map((p) => ({
-    index: Number(p.page || 0),
-    title: p.part || `P${p.page}`,
-    duration_ms: Number(p.duration || 0) * 1000,
-    url: `https://www.bilibili.com/video/${bvid}?p=${p.page}`,
-    selected: Number(p.page) === page,
-  })) : [];
+  // 单 P 也回 parts[1]：分析页要显示「第 1 P · CID · 时长」，空数组会让界面退化成
+  // "没有分P"的另一种样子。cid 一并带上，界面才不用为它再打一次接口。
+  // 只有真多 P 才拼 `?p=`：单 P 若写成 `?p=1`，它和 media.source_url 就成了两个不同字符串，
+  // 后端的"同链接同档位去重"会认不出来（分析页与直接解析会各建一个任务）。
+  const multi = pages.length > 1;
+  const partRows = pages.length ? pages : [{ page: 1, part: '', cid: current.cid, duration: 0 }];
+  const parts: Part[] = partRows.map((p) => ({
+    index: Number(p.page || 1),
+    title: p.part || (multi ? `P${p.page || 1}` : (view.title || '')),
+    // 单 P 的 pages[0].duration 只有秒级；此时用播放接口算出的 durationMs 更准
+    duration_ms: multi ? Number(p.duration || 0) * 1000 : durationMs,
+    url: `https://www.bilibili.com/video/${bvid}${multi ? `?p=${p.page}` : ''}`,
+    selected: Number(p.page || 1) === page,
+    cid: Number(p.cid || 0) || undefined,
+  }));
 
   return {
     schema: 2, ok: true, platform: 'bilibili', engine: 'bilibili-api',
@@ -314,6 +332,8 @@ async function probeVideo(target: Target): Promise<ProbeResult> {
       author: view.owner?.name || '',
       duration_ms: durationMs || null,
       thumbnail: view.pic || '',
+      // 简介只给界面看；空串不写，避免所有平台都被塞一个无意义的 desc 键
+      ...(String(view.desc || '').trim() ? { desc: String(view.desc).trim() } : {}),
       source_url: `https://www.bilibili.com/video/${bvid}${pages.length > 1 ? `?p=${page}` : ''}`,
       platform: 'bilibili', parts,
     },

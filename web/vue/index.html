@@ -166,6 +166,49 @@
               </div>
             </section>
 
+            <!-- 收藏夹 / 合集：列表入口，逐条勾选（不做一键全下） -->
+            <section class="card" id="collection" v-if="collection">
+              <div class="card-head">
+                <h2>{{ collection.title }}</h2>
+                <span class="en">{{ collection.kind === 'fav' ? 'FAVORITES' : 'COLLECTION' }}</span>
+                <span class="spacer"></span>
+                <span class="section-label" v-if="collection.owner">{{ collection.owner }}</span>
+                <span class="section-label mono">{{ collection.total }}</span>
+              </div>
+              <div class="batch-head">
+                <label class="switch">
+                  <input type="checkbox" :checked="allCollChecked" :indeterminate.prop="someCollChecked"
+                         @change="toggleAllColl">
+                  <span class="track"></span>{{ t('selectAll') }}
+                </label>
+                <span class="num">{{ collectionChecked.length }} / {{ collection.items.length }}</span>
+                <span class="help">{{ t('collHint') }}</span>
+              </div>
+              <div class="list">
+                <div v-for="it in collection.items" :key="it.bvid || it.title" class="list-row coll-row">
+                  <input type="checkbox" :disabled="it.state !== 'ok'"
+                         :checked="collectionChecked.includes(it.bvid)"
+                         @change="toggleColl(it.bvid)">
+                  <!-- 图床按 Referer 防盗链：本机页面必须 no-referrer，否则 403 -->
+                  <img v-if="it.cover" class="coll-cover" :src="it.cover" alt="" referrerpolicy="no-referrer">
+                  <span class="name" :title="it.title">{{ it.title }}</span>
+                  <span class="sub" v-if="it.author">{{ it.author }}</span>
+                  <span class="sub mono" v-if="it.duration_ms">{{ dur(it.duration_ms) }}</span>
+                  <span class="badge warn" v-if="it.state === 'gone'">{{ t('collGone') }}</span>
+                  <span class="badge fail" v-else-if="it.state === 'private'">{{ t('collPrivate') }}</span>
+                </div>
+              </div>
+              <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end;align-items:center">
+                <span class="num" v-if="collectionMore">{{ t('loadingMore') }}</span>
+                <button class="btn ghost sm" v-if="collection.hasMore" :disabled="collectionMore"
+                        @click="loadMoreCollection">{{ t('collLoadMore') }}</button>
+                <button class="btn primary" :disabled="!collectionChecked.length || submitting"
+                        @click="downloadCollection">
+                  {{ t('download') }} ({{ collectionChecked.length }})
+                </button>
+              </div>
+            </section>
+
             <!-- 结果 -->
             <section class="card" id="result" v-if="result">
               <div class="media">
@@ -188,30 +231,53 @@
                     <span class="mono">{{ result.engine }}</span>
                   </div>
                   <div class="src" v-if="result.media.source_url">{{ result.media.source_url }}</div>
+                  <div class="analyze-actions">
+                    <a class="btn ghost sm" v-if="result.media.source_url" :href="result.media.source_url"
+                       target="_blank" rel="noreferrer noopener">{{ t('openOnSite') }}</a>
+                    <button class="btn ghost sm" :disabled="busy" @click="probe">{{ t('reprobe') }}</button>
+                  </div>
+                  <!-- 简介只做展示：截断在 CSS 里，模板不截字符串（截了就没法看全文） -->
+                  <p class="media-desc" v-if="result.media.desc">{{ result.media.desc }}</p>
                 </div>
               </div>
 
-              <!-- 分P -->
-              <div v-if="result.media.parts.length > 1" style="margin-top:18px">
+              <!-- 分P 与资源：单 P 也列（B站 现在总会回 parts[1]），多 P 才出现勾选 -->
+              <div v-if="result.media.parts.length" style="margin-top:18px">
                 <div class="batch-head">
-                  <label class="switch">
+                  <label class="switch" v-if="isBatch">
                     <input type="checkbox" :checked="allChecked" :indeterminate.prop="someChecked"
                            @change="toggleAll">
                     <span class="track"></span>
                     {{ t('selectAll') }}
                   </label>
-                  <span class="num">{{ checkedParts.length }} / {{ result.media.parts.length }}</span>
+                  <span class="section-label" style="letter-spacing:0">{{ t('partList') }}</span>
+                  <span class="num" v-if="isBatch">{{ checkedParts.length }} / {{ result.media.parts.length }}</span>
                   <span class="num" v-if="estimated" style="margin-left:auto">{{ t('estimated') }} {{ size(estimated) }}</span>
                 </div>
                 <p class="batch-limit" v-if="result.media.parts.length > 20">{{ t('limitHint') }}</p>
                 <div class="list">
-                  <label v-for="p in result.media.parts" :key="p.index" class="list-row">
-                    <input type="checkbox" :checked="checkedParts.includes(p.index)"
+                  <div v-for="p in result.media.parts" :key="p.index" class="list-row part-row">
+                    <input v-if="isBatch" type="checkbox" :checked="checkedParts.includes(p.index)"
                            @change="togglePart(p.index)">
                     <span class="idx">P{{ p.index }}</span>
-                    <span class="name">{{ p.title }}</span>
+                    <span class="name" :title="p.title">{{ p.title }}</span>
                     <span class="sub mono">{{ dur(p.duration_ms) }}</span>
-                  </label>
+                    <span class="sub mono" v-if="p.cid">CID {{ p.cid }}</span>
+                    <span class="badge ok" v-if="chosenFormat">
+                      {{ chosenFormat.label }}{{ chosenFormat.fps > 30 ? chosenFormat.fps : '' }}
+                    </span>
+                    <!-- 每 P 的资源：弹幕/字幕/封面；音频单独下还没做，标出来而不是假装能选 -->
+                    <span class="part-opts" v-if="result.platform === 'bilibili'">
+                      <button type="button" class="chip" :class="{ on: optOf(p.index).danmaku }"
+                              @click="togglePartOpt(p.index, 'danmaku')">{{ t('danmaku') }}</button>
+                      <button type="button" class="chip" :class="{ on: optOf(p.index).subs }"
+                              @click="togglePartOpt(p.index, 'subs')">{{ t('subs') }}</button>
+                      <button type="button" class="chip" :class="{ on: optOf(p.index).cover }"
+                              @click="togglePartOpt(p.index, 'cover')">{{ t('cover') }}</button>
+                      <button type="button" class="chip dim" disabled
+                              :title="t('audioOnlyUnsupported')">{{ t('audio') }}</button>
+                    </span>
+                  </div>
                 </div>
               </div>
 
@@ -255,6 +321,7 @@
                       v-if="result.platform === 'bilibili' && (withSubs || withDanmaku)">
                   {{ t('sidecarHint') }}
                 </span>
+                <span class="help" v-if="result.platform === 'bilibili'">{{ t('sidecarsAll') }}</span>
               </div>
 
               <!-- 警告（未登录/会员档被拒/试听） -->
@@ -436,8 +503,15 @@
             <div class="comp-row" v-for="a in authRows" :key="a.site">
               <span class="name">{{ a.label }}</span>
               <span class="badge" :class="authBadge(a)">{{ authText(a) }}</span>
-              <button class="btn ghost sm" :disabled="authBusy" @click="loginSite(a.site)">
+              <!-- 支持扫码的站点走扫码弹层（纯 HTTP），其它站点仍走独立 Edge -->
+              <button v-if="usesQr(a)" class="btn ghost sm" :disabled="authBusy" @click="openQr(a.site)">
                 {{ a.loggedIn ? t('relogin') : t('login') }}
+              </button>
+              <button v-else class="btn ghost sm" :disabled="authBusy" @click="loginSite(a.site)">
+                {{ a.loggedIn ? t('relogin') : t('login') }}
+              </button>
+              <button v-if="usesQr(a) && a.loggedIn" class="btn ghost sm" @click="logoutSite(a.site)">
+                {{ t('logout') }}
               </button>
             </div>
             <div style="display:flex;align-items:center;gap:8px">
@@ -482,6 +556,26 @@
           <button class="icon-btn" :aria-label="t('close')" @click="closePreview">✕</button>
         </div>
         <video ref="videoEl" :src="previewUrl" controls autoplay @loadedmetadata="applySeek"></video>
+      </div>
+    </div>
+
+    <!-- B站 扫码登录：二维码由服务端渲染成 PNG data URL，前端只负责轮询 -->
+    <div v-if="qrOpen" class="qr-scrim" @click.self="closeQr">
+      <div class="qr-box" role="dialog" aria-modal="true" :aria-label="t('qrLogin')">
+        <div class="phead">
+          <span>{{ t('qrLogin') }}</span>
+          <button class="icon-btn" :aria-label="t('close')" @click="closeQr">✕</button>
+        </div>
+        <div class="qr-body">
+          <img v-if="qrImage" :src="qrImage" alt="" class="qr-img">
+          <p class="qr-msg" :class="'qrs-' + qrState">{{ qrMessage || t('qrPending') }}</p>
+          <p class="help">{{ t('qrHelp') }}</p>
+          <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+            <button class="btn ghost sm" @click="startQr">{{ t('qrRefresh') }}</button>
+            <!-- 扫码失败不能是死路：保留电脑上的 Edge 通道，否则用户只能去改配置 -->
+            <button class="btn ghost sm" @click="fallbackToEdge">{{ t('qrFallbackEdge') }}</button>
+          </div>
+        </div>
       </div>
     </div>
 

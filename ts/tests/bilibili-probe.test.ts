@@ -149,6 +149,44 @@ describe('B站 probe：档位、音轨与接口错误', () => {
     expect(probe.media?.title).toBe('测试视频');
   });
 
+  test('B1b 单 P 也回 parts[1] 并带 cid，简介透传', async () => {
+    stubView({ desc: '  简介正文  ' });
+    stubPlayurl({
+      video: [videoTrack(1920, 1080, 2_000_000)],
+      audio: [{ bandwidth: 192_000, codecs: 'mp4a.40.2', baseUrl: `${CDN}a.m4s` }],
+    });
+    stubCdn({ 'v1920.m4s': { total: 8_000_000 } });
+
+    const probe = await probeBilibiliApi(BVID);
+    // 分析页要显示「第 1 P · CID · 时长」，空数组会让界面以为没有分P
+    expect(probe.media?.parts.length).toBe(1);
+    expect(probe.media?.parts[0].cid).toBe(111);
+    expect(probe.media?.parts[0].index).toBe(1);
+    expect(probe.media?.parts[0].selected).toBe(true);
+    // 单 P 时长用播放接口的 timelength（240s），不是零
+    expect(probe.media?.parts[0].duration_ms).toBe(240_000);
+    expect(probe.media?.desc).toBe('简介正文');
+    // 单 P 不能拼 ?p=1：否则它和 source_url 是两个字符串，后端去重会各建一个任务
+    expect(probe.media?.parts[0].url).toBe(probe.media?.source_url);
+  });
+
+  test('B1c 竖屏 1080×1920 归到 1080P，不是 480P', async () => {
+    stubView();
+    stubPlayurl({
+      // 竖屏：宽 1080 落在 854 与 1280 之间，只按宽看会被误标成 480P
+      video: [videoTrack(1080, 1920, 10_000_000)],
+      audio: [{ bandwidth: 192_000, codecs: 'mp4a.40.2', baseUrl: `${CDN}a.m4s` }],
+    });
+    stubCdn({ 'v1080.m4s': { total: 8_000_000 } });
+
+    const probe = await probeBilibiliApi(BVID);
+    expect(probe.formats.map((f) => f.id)).toEqual(['bili-1920']);
+    expect(probe.formats[0].label).toBe('1080P');
+    // 宽高仍如实透传，界面要显示「1080×1920」
+    expect(probe.formats[0].width).toBe(1080);
+    expect(probe.formats[0].height).toBe(1920);
+  });
+
   test('B2 没有音频轨：必须提前说清楚会得到无声视频', async () => {
     stubView();
     stubPlayurl({

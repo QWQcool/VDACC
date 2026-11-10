@@ -25,6 +25,8 @@ import { getKugou, probeKugou } from './engines/kugou';
 import { canHandle as canSniff, getSniff, probeSniff } from './engines/sniff';
 import { getBilibiliApi, previewBilibili, probeBilibiliApi, refetchSidecars } from './engines/bilibili_api';
 import { SITES as AUTH_SITES, login as authLogin, status as authStatus, verify as authVerify } from './auth';
+import { QR_SITES, logoutSite as qrLogout, qrGenerate, qrPoll, type QrSite } from './auth_qr';
+import { fetchCollection, parseCollectionTarget } from './engines/bilibili_collection';
 import { componentPath, genericInstalled, getGeneric, probeGeneric } from './engines/generic';
 import type { DownloadOptions, Job, ProbeResult } from './core/types';
 
@@ -330,8 +332,9 @@ const server = Bun.serve({
         jobs: order.length, engine: 'ts',
         theme: (loadConfig().theme || 'light'),
         limitRate: currentLimitBytesPerSec(),
-        // 能力位：界面据此决定要不要显示「分析」（端上没有 ffmpeg，按钮就不该出现）
-        capabilities: { analyze: !!Bun.which(ffmpegBin()) },
+        // 能力位：界面据此决定要不要显示「分析」（端上没有 ffmpeg，按钮就不该出现）；
+        // qrSites 决定「登录」按钮走扫码弹层还是走电脑上的 Edge
+        capabilities: { analyze: !!Bun.which(ffmpegBin()), qrSites: QR_SITES },
         warnings: persistenceWarning ? [persistenceWarning] : [],
       });
     }
@@ -367,6 +370,30 @@ const server = Bun.serve({
       if (!target) return json({ ok: false, error: { code: 'bad_input', message: '缺少 url' } }, 400);
       try {
         return json(await probeUrl(target));
+      } catch (err) {
+        return json(failBody('ts', err));
+      }
+    }
+
+    // 收藏夹 / 合集：只返回一页列表，下载仍由用户逐条勾选后走 /api/jobs。
+    // 不做「一键全下」——这里的职责是"让用户看见并挑"，不是替他决定。
+    if (path === '/api/collection' && req.method === 'POST') {
+      const body = (await req.json().catch(() => null)) || {};
+      const input = String(body.url || body.id || '').trim();
+      const target = parseCollectionTarget(input, body.kind);
+      if (!target) {
+        return json({
+          ok: false,
+          error: {
+            code: 'bad_input',
+            message: '认不出这是收藏夹还是合集',
+            next_action: '粘贴收藏夹页面地址（space.bilibili.com/<uid>/favlist?fid=…）或合集页地址',
+          },
+        }, 400);
+      }
+      try {
+        const page = await fetchCollection(target, Number(body.page) || 1);
+        return json({ ok: true, ...page });
       } catch (err) {
         return json(failBody('ts', err));
       }
@@ -430,6 +457,44 @@ const server = Bun.serve({
         sites: local.map((r) => ({ ...r, online: bySite.get(r.site) || null })),
         loggingIn: [...authLogins],
       });
+    }
+
+    // 扫码登录（B站 / 网易云）：一两个 HTTP 往返就能登完，不需要 Edge / Playwright / profile 锁。
+    // 轮询由前端发起（1.5s 一次），服务端不挂后台任务，页面关掉就不会有残留循环。
+    const qrMatch = /^\/api\/auth\/([a-z]+)\/qrcode$/.exec(path);
+    if (qrMatch && QR_SITES.includes(qrMatch[1] as QrSite)) {
+      const site = qrMatch[1] as QrSite;
+      if (req.method === 'POST') {
+        try {
+          return json({ ok: true, site, ...(await qrGenerate(site)) });
+        } catch (err) {
+          return json(failBody('ts', err));
+        }
+      }
+      if (req.method === 'GET') {
+        const key = url.searchParams.get('key') || '';
+        if (!key) return json({ ok: false, error: { code: 'bad_input', message: '缺少 key' } }, 400);
+        try {
+          const result = await qrPoll(site, key);
+          // 扫码是"黑盒"流程：平台给的状态码必须留在日志里，否则出错只能靠用户截图猜
+          console.error(`[qr] site=${site} state=${result.state} code=${result.rawCode ?? '-'} msg=${result.message}`);
+          // 凭据一变就立刻让 /api/auth 的 20s 缓存失效，否则登完还要等半分钟才显示
+          if (result.saved) authCache = null;
+          return json({ ok: true, site, ...result });
+        } catch (err) {
+          return json(failBody('ts', err));
+        }
+      }
+    }
+    const logoutMatch = /^\/api\/auth\/([a-z]+)\/logout$/.exec(path);
+    if (logoutMatch && QR_SITES.includes(logoutMatch[1] as QrSite) && req.method === 'POST') {
+      try {
+        const removed = qrLogout(logoutMatch[1] as QrSite);
+        authCache = null;
+        return json({ ok: true, removed });
+      } catch (err) {
+        return json(failBody('ts', err));
+      }
     }
 
     // 重新登录：在电脑上弹出独立 Edge，扫码结果写回凭据（手机端只负责发起与看状态）

@@ -115,13 +115,54 @@ if (cmd === 'auth') {
     }
     const site = positional[0];
     if (!site) {
-      console.error('用法: bun src/cli.ts auth <bilibili|netease> [--status [--offline]|--clear]');
+      console.error('用法: bun src/cli.ts auth <bilibili|netease> [--status [--offline]|--clear]'
+        + '\n       bun src/cli.ts auth bilibili --qr [--timeout 180]   # 终端扫码，不开浏览器');
       process.exit(2);
     }
     if (has('--clear')) {
       auth.clear(site);
       console.log(`已清除 ${site} 凭据`);
       process.exit(0);
+    }
+    // 扫码登录：B站 / 网易云 都是纯 HTTP，不需要 Edge/Playwright/profile 锁。
+    // 二维码过期自动换一张（最多 3 张），用户不用敲任何键——终端里没法"点刷新"。
+    if (has('--qr')) {
+      const qr = await import('./auth_qr');
+      if (!qr.QR_SITES.includes(site as never)) {
+        console.error(`扫码登录目前只支持：${qr.QR_SITES.join(' / ')}；其它站点请用默认的 Edge 方式`);
+        process.exit(2);
+      }
+      const target = site as (typeof qr.QR_SITES)[number];
+      const appName = target === 'netease' ? '网易云音乐' : 'B站';
+      const QRCode = (await import('qrcode')).default;
+      const deadline = Date.now() + Number(flag('--timeout', '180')) * 1000;
+      let round = 0;
+      while (Date.now() < deadline && round < 3) {
+        round += 1;
+        const start = await qr.qrGenerate(target);
+        console.log(await QRCode.toString(start.url, { type: 'terminal', small: true }));
+        console.error(`请用${appName} App 扫码（第 ${round} 张，约 ${start.expiresIn} 秒后失效）`);
+        let last = '';
+        while (Date.now() < deadline) {
+          await new Promise((r) => setTimeout(r, 1500));
+          const p = await qr.qrPoll(target, start.key);
+          if (p.message !== last) {
+            console.error(`  ${p.message}`);
+            last = p.message;
+          }
+          if (p.state === 'ok' || p.state === 'unverified') {
+            console.log(JSON.stringify(p));
+            process.exit(0);
+          }
+          if (p.state === 'error') {
+            console.error(p.message);
+            process.exit(1);
+          }
+          if (p.state === 'expired') break;
+        }
+      }
+      console.error('超时未完成登录；可重跑，或改用默认 Edge 方式');
+      process.exit(1);
     }
     try {
       console.error(`已打开独立 Edge（${site}），请在窗口里完成登录，成功后自动保存并关闭`);

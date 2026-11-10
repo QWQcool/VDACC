@@ -35,6 +35,8 @@ export interface Part {
   duration_ms: number | null;
   url: string;
   selected: boolean;
+  /** B站 分P 的 cid；其它平台没有这一层，留空。 */
+  cid?: number;
 }
 
 export interface Media {
@@ -46,6 +48,8 @@ export interface Media {
   source_url: string;
   platform: string;
   parts: Part[];
+  /** 简介/描述。只用于界面展示，不参与命名，也不保证所有平台都有。 */
+  desc?: string;
 }
 
 export interface Format {
@@ -70,6 +74,33 @@ export interface ErrorBody {
   code: string;
   message: string;
   next_action: string;
+}
+
+/** 收藏夹 / 合集这类"列表入口"的条目。只描述可下载对象，不携带播放地址。 */
+export interface CollectionItem {
+  bvid: string;
+  title: string;
+  author: string;
+  cover: string;
+  duration_ms: number | null;
+  url: string;
+  /** `gone` = 已失效/被删；`private` = 无权限。两种都要如实显示，不能过滤掉。 */
+  state: 'ok' | 'gone' | 'private';
+}
+
+export type CollectionKind = 'fav' | 'season';
+
+export interface CollectionPage {
+  source: 'bilibili-fav';
+  kind: CollectionKind;
+  id: string;
+  title: string;
+  owner: string;
+  total: number;
+  page: number;
+  pageSize: number;
+  hasMore: boolean;
+  items: CollectionItem[];
 }
 
 export interface ProbeResult {
