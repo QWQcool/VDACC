@@ -26,6 +26,7 @@ import { canHandle as canSniff, getSniff, probeSniff } from './engines/sniff';
 import { getBilibiliApi, previewBilibili, probeBilibiliApi, refetchSidecars } from './engines/bilibili_api';
 import { SITES as AUTH_SITES, login as authLogin, status as authStatus, verify as authVerify } from './auth';
 import { QR_SITES, logoutSite as qrLogout, qrGenerate, qrPoll, type QrSite } from './auth_qr';
+import { renewStatus } from './auth_renew';
 import { fetchCollection, parseCollectionTarget } from './engines/bilibili_collection';
 import { componentPath, genericInstalled, getGeneric, probeGeneric } from './engines/generic';
 import type { DownloadOptions, Job, ProbeResult } from './core/types';
@@ -486,6 +487,16 @@ const server = Bun.serve({
         }
       }
     }
+    // 凭据续期状态（只读）：问平台"现在需要续期吗"，不动凭据。
+    // 自动续期没做——`correspondPath` 那步的公钥拿不到可信来源，做一半会把用户踢下线（见 auth_renew.ts）。
+    if (path === '/api/auth/bilibili/renew' && req.method === 'GET') {
+      try {
+        return json({ ok: true, ...(await renewStatus()) });
+      } catch (err) {
+        return json(failBody('ts', err));
+      }
+    }
+
     const logoutMatch = /^\/api\/auth\/([a-z]+)\/logout$/.exec(path);
     if (logoutMatch && QR_SITES.includes(logoutMatch[1] as QrSite) && req.method === 'POST') {
       try {

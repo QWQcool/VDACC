@@ -62,6 +62,8 @@ createApp({
     // 哪些站点支持扫码由 /api/health 的能力位给（前端不写死，后端加站点这里自动跟上）
     const qrSites = ref([]);
     const qrSite = ref('bilibili');
+    // 续期状态（只读）：平台说要不要刷新凭据
+    const renewInfo = ref(null);
     const qrKey = ref('');
     const qrImage = ref('');
     const qrState = ref('idle');
@@ -560,6 +562,13 @@ createApp({
       authBusy.value = false;
       if (data.ok) authRows.value = data.sites || [];
       else message.value = (data.error && data.error.message) || 'failed';
+      loadRenew();
+    }
+
+    /** 续期状态是单独一次只读查询（平台会真的算一次，不跟着 20s 的账号缓存走）。 */
+    async function loadRenew() {
+      const data = await api('/api/auth/bilibili/renew');
+      renewInfo.value = data.ok ? data : null;
     }
 
     async function runDiagnostics() {
@@ -659,6 +668,111 @@ createApp({
       closeQr();
       await loginSite(site);
     }
+
+    // ── 剪贴板 →「立即分析」（N21）──
+    // 唧唧Down 是桌面壳，可以直接读 Win32 剪贴板；我们是浏览器页面，只有两条路：
+    // ① navigator.clipboard.readText()（需要用户授权，可能被拒）② paste 事件（零权限）。
+    // 所以默认关闭，打开时当场请求一次授权：授权失败就明确说"没权限"，不假装在工作。
+    const clipWatch = ref(false);
+    const clipHit = ref(null);
+    let clipTimer = null;
+    let clipLast = '';
+    let clipReading = false;
+
+    const URL_RE = /https?:\/\/[^\s"'<>，。；、）)]+/;
+    /** 从一段分享文案里抽链接；没有链接就退而找裸 BV 号。抽不到返回空串。 */
+    function extractLink(text) {
+      const raw = String(text || '');
+      const m = URL_RE.exec(raw);
+      if (m) return m[0];
+      const bv = /\bBV[0-9A-Za-z]{10}\b/.exec(raw);
+      return bv ? bv[0] : '';
+    }
+    /** 只对"像下载目标"的链接弹卡片；否则复制一句普通网址也弹，纯噪音。 */
+    const isMediaLink = (link) => /bilibili\.com|b23\.tv|douyin\.com|iesdouyin|music\.163\.com|y\.qq\.com|kugou|kuwo/i.test(link);
+
+    function handleClipText(text) {
+      const raw = String(text || '');
+      if (!raw || raw === clipLast) return;
+      clipLast = raw;
+      const link = extractLink(raw);
+      if (!link || !isMediaLink(link)) return;
+      if (link === url.value.trim()) return;
+      clipHit.value = { link };
+    }
+
+    function stopClipWatch() {
+      if (clipTimer) { clearInterval(clipTimer); clipTimer = null; }
+    }
+
+    function startClipWatch() {
+      stopClipWatch();
+      clipTimer = setInterval(async () => {
+        // 只在可见且聚焦时读：后台标签页读剪贴板既没意义，也更容易被浏览器拒
+        if (clipReading || document.visibilityState !== 'visible' || !document.hasFocus()) return;
+        clipReading = true;
+        try {
+          handleClipText(await navigator.clipboard.readText());
+        } catch {
+          // 授权被收回/浏览器策略变化：停掉轮询，但保留已开的开关状态说明
+          stopClipWatch();
+        } finally {
+          clipReading = false;
+        }
+      }, 1500);
+    }
+
+    async function toggleClipWatch() {
+      if (clipWatch.value) {
+        clipWatch.value = false;
+        localStorage.setItem('vdl-clipwatch', '0');
+        stopClipWatch();
+        return;
+      }
+      try {
+        // 必须在用户手势里读一次，浏览器才弹授权；失败就不算打开
+        const text = await navigator.clipboard.readText();
+        clipWatch.value = true;
+        localStorage.setItem('vdl-clipwatch', '1');
+        handleClipText(text);
+        startClipWatch();
+      } catch {
+        clipWatch.value = false;
+        localStorage.setItem('vdl-clipwatch', '0');
+        message.value = t('clipDenied');
+      }
+    }
+
+    /** 挂载时恢复上次的开关；授权已被收回就如实关掉，不留一个假的「已开启」。 */
+    async function initClipWatch() {
+      clipWatch.value = localStorage.getItem('vdl-clipwatch') === '1';
+      if (!clipWatch.value) return;
+      try {
+        await navigator.clipboard.readText();
+        startClipWatch();
+      } catch {
+        clipWatch.value = false;
+        localStorage.setItem('vdl-clipwatch', '0');
+        message.value = t('clipDenied');
+      }
+    }
+
+    function acceptClip() {
+      if (!clipHit.value) return;
+      url.value = clipHit.value.link;
+      clipHit.value = null;
+      probeUrl();
+    }
+
+    const dismissClip = () => { clipHit.value = null; };
+
+    // paste 兜底：任何地方 Ctrl+V 都会触发，不需要任何权限
+    window.addEventListener('paste', (e) => {
+      const el = e.target;
+      const tag = el && el.tagName ? el.tagName : '';
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return; // 输入框里粘贴本来就会解析，别重复弹
+      handleClipText(e.clipboardData ? e.clipboardData.getData('text') : '');
+    });
 
     const authBadge = (a) => (a.online && a.online.ok ? 'ok'
       : a.online && a.online.ok === false ? 'fail' : 'neutral');
@@ -821,6 +935,8 @@ createApp({
       }
       // 右栏要显示组件状态，挂载时就查一次（不必等用户打开设置）
       refreshComponents();
+      // 剪贴板监听：只在用户上次明确打开过时才恢复
+      initClipWatch();
       const list = await api('/api/jobs');
       if (list.ok) {
         jobs.value = (list.jobs || []).slice().reverse();
@@ -844,6 +960,7 @@ createApp({
     });
 
     onBeforeUnmount(() => {
+      stopClipWatch();
       if (events) events.close();
       teardownOverlays();
     });
@@ -854,8 +971,9 @@ createApp({
       connected, outDir, limitRate, rateText, platformClass, jobName,
       settingsOpen, sOutDir, sTheme, sLimitRateMB, sConcurrency, sGeneric,
       compStatus, compBusy, previewUrl,
-      authRows, authBusy, loadAuth, loginSite, authBadge, authText,
+      authRows, authBusy, loadAuth, loginSite, authBadge, authText, renewInfo, loadRenew,
       qrOpen, qrSites, qrSite, qrImage, qrState, qrMessage,
+      clipWatch, clipHit, toggleClipWatch, acceptClip, dismissClip,
       openQr, closeQr, startQr, logoutSite, usesQr, fallbackToEdge,
       diagRows, diagBusy, runDiagnostics,
       isBiliJob, refetchJobSidecars,

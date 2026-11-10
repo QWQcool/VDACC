@@ -514,11 +514,24 @@
                 {{ t('logout') }}
               </button>
             </div>
+            <!-- 续期状态：平台算出来的，不是我们自己猜的 -->
+            <div class="help" v-if="renewInfo" :class="{ 'renew-warn': renewInfo.needsRenew || renewInfo.state !== 'ok' }">
+              {{ t('renewLabel') }}：{{ renewInfo.message }}
+            </div>
             <div style="display:flex;align-items:center;gap:8px">
               <span class="help">{{ authBusy ? t('authChecking') : t('accountsHelp') }}</span>
               <span style="flex:1"></span>
               <button class="btn ghost sm" :disabled="authBusy" @click="loadAuth">{{ t('refresh') }}</button>
             </div>
+          </div>
+
+          <div class="field">
+            <label>{{ t('clipboard') }}</label>
+            <label class="switch">
+              <input type="checkbox" :checked="clipWatch" @change="toggleClipWatch">
+              <span class="track"></span>{{ t('clipWatchOn') }}
+            </label>
+            <span class="help">{{ t('clipHelp') }}</span>
           </div>
 
           <div class="field">
@@ -576,6 +589,16 @@
             <button class="btn ghost sm" @click="fallbackToEdge">{{ t('qrFallbackEdge') }}</button>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- 剪贴板命中：右下角卡片，点「立即分析」才真的解析（绝不自动跳转） -->
+    <div v-if="clipHit" class="clip-card" role="status">
+      <div class="clip-head">{{ t('clipFound') }}</div>
+      <div class="clip-link mono" :title="clipHit.link">{{ clipHit.link }}</div>
+      <div class="clip-actions">
+        <button class="btn primary sm" @click="acceptClip">{{ t('clipAnalyze') }}</button>
+        <button class="btn ghost sm" @click="dismissClip">{{ t('clipIgnore') }}</button>
       </div>
     </div>
 

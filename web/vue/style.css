@@ -626,6 +626,23 @@
 }
 .chip.on { border-color: var(--ok); background: var(--ok-soft); color: var(--ok); }
 .chip.dim { opacity: .5; cursor: not-allowed; }
+/* 续期状态：需要续期/凭据失效时用警示色，不要和普通说明文字混在一起 */
+.help.renew-warn { color: #b45309; }
+
+/* ── 剪贴板命中卡片（右下角） ─────────────── */
+.clip-card {
+  position: fixed; right: 18px; bottom: 18px; z-index: 47;
+  width: min(320px, calc(100vw - 36px));
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r-lg); box-shadow: var(--shadow-lg);
+  padding: 12px 14px;
+}
+.clip-head { font-size: 12px; color: var(--text-2); margin-bottom: 6px; }
+.clip-link {
+  font-size: 12px; color: var(--text-3);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 10px;
+}
+.clip-actions { display: flex; gap: 8px; justify-content: flex-end; }
 
 /* ── 收藏夹 / 合集列表 ───────────────────── */
 .coll-row .name { flex: 1; min-width: 160px; }

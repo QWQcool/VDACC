@@ -120,9 +120,13 @@ export function toNetscape(cookies: QrCookie[]): string {
  * `bilibili.cookies.txt`（`bilibili_api.cookieHeader()` **优先读它**）。
  * 只写 json 的话，旧的 txt 会把新 cookie 盖住——扫码成功但引擎仍用旧凭据，看起来就是"登录没用"。
  */
-function saveCredentials(site: QrSite, deps: QrDeps, cookies: QrCookie[]) {
+function saveCredentials(
+  site: QrSite, deps: QrDeps, cookies: QrCookie[],
+  meta?: Record<string, unknown>,
+) {
   const jsonFile = credentialFile(site, deps);
-  writeJsonAtomic(jsonFile, { cookies, origins: [] });
+  // meta 是"旁挂"信息（续期令牌等），cookie 数组形状不变——auth.ts / 引擎只读 cookies
+  writeJsonAtomic(jsonFile, { cookies, origins: [], ...(meta ? { meta } : {}) });
   const txtFile = credentialTxt(site, deps);
   const tmp = `${txtFile}.${randomUUID()}.tmp`;
   try {
@@ -296,7 +300,10 @@ export async function pollBilibili(key: string, deps: QrDeps = {}): Promise<QrPo
   // 落盘沿用 Playwright storage_state 形状：`auth.ts` 的 cookieHeader() 与引擎的 cookie
   // 过滤都按 state.cookies 读，改形状会连带改三处，没必要。
   const file = credentialFile('bilibili', deps);
-  saveCredentials('bilibili', deps, cookies);
+  // 续期令牌只在扫码成功那一次出现；现在不存，将来就永远没有（N19a）
+  const refreshToken = String(data.refresh_token || '');
+  saveCredentials('bilibili', deps, cookies,
+    refreshToken ? { refreshToken, refreshAt: Number(data.timestamp) || now } : undefined);
 
   const cookie = cookies.map((c) => `${c.name}=${c.value}`).join('; ');
   let account: QrAccount | null = null;

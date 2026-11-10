@@ -124,6 +124,19 @@ if (cmd === 'auth') {
       console.log(`已清除 ${site} 凭据`);
       process.exit(0);
     }
+    // 凭据续期状态：只读（问平台"要不要续期"），不动凭据
+    if (has('--renew')) {
+      if (site !== 'bilibili') {
+        console.error('续期状态目前只有 B站 有公开接口');
+        process.exit(2);
+      }
+      const renew = await import('./auth_renew');
+      const st = await renew.renewStatus();
+      if (has('--json')) console.log(JSON.stringify(st, null, 2));
+      else console.log(`${st.state}\t${st.needsRenew ? '建议续期' : '不需要续期'}\t${st.message}`);
+      process.exit(st.state === 'ok' ? 0 : 1);
+    }
+
     // 扫码登录：B站 / 网易云 都是纯 HTTP，不需要 Edge/Playwright/profile 锁。
     // 二维码过期自动换一张（最多 3 张），用户不用敲任何键——终端里没法"点刷新"。
     if (has('--qr')) {

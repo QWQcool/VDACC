@@ -517,6 +517,20 @@ DedeUserID__ckMd5 / sid / default_sites / ticket / first_domain），写入时�
   **禁用**的「音频」chip 并在 tooltip 说明，而不是摆一个点了没反应的开关。要做真 audio-only
   需在 `bilibili_api` 加"只取 dash.audio → .m4a"的分支，列为后续 N20b，不在本轮范围。
 
+**N19a 落地状态（2026-11-10）**：🟡 做到「记录 + 判断」，**自动续期没做**，理由在下面。
+
+- 扫码成功时把 `data.refresh_token` 与 `timestamp` 存进凭据文件的 `meta`（`cookies` 数组形状不变）。
+  **注意**：今天那次扫码发生在本功能之前，所以现存凭据里没有 `meta`，界面会如实写「这次登录未记录 refresh_token」。
+- 新增 `ts/src/auth_renew.ts`：只读调用 `cookie/info?csrf=<bili_jct>`，
+  返回 `{state, needsRenew, canAutoRenew, message}`；`-101` → `need_login`，网络失败 → `error`（不冒充“需要续期”）。
+  路由 `GET /api/auth/bilibili/renew`、CLI `auth bilibili --renew [--json]`、设置面板「续期状态」一行。
+- **为什么不做自动续期**：真链路是 `cookie/info` → `correspondPath`（用 B站 公钥 RSA-OAEP 加密 timestamp）→
+  抓 `/correspond/1/<correspondPath>` 里的 `refresh_csrf` → `POST cookie/refresh` → `POST cookie/confirm`。
+  公钥与 `correspondPath` 细节拿不到可信来源；**猜一个公钥等于埋雷**，而 refresh 成功但 confirm 没做会让旧 cookie 失效——
+  “帮用户续期”变成“把用户踢下线”。所以先只报告状态，真需要时重新扫码（现在 10 秒）。
+- 实测（真实凭据）：`cookie/info` 返回 `{refresh:false, timestamp:1794304882640}`；
+  CLI 输出 `state=ok / needsRenew=false`。单测 7 条（无凭据、缺 csrf、不需要续期、需要续期+有 token、-101、网络失败、文件损坏）。
+
 **N21 · 剪贴板 →「立即分析」（P1）**
 
 唧唧Down 用 Rust 读 Win32 剪贴板；我们是浏览器页面，能力边界不同，分两层且都如实告知：
@@ -584,7 +598,18 @@ notes §9。**IDA 没做**：Pro 需商业授权不能自动下载，Free 不支
 
 由此把计划改成三处（都是"比它多做一步"，不是抄）：
 
-- **N19a · 凭据续期（P1，新增）**：poll 成功时把 `refresh_token` 一并存进 `auth/bilibili.json` 的旁挂字段
+- **N21 落地状态（2026-11-10）**：✅ 完成（默认关闭）。
+
+- 设置面板新增「剪贴板」开关（默认**关**，见决策 D2）：打开时**当场**读一次剪贴板以触发浏览器授权，
+  被拒就关掉开关并说明「仍可 Ctrl+V 粘贴」，不留一个假的“已开启”。
+- 轮询 1.5s，只在 `visibilityState==='visible'` 且 `hasFocus()` 时读；与上次内容去重；命中只弹右下角卡片，
+  **绝不自动解析**——点「立即分析」才填输入框并走 probe。
+- 兜底：全局 `paste` 监听（零权限），输入框内粘贴不重复弹。
+- 只对“像下载目标”的链接（B站/抖音/网易云/QQ/酷我/酷狗/b23）弹卡片，普通网址不打扰。
+- 验证（Playwright，授予剪贴板权限）：开关可开启 → 写入带 `?spm_id_from=…` 的分享文案 → 卡片出现并抽出链接 →
+  点「立即分析」→ 输入框被填、`/api/probe` 收到该 URL、卡片消失、零 page error。
+
+**N19a · 凭据续期（P1，新增）**：poll 成功时把 `refresh_token` 一并存进 `auth/bilibili.json` 的旁挂字段
   （cookie 数组不动，保持 `storage_state` 形状）；启动与每 24h 用 `cookie/info` 问一次是否需要续期，
   需要则 **POST** `cookie/refresh`（实测 GET 返回 `Method Not Allowed`）拿新 cookie 并原子落盘。
   **边界**：两条接口只在未登录态验证过存在性（`-101 账号未登录`），语义要首个真实扫码后确认；
