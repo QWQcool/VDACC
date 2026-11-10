@@ -22,6 +22,14 @@ const BUCKETS: Array<[number, string]> = [
 ];
 
 const urlCache = operationState(() => new Map<string, { video: string; audio: string }>());
+
+/**
+ * 「重新解析播放地址」的闭包。
+ * B站 的 m4s 地址带签名与时效，长视频下到一半会 403（唧唧Down 里那句「刷新播放地址重试次数已用尽」
+ * 就是这件事）。探测时把「再取一遍 DASH 并重填 urlCache」记下来，下载遇 403 才能续传，
+ * 而不是把已经下好的几百兆扔掉。
+ */
+const refresher = operationState(() => ({ value: null as null | (() => Promise<void>) }));
 /**
  * 字幕接口要 aid+cid（普通视频）或 ep_id（番剧）；探测时顺手记下，下载带 --subs 时才请求。
  *
@@ -307,6 +315,16 @@ async function probeVideo(target: Target): Promise<ProbeResult> {
   subtitleState().value = {
     bvid, cid: Number(current.cid), aid: Number(view.aid || 0), durationMs,
   };
+  // 地址过期时用同一套参数再取一遍，foldDash 会把新地址写回 urlCache
+  refresher().value = async () => {
+    const again = await apiJson(
+      `/x/player/playurl?bvid=${bvid}&cid=${current.cid}&qn=120&fnval=4048&fourk=1`, referer);
+    if (!again?.dash) {
+      throw new VdlError('url_expired', '播放地址已过期，重新获取失败',
+        '稍后重试；持续失败请重新解析该视频');
+    }
+    foldDash(again.dash, durationMs);
+  };
 
   // 单 P 也回 parts[1]：分析页要显示「第 1 P · CID · 时长」，空数组会让界面退化成
   // "没有分P"的另一种样子。cid 一并带上，界面才不用为它再打一次接口。
@@ -370,6 +388,18 @@ async function probeBangumi(target: Target): Promise<ProbeResult> {
   if (!formats.length) throw new VdlError('no_stream', '没有视频轨');
   const warnings = dashWarnings(dash);
   subtitleState().value = { epId: String(ep.id), durationMs };
+  // 番剧的地址同样会过期；重取时也要再补一次 SSR 那档 4K，否则刷新后会掉档
+  refresher().value = async () => {
+    const again = await apiJson(
+      `/pgc/player/web/v2/playurl?ep_id=${ep.id}&fnval=12240&fourk=1`, epReferer);
+    const againDash = again?.video_info?.dash || again?.dash;
+    if (!againDash) {
+      throw new VdlError('url_expired', '播放地址已过期，重新获取失败',
+        '稍后重试；持续失败请重新解析该番剧');
+    }
+    const againSsr = await ssrDash(epReferer);
+    foldDash(againSsr.length ? mergeDash(againDash, againSsr) : againDash, durationMs);
+  };
 
   const parts: Part[] = episodes.map((e, i) => ({
     index: i + 1,
@@ -393,8 +423,8 @@ async function probeBangumi(target: Target): Promise<ProbeResult> {
            formats, warnings, error: null };
 }
 
-async function streamTo(url: string, part: string,
-                        onProgress: (w: number, t: number) => void = report): Promise<number> {
+async function streamOnce(url: string, part: string,
+                          onProgress: (w: number, t: number) => void = report): Promise<number> {
   let resume = existsSync(part) ? statSync(part).size : 0;
   const headers: Record<string, string> = { 'User-Agent': UA, Referer: 'https://www.bilibili.com/' };
   if (resume) headers.Range = `bytes=${resume}-`;
@@ -423,6 +453,43 @@ async function streamTo(url: string, part: string,
   }
   onProgress(written, total || written);
   return statSync(part).size;
+}
+
+/** 重试上限。地址过期不是「网络抖动」，2 次足够；再多说明是账号/权限问题，重试没用。 */
+const URL_EXPIRED_RETRIES = 2;
+
+/**
+ * 下载一条流，遇到 **403 / 410**（B站 签名地址过期）时先刷新地址再续传。
+ *
+ * 为什么不重试其它错误：404 通常是被删/被限权，刷新地址也拿不到；5xx 会由外层任务的
+ * 重试机制处理，在这里重试只会把一次失败拖成三次。
+ * 续传本身由 `streamOnce` 里的 `.part` + `Range` 完成，所以重试不会重下已完成的字节。
+ */
+async function streamTo(
+  url: string, part: string,
+  onProgress: (w: number, t: number) => void = report,
+  refetch?: () => Promise<string>,
+): Promise<number> {
+  let current = url;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await streamOnce(current, part, onProgress);
+    } catch (err) {
+      const code = err instanceof VdlError ? err.code : '';
+      const expired = code === 'http_403' || code === 'http_410';
+      if (!expired || !refetch || attempt >= URL_EXPIRED_RETRIES) {
+        // 已经到了上限还失败：把「地址过期」说明白，别让用户以为是网络问题
+        if (expired && refetch && attempt >= URL_EXPIRED_RETRIES) {
+          throw new VdlError('url_expired',
+            `播放地址已过期，刷新 ${URL_EXPIRED_RETRIES} 次后仍然失败`,
+            '该视频可能刚被限权/删除；重试可续传，或换档位再试');
+        }
+        throw err;
+      }
+      current = await refetch();
+      if (!current) throw err;
+    }
+  }
 }
 
 /** 从 `content-range: bytes 0-0/21154992` 里取总字节；`*` 或畸形值返回 0。 */
@@ -753,7 +820,12 @@ async function getBilibiliApiImpl(
     const [w, t] = aggregateProgress(base, written, planned, total);
     report(w, t);
   };
-  await streamTo(urls.video, vPart, sink);
+  // 地址过期时重取一次再续传（同一档位的新地址，不是换档）
+  const refetchVideo = async () => {
+    await refresher().value?.();
+    return urlCache().get(fmt.id)?.video || '';
+  };
+  await streamTo(urls.video, vPart, sink, refetchVideo);
   base = statSync(vPart).size;
   // 探测到的总字节是同一个 CDN 给的真值：短了就是截断（或被中途降档）。
   // 校验必须放在合并之前——合并成功只说明 ffmpeg 跑通了，不说明内容完整。
@@ -763,7 +835,11 @@ async function getBilibiliApiImpl(
       '重试可续传；若持续偏小，可能是该清晰度被降级，换档再试');
   }
   if (urls.audio) {
-    await streamTo(urls.audio, aPart, sink);
+    const refetchAudio = async () => {
+      await refresher().value?.();
+      return urlCache().get(fmt.id)?.audio || '';
+    };
+    await streamTo(urls.audio, aPart, sink, refetchAudio);
     const aGot = statSync(aPart).size;
     if (aPlanned > 0 && aGot < aPlanned * 0.95) {
       throw new VdlError('incomplete_media',

@@ -229,6 +229,101 @@ describe('B站 probe：档位、音轨与接口错误', () => {
   });
 });
 
+describe('B站 get：播放地址过期（403）', () => {
+  /** 每 P 只给一条视频轨；旧地址在真正下载时 403，新地址正常。 */
+  function stubRotatingPlayurl(counter: { calls: number }) {
+    routes.push({
+      name: 'playurl-rotating',
+      match: (url) => url.includes('/x/player/playurl'),
+      handle: () => {
+        const file = counter.calls === 0 ? 'v-old.m4s' : 'v-new.m4s';
+        counter.calls += 1;
+        return json({
+          code: 0,
+          data: {
+            timelength: 240_000,
+            dash: {
+              video: [{
+                width: 1920, height: 1080, bandwidth: 2_000_000,
+                codecs: 'avc1.640028', frameRate: '30', baseUrl: `${CDN}${file}`,
+              }],
+              audio: [{ bandwidth: 192_000, codecs: 'mp4a.40.2', baseUrl: `${CDN}a.m4s` }],
+            },
+          },
+        });
+      },
+    });
+  }
+
+  function stubCdnExpiring() {
+    routes.push({
+      name: 'cdn-expiring',
+      match: (url) => url.startsWith(CDN),
+      handle: (url, init) => {
+        // 旧地址：探测（Range）时不拦，真正下载时 403——模拟签名中途过期
+        if (url.includes('v-old.m4s')) {
+          if (headerOf(init, 'Range')) {
+            return new Response(null, { status: 206, headers: { 'content-range': `bytes 0-0/${V_TOTAL}` } });
+          }
+          return new Response('expired', { status: 403 });
+        }
+        const total = url.includes('a.m4s') ? A_TOTAL : V_TOTAL;
+        if (headerOf(init, 'Range')) {
+          return new Response(null, { status: 206, headers: { 'content-range': `bytes 0-0/${total}` } });
+        }
+        return new Response(new Uint8Array(total), {
+          status: 200, headers: { 'content-type': 'video/mp4', 'content-length': String(total) },
+        });
+      },
+    });
+  }
+
+  test('B7 403 后重新解析地址并继续下载，不是直接失败', async () => {
+    stubView();
+    const counter = { calls: 0 };
+    stubRotatingPlayurl(counter);
+    stubCdnExpiring();
+
+    // ffmpeg 指向不存在的路径：合并会失败，但**下载阶段**必须已经过了 403
+    const code = await codeOf(() => getBilibiliApi(`https://www.bilibili.com/video/${BVID}`, null, outDir));
+    expect(code).not.toBe('http_403');
+    expect(code).not.toBe('url_expired');
+    // 初次 1 次 + 刷新 1 次
+    expect(counter.calls).toBe(2);
+  });
+
+  test('B8 刷新两次仍 403：报 url_expired，而不是含糊的 http_403', async () => {
+    stubView();
+    const counter = { calls: 0 };
+    // 始终给旧地址（刷不到新地址）
+    routes.push({
+      name: 'playurl-always-old',
+      match: (url) => url.includes('/x/player/playurl'),
+      handle: () => {
+        counter.calls += 1;
+        return json({
+          code: 0,
+          data: {
+            timelength: 240_000,
+            dash: {
+              video: [{
+                width: 1920, height: 1080, bandwidth: 2_000_000,
+                codecs: 'avc1.640028', frameRate: '30', baseUrl: `${CDN}v-old.m4s`,
+              }],
+              audio: [{ bandwidth: 192_000, codecs: 'mp4a.40.2', baseUrl: `${CDN}a.m4s` }],
+            },
+          },
+        });
+      },
+    });
+    stubCdnExpiring();
+
+    const code = await codeOf(() => getBilibiliApi(`https://www.bilibili.com/video/${BVID}`, null, outDir));
+    expect(code).toBe('url_expired');
+    // 初次 + 2 次刷新
+    expect(counter.calls).toBe(3);
+  });
+});
 describe('B站 get：截断判定', () => {
   test('B5 视频轨只下到一部分：不报完成', async () => {
     stubView();
