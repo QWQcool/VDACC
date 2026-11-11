@@ -517,6 +517,18 @@ DedeUserID__ckMd5 / sid / default_sites / ticket / first_domain），写入时�
   **禁用**的「音频」chip 并在 tooltip 说明，而不是摆一个点了没反应的开关。要做真 audio-only
   需在 `bilibili_api` 加"只取 dash.audio → .m4a"的分支，列为后续 N20b，不在本轮范围。
 
+**N19b / N19c 落地状态（2026-11-11）**：✅ 完成。
+
+- **N19b 登录后能力自检**：扫码成功后，若输入框里已有链接，**自动重解析一次**并把结果写成
+  「登录成功，当前最高档：1080P60」。没有链接就跳过——不凭空造一个视频去探测。
+  这条针对的是「nav 说已登录、playurl 只给 480P」这种真实出现过的半吊子状态。
+- **N19c 失败可诊断**：`auth.ts` 增加进程内 `lastError` 记录（`noteAuthError / clearAuthError / authErrorOf`，
+  信息截断 300 字），三个写入点——Edge 登录失败、扫码 `state==='error'`（带平台原始码如 `qr_8821`）、
+  成功即清除。`GET /api/auth` 每行多一个 `lastError {at, code, message}`，设置面板在对应站点行下方用警示色显示
+  并附时间。以前这些只写一行 `console.error`，界面上永远只说「刷新状态」。
+- 验证：单测 4 条（记录/清除/无记录返回 null/超长截断）+ 全量 251 pass；
+  隔离目录起服务冒烟：`/api/auth` 三行都带 `lastError` 字段、设置面板渲染正常、零 page error。
+
 **N19a 落地状态（2026-11-10）**：🟡 做到「记录 + 判断」，**自动续期没做**，理由在下面。
 
 - 扫码成功时把 `data.refresh_token` 与 `timestamp` 存进凭据文件的 `meta`（`cookies` 数组形状不变）。

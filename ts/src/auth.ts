@@ -29,6 +29,29 @@ export const SITES: Record<string, { url: string; keys: string[]; label: string;
   },
 };
 
+/**
+ * 「上次登录为什么失败」（N19c）。
+ *
+ * 以前登录失败只留一行 `console.error('[auth_login_failed]')`——用户界面上看不到，
+ * 事后也查不到。这里在进程内存里记一条：谁失败了、什么码、什么话、什么时候。
+ * 只存内存，不落盘：重启后清零可以接受（失败信息本来就该是"最近一次"）。
+ */
+export interface AuthError { at: number; code: string; message: string }
+
+const lastErrors = new Map<string, AuthError>();
+
+export function noteAuthError(site: string, code: string, message: string) {
+  lastErrors.set(site, { at: Date.now(), code, message: String(message || '').slice(0, 300) });
+}
+
+export function clearAuthError(site: string) {
+  lastErrors.delete(site);
+}
+
+export function authErrorOf(site: string): AuthError | null {
+  return lastErrors.get(site) || null;
+}
+
 export function status() {
   const rows = [];
   for (const [site, info] of Object.entries(SITES)) {

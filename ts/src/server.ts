@@ -24,7 +24,10 @@ import { getKuwo, probeKuwo } from './engines/kuwo';
 import { getKugou, probeKugou } from './engines/kugou';
 import { canHandle as canSniff, getSniff, probeSniff } from './engines/sniff';
 import { getBilibiliApi, previewBilibili, probeBilibiliApi, refetchSidecars } from './engines/bilibili_api';
-import { SITES as AUTH_SITES, login as authLogin, status as authStatus, verify as authVerify } from './auth';
+import {
+  SITES as AUTH_SITES, authErrorOf, clearAuthError, login as authLogin,
+  noteAuthError, status as authStatus, verify as authVerify,
+} from './auth';
 import { QR_SITES, logoutSite as qrLogout, qrGenerate, qrPoll, type QrSite } from './auth_qr';
 import { renewStatus } from './auth_renew';
 import { fetchCollection, parseCollectionTarget } from './engines/bilibili_collection';
@@ -455,7 +458,12 @@ const server = Bun.serve({
       const bySite = new Map((authCache?.rows || []).map((r) => [r.site, r]));
       return json({
         ok: true,
-        sites: local.map((r) => ({ ...r, online: bySite.get(r.site) || null })),
+        // lastError 是"上次登录为什么失败"，跟凭据状态分开报——两者可以同时存在
+        sites: local.map((r) => ({
+          ...r,
+          online: bySite.get(r.site) || null,
+          lastError: authErrorOf(r.site),
+        })),
         loggingIn: [...authLogins],
       });
     }
@@ -481,6 +489,11 @@ const server = Bun.serve({
           console.error(`[qr] site=${site} state=${result.state} code=${result.rawCode ?? '-'} msg=${result.message}`);
           // 凭据一变就立刻让 /api/auth 的 20s 缓存失效，否则登完还要等半分钟才显示
           if (result.saved) authCache = null;
+          // 成功就清掉旧失败，失败就记下来给界面看（pending/scanned 不算失败，别刷屏）
+          if (result.state === 'ok' || result.state === 'unverified') clearAuthError(site);
+          else if (result.state === 'error') {
+            noteAuthError(site, `qr_${result.rawCode ?? 'unknown'}`, result.message);
+          }
           return json({ ok: true, site, ...result });
         } catch (err) {
           return json(failBody('ts', err));
@@ -502,6 +515,7 @@ const server = Bun.serve({
       try {
         const removed = qrLogout(logoutMatch[1] as QrSite);
         authCache = null;
+        clearAuthError(logoutMatch[1]);
         return json({ ok: true, removed });
       } catch (err) {
         return json(failBody('ts', err));
@@ -520,8 +534,13 @@ const server = Bun.serve({
       authLogins.add(site);
       authCache = null;
       authLogin(site, 300000)
-        .then(() => { authCache = null; })
-        .catch((err) => { console.error('[auth_login_failed] ' + (err as Error).message); })
+        .then(() => { authCache = null; clearAuthError(site); })
+        .catch((err) => {
+          const text = (err as Error).message;
+          console.error('[auth_login_failed] ' + text);
+          // 以前只落在控制台，界面永远只说"刷新状态"——把原因留给 /api/auth（N19c）
+          noteAuthError(site, 'login_failed', text);
+        })
         .finally(() => { authLogins.delete(site); });
       return json({
         ok: true, started: true,

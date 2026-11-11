@@ -639,7 +639,11 @@ createApp({
       if (data.state === 'ok' || data.state === 'unverified') {
         // unverified 也要刷新账号面板：凭据已经落盘，只是没验通
         loadAuth();
-        if (data.state === 'ok') setTimeout(closeQr, 1200);
+        if (data.state === 'ok') {
+          // 登录后能力自检：有现成链接就重解析一次，用真实档位证明"登录有用"（N19b）
+          refreshTierAfterLogin();
+          setTimeout(closeQr, 1200);
+        }
         return;
       }
       if (data.state === 'expired') {
@@ -661,6 +665,20 @@ createApp({
     /** 该站点的登录按钮是走扫码弹层，还是走电脑上的 Edge。 */
     const usesQr = (a) => qrSites.value.includes(a.site);
 
+
+    /**
+     * 登录后能力自检：拿输入框里的链接重新解析一次，把"实际最高档"说出来。
+     * 为什么要这一步：nav 说已登录、playurl 却只给 480P 是真实存在过的状态（cookie 不全）。
+     * 没有现成链接就跳过——不能凭空造一个视频去探测。
+     */
+    async function refreshTierAfterLogin() {
+      const target = url.value.trim();
+      if (!target) return;
+      await probeUrl(target);
+      const fmt = chosenFormat.value;
+      if (!fmt) return;
+      message.value = `${t('loginTierOk')}：${fmt.label}${fmt.fps > 30 ? fmt.fps : ''}`;
+    }
 
     /** 扫码这条路平台不给面子时，退回电脑上的 Edge——不留在死路上。 */
     async function fallbackToEdge() {

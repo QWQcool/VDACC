@@ -513,6 +513,11 @@
               <button v-if="usesQr(a) && a.loggedIn" class="btn ghost sm" @click="logoutSite(a.site)">
                 {{ t('logout') }}
               </button>
+              <!-- 上次失败原因：以前只写 console，界面上永远只说"刷新状态"（N19c） -->
+              <span class="help renew-warn" v-if="a.lastError" style="flex-basis:100%">
+                {{ t('lastError') }}：{{ a.lastError.message }}
+                <span class="mono">{{ new Date(a.lastError.at).toLocaleTimeString() }}</span>
+              </span>
             </div>
             <!-- 续期状态：平台算出来的，不是我们自己猜的 -->
             <div class="help" v-if="renewInfo" :class="{ 'renew-warn': renewInfo.needsRenew || renewInfo.state !== 'ok' }">
