@@ -18,6 +18,7 @@ import { open } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import type { AlbumInfo, AlbumTrack } from '../core/album';
+import { LIST_MAX, collectPages } from '../core/paging';
 import { throwIfCancelled } from '../core/cancel';
 import { releaseDest, reserveDest } from '../core/dest';
 import { runFfmpeg } from '../core/ffmpeg';
@@ -528,6 +529,122 @@ export async function albumTracks(input: string): Promise<AlbumInfo> {
       url: SONG_PAGE + s.songmid,
     })).filter((t: AlbumTrack) => t.id),
   };
+}
+
+/** 单页上限：实测 `song_num=100` 一次能返回整单（66 首），再大也只给到 songnum。 */
+export const PLAYLIST_PAGE = 100;
+/** 兜底上限：与其它列表入口共用同一个值（`core/paging.ts` 的 LIST_MAX）。 */
+export const PLAYLIST_MAX = LIST_MAX;
+
+/**
+ * 歌单链接：`y.qq.com/n/ryqq/playlist/<id>`、手机分享页 `taoge.html?id=<id>`，或裸数字 ID。
+ *
+ * 只认自己的路径：`albumDetail/<mid>` 的 mid 是 base62，拿它当歌单会列出不相干的东西。
+ */
+export function parsePlaylistId(input: string): string {
+  const raw = (input || '').trim();
+  if (/^\d+$/.test(raw)) return raw;
+  try {
+    const u = new URL(raw);
+    if (/albumDetail|albumdetail/i.test(u.pathname)) return '';
+    const fromPath = /\/playlist\/(\d+)/i.exec(u.pathname);
+    if (fromPath) return fromPath[1];
+    if (/taoge|playlist/i.test(u.pathname)) {
+      const id = u.searchParams.get('id') || u.searchParams.get('disstid') || '';
+      if (/^\d+$/.test(id)) return id;
+    }
+    return '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * 一页歌单。接口是 `musicu.fcg` 的 `music.srfDissInfo.aiDissInfo / uniform_get_Dissinfo`
+ * （2026-11-11 实测：匿名可用，`code=0`，`data.dirinfo.songnum` 是总数，`data.songlist[]` 是曲目）。
+ *
+ * 为什么不用 `fcg_ucc_getcdinfo_byids_cp`：同一天对同一个歌单它回
+ * `{"code":0,"subcode":4000,"msg":"check privacy error!"}`，等于拿不到数据。
+ */
+async function playlistPage(
+  id: string, begin: number, num: number, doFetch?: typeof fetch,
+): Promise<any> {
+  const payload = {
+    comm: { ct: 24, cv: 0 },
+    req: {
+      module: 'music.srfDissInfo.aiDissInfo',
+      method: 'uniform_get_Dissinfo',
+      param: {
+        disstid: Number(id), enc_host_uin: '', tag: 1, userinfo: 1,
+        song_begin: begin, song_num: num,
+      },
+    },
+  };
+  const res = await request(MUSICU, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Referer: 'https://y.qq.com/' },
+    body: JSON.stringify(payload),
+    doFetch,
+  });
+  if (!res.ok) throw new VdlError('network', `歌单接口 HTTP ${res.status}`, '稍后重试');
+  const json = await res.json().catch(() => null) as any;
+  const req = json?.req || {};
+  if (req.code !== 0) {
+    const code = req.code ?? json?.code;
+    throw new VdlError('playlist_failed',
+      `歌单接口 code=${code}${req.subcode ? ` subcode=${req.subcode}` : ''}`,
+      '确认歌单是公开的；私密歌单需要先在电脑上登录，再重试');
+  }
+  return req.data || {};
+}
+
+/**
+ * 歌单曲目。整单一次取回、按 `planAlbum` 分批（与专辑同一套口径），
+ * 因为界面的「加载下一批」只认 `nextOffset`，不关心后端是怎么翻页的。
+ *
+ * 分页循环交给 `core/paging.ts`：QQ 与酷狗是同一套「每页 N 条 + 声明总数」，
+ * 去重、按总数收敛、上限保护只该有一份实现。
+ */
+export async function playlistTracks(
+  input: string, deps: { fetch?: typeof fetch } = {},
+): Promise<AlbumInfo> {
+  const id = parsePlaylistId(input);
+  if (!id) throw new VdlError('bad_input', `识别不出 QQ 音乐歌单 ID: ${input}`);
+
+  let title = '';
+  let cover = '';
+  const collected = await collectPages({
+    pageSize: PLAYLIST_PAGE,
+    keyOf: (song: any) => String(song?.mid || song?.songmid || ''),
+    fetchPage: async (cursor, size) => {
+      const data = await playlistPage(id, cursor, size, deps.fetch);
+      const dir = data.dirinfo || {};
+      if (!title) {
+        title = String(dir.title || `playlist_${id}`);
+        cover = String(dir.picurl || '');
+      }
+      return { raws: Array.isArray(data.songlist) ? data.songlist : [], total: dir.songnum };
+    },
+  });
+
+  const tracks: AlbumTrack[] = (collected.raws as any[]).map((song) => {
+    const mid = String(song.mid || song.songmid || '');
+    return {
+      id: mid,
+      title: String(song.name || song.songname || song.title || ''),
+      author: (song.singer || []).map((x: any) => String(x.name || '')).filter(Boolean).join(' / '),
+      url: SONG_PAGE + mid,
+    };
+  }).filter((t: AlbumTrack) => t.id);
+
+  if (!tracks.length) {
+    throw new VdlError('not_found', `歌单里没有可下载的曲目（id=${id}）`,
+      collected.declared > 0
+        ? `接口声明 ${collected.declared} 首但没有给出曲目：可能整单下架或地区限制，登录后重试`
+        : '确认这个歌单不是空的');
+  }
+
+  return { id, kind: 'playlist', title, cover, tracks, warnings: collected.warnings };
 }
 
 /**

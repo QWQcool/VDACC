@@ -235,8 +235,9 @@
       const target = String(body.url || '').trim();
       if (!target) return { status: 400, data: { ok: false, error: { code: 'bad_input', message: '缺少 url' } } };
       try {
-        // offset 原样交给引擎：单批 20 首的上限在 core/album.ts 里，端上不再写一份
-        const result = await engine().albumAny(target, Number(body.offset) || 0);
+        // offset 原样交给引擎：单批 20 首的上限在 core/album.ts 里，端上不再写一份。
+        // kind 只在「裸数字想当歌单」时需要；链接形状由引擎自己判断（与桌面同口径）。
+        const result = await engine().albumAny(target, Number(body.offset) || 0, body.kind);
         return ok(result);
       } catch (error) {
         // 形状与桌面 /api/album 的失败一致：界面只读 error.message
@@ -381,6 +382,12 @@
         return { status: 200, data: { ok: false, error: { code: (error && error.code) || 'error',
           message: String((error && error.message) || error) } } };
       }
+    }
+
+    // 收藏夹/合集只有桌面端接了（B站 列表入口）：端上明确说不支持，
+    // 不要让用户以为「粘了没反应」是链接坏了。
+    if (path === '/api/collection' && method === 'POST') {
+      return unsupported('手机端暂不支持收藏夹/合集，请在电脑的网页界面里挑');
     }
 
     // 解析前预览要拿远端直链（涉及 UA/Referer 与合并流），端上暂不支持：

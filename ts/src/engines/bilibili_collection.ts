@@ -150,9 +150,30 @@ export async function fetchCollection(
   if (!data || typeof data !== 'object') throw shapeError(target.kind);
 
   const info = data.info || {};
-  const medias: RawItem[] = Array.isArray(data.medias) ? data.medias
-    : Array.isArray(data.archives) ? data.archives : [];
-  if (!Array.isArray(data.medias) && !Array.isArray(data.archives)) throw shapeError(target.kind);
+  const rawList: RawItem[] | null = Array.isArray(data.medias) ? data.medias
+    : Array.isArray(data.archives) ? data.archives : null;
+  if (!rawList) {
+    // 实测（2026-11-11，media_id=3473916881 共 6 条）：请求 pn=2 时接口回
+    // `data: {info, medias: null, has_more: false}` —— 这是「翻过末页」，不是「形状变了」。
+    // 以前一律抛 collection_shape，用户点「加载下一页」会看到误导性的「没认出返回结构」。
+    if (data.has_more === false || data.has_more === 0) {
+      return {
+        source: 'bilibili-fav',
+        kind: target.kind,
+        id: target.id,
+        title: String(info.title || (target.kind === 'fav' ? '收藏夹' : '合集')),
+        owner: String(info.upper?.name || ''),
+        total: Number(info.media_count || info.count || 0),
+        page: Math.max(1, page),
+        pageSize,
+        hasMore: false,
+        items: [],
+      };
+    }
+    // 不存在的 media_id 是 `data: null`（上面已拦），这里是「有 data 但没有列表字段」的改版形态
+    throw shapeError(target.kind);
+  }
+  const medias: RawItem[] = rawList;
 
   return {
     source: 'bilibili-fav',

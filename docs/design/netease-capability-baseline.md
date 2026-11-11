@@ -142,3 +142,67 @@ standard  标准 128K   3.93 MB
 bun test ts/tests/netease-probe.test.ts → 13 pass / 0 fail（新增 N1b 低档可用、N1c 同字节判重）
 bun test ts/tests                        → 147 pass / 0 fail
 ```
+
+## 9. 增补：歌单曲目（2026-11-11，真实环境驱动）
+
+### 为什么要先探测
+
+`/api/playlist/track/all`（社区文档里最常见的分页接口）**匿名请求回 `code=404`**，
+响应体里那 1 条 `songs` 是错误占位而不是数据。照着它写会把"接口改版"当成"歌单是空的"。
+
+### 实测口径（不带 cookie，UA=Chrome 141，Referer=music.163.com）
+
+| 请求 | 结果 |
+|---|---|
+| `GET /api/v6/playlist/detail?id=3778678&n=0` | `code=200`，34,918 B，`trackCount=200`，`tracks=0`，**`trackIds=200`** |
+| 同上 `n=3` | `tracks=3`，`trackIds=200` |
+| 同上 `n=1000` / `n=5000` | `tracks=200`（截到 `trackCount`），`trackIds=200`，472,170 B |
+| `GET /api/song/detail/?ids=[…5 个]` | `code=200`，`songs=5` |
+| `GET /api/song/detail/?ids=[…100 个]` | `code=200`，`songs=100` |
+| `GET /api/playlist/track/all?id=3778678&limit=3&offset=0` | `code=404`（**不可用**） |
+
+结论：`n` 只控制**内联曲目数**，`trackIds` 恒为全量；曲目详情另走 `song/detail` 批量。
+
+### 实现
+
+`playlistTracks()`（`ts/src/engines/netease.ts`）：
+
+```
+parsePlaylistId()  → /playlist?id= / #/playlist?id= / /m/playlist / /playlist/<id> / 裸数字
+  → detail?n=0 取 trackCount + trackIds
+  → trackIds 为空且 trackCount>0 时，退回默认 detail 再取一次（仍空则用首屏 tracks）
+  → 每 100 条一批 song/detail?ids=[…]
+  → 按 trackIds 顺序还原（song/detail 的返回顺序不作保证）
+  → 缺失曲目数、trackCount 与 trackIds 不等，全部进 warnings
+```
+
+入口：`get <链接> --playlist`（歌单链接粘给 `--album` 也认）、`POST /api/album`
+（`kind` 透传 + `warnings` 透出）、界面复用专辑列表卡（标签 PLAYLIST）。
+
+### 真实环境结果
+
+```
+playlistTracks('https://music.163.com/playlist?id=3778678')
+  kind=playlist title=热歌榜 tracks=200 cost=610ms warnings=[]
+playlistTracks('...#/playlist?id=3778678')            tracks=200 cost=419ms
+playlistTracks('.../m/playlist?id=3778678&userid=1')  tracks=200 cost=553ms
+playlistTracks('https://music.163.com/playlist?id=1') 网易云音乐喜欢的音乐 158 首
+playlistTracks('...id=999999999999')  → not_found（code=404），提示确认公开/登录
+```
+
+浏览器端（headless Edge + 真实服务）：粘 `#/playlist?id=3778678` → 卡片 `PLAYLIST`、
+`20 / 200 曲目`、20 行、「加载下一批」后 40 行、勾选计数进下载按钮、无页面脚本错误；
+切到专辑链接后标签回到 `ALBUM` 且不残留收藏夹卡。
+
+### 未做
+
+- `163cn.tv` 短链：要跟随跳转才知道指向歌曲/专辑/歌单，当前直接报 `bad_input`；
+- QQ 音乐歌单（`--playlist` 明确回 `unsupported`）；
+- Android 端引擎未移植 `playlistTracks`（`local-api` 会报"识别不出网易云专辑 ID"）。
+
+### 测试
+
+```
+bun test ts/tests/playlist.test.ts → 10 pass / 0 fail
+bun test ts/tests                  → 261 pass / 0 fail
+```

@@ -48,6 +48,14 @@ describe('媒体代理逐跳验证', () => {
     expect(streamUrlAllowed('https://cn.bilivideo.com/v')).toBe(true);
     expect(streamUrlAllowed('http://dl.stream.qqmusic.qq.com/v')).toBe(true);
   });
+
+  test('B站 mcdn 的 :8082 放行，其它端口仍拒', () => {
+    // 实测 mcdn 节点形如 `xxx.mcdn.bilivideo.cn:8082`；只放行默认端口的旧规则会让预览 403
+    expect(streamUrlAllowed('https://xy113x20x1x2xy.mcdn.bilivideo.cn:8082/v1/resource/a.m4s')).toBe(true);
+    expect(streamUrlAllowed('https://mcdn.bilivideo.cn:8082/v')).toBe(true);
+    expect(streamUrlAllowed('https://mcdn.bilivideo.cn:8083/v')).toBe(false);
+    expect(streamUrlAllowed('https://mcdn.bilivideo.cn:22/v')).toBe(false);
+  });
   test('白名单重定向到内网时不会发出第二个请求', async () => {
     const calls: string[] = [];
     await expect(fetchMediaStream('https://cn.bilivideo.com/v', {}, async (url) => {

@@ -111,6 +111,22 @@ describe('收藏夹列表拉取', () => {
     })).rejects.toThrow(/没认出收藏夹的返回结构/);
   });
 
+  test('翻过末页（medias: null + has_more: false）返回空页，不冒充形状错误', async () => {
+    // 实测 2026-11-11，media_id=3473916881 共 6 条：pn=2 回 data 对象 + medias:null + has_more:false
+    const page = await fetchCollection(target, 2, {
+      cookie: '',
+      fetch: (async () => json({
+        code: 0,
+        data: { info: { title: '我的收藏', media_count: 6 }, medias: null, has_more: false },
+      })) as unknown as typeof fetch,
+    });
+    expect(page.items).toEqual([]);
+    expect(page.hasMore).toBe(false);
+    expect(page.total).toBe(6);
+    expect(page.title).toBe('我的收藏');
+    expect(page.page).toBe(2);
+  });
+
   test('未登录时给 need_login，而不是空列表', async () => {
     await expect(fetchCollection(target, 1, {
       cookie: '',

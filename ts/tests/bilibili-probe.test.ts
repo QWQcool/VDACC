@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { getBilibiliApi, probeBilibiliApi } from '../src/engines/bilibili_api';
+import { setLimitBytesPerSec } from '../src/core/rate';
 
 const BVID = 'BV1xx411c7mD';
 const CDN = 'https://cdn.example/';
@@ -36,6 +37,7 @@ beforeEach(() => {
   outDir = join(tmpRoot, 'out');
   process.env.LOCALAPPDATA = tmpRoot;
   process.env.VDL_FFMPEG = join(tmpRoot, 'no-such-ffmpeg');
+  setLimitBytesPerSec(0); // 全局状态：上一个用例设过限速会漏到这里
   routes = [];
   globalThis.fetch = (async (input: any, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : String(input?.url || '');
@@ -98,11 +100,12 @@ function stubPlayurl(dash: { video: any[]; audio: any[] }, patch: Record<string,
 }
 
 /** Range 探测 → content-range 总字节；普通请求 → 真实 body（可指定只给一部分，模拟截断）。 */
-function stubCdn(files: Record<string, { total: number; send?: number }>) {
+function stubCdn(files: Record<string, { total: number; send?: number }>, seen?: string[]) {
   routes.push({
     name: 'cdn',
     match: (url) => url.startsWith(CDN),
     handle: (url, init) => {
+      if (seen) seen.push(url);
       const key = Object.keys(files).find((k) => url.includes(k));
       const spec = key ? files[key] : null;
       const total = spec?.total ?? 0;
@@ -144,7 +147,8 @@ describe('B站 probe：档位、音轨与接口错误', () => {
     stubCdn({ 'v3840.m4s': { total: V_TOTAL }, 'v1920.m4s': { total: 8_000_000 }, 'v854.m4s': { total: 3_000_000 } });
 
     const probe = await probeBilibiliApi(BVID);
-    expect(probe.formats.map((f) => f.id)).toEqual(['bili-3840', 'bili-1920', 'bili-854']);
+    // 视频档位 + 单独一条「仅音频」（DASH 音频轨本来就是独立文件）
+    expect(probe.formats.map((f) => f.id)).toEqual(['bili-3840', 'bili-1920', 'bili-854', 'audio']);
     expect(probe.formats.find((f) => f.recommended)?.id).toBe('bili-1920');
     expect(probe.media?.title).toBe('测试视频');
   });
@@ -180,7 +184,7 @@ describe('B站 probe：档位、音轨与接口错误', () => {
     stubCdn({ 'v1080.m4s': { total: 8_000_000 } });
 
     const probe = await probeBilibiliApi(BVID);
-    expect(probe.formats.map((f) => f.id)).toEqual(['bili-1920']);
+    expect(probe.formats.map((f) => f.id)).toEqual(['bili-1920', 'audio']);
     expect(probe.formats[0].label).toBe('1080P');
     // 宽高仍如实透传，界面要显示「1080×1920」
     expect(probe.formats[0].width).toBe(1080);
@@ -197,6 +201,117 @@ describe('B站 probe：档位、音轨与接口错误', () => {
 
     const probe = await probeBilibiliApi(BVID);
     expect(probe.warnings.join(' ')).toContain('音频');
+  });
+
+  test('B2b 仅音频档位：体积只按音频带宽算，不抢推荐', async () => {
+    stubView();
+    stubPlayurl({
+      video: [videoTrack(1920, 1080, 2_000_000)],
+      audio: [{ bandwidth: 192_000, codecs: 'mp4a.40.2', baseUrl: `${CDN}a.m4s` }],
+    });
+    stubCdn({ 'v1920.m4s': { total: 8_000_000 } });
+
+    const probe = await probeBilibiliApi(BVID);
+    const audio = probe.formats.find((f) => f.id === 'audio');
+    expect(audio?.ext).toBe('m4a');
+    expect(audio?.acodec).toBe('mp4a');
+    // 240s × 192kbps / 8 = 5,760,000（不含视频带宽）
+    expect(audio?.bytes).toBe(5_760_000);
+    expect(audio?.recommended).toBeFalsy();
+  });
+
+  test('B2c 只下音频：不请求视频轨，缺 ffmpeg 也保留文件并说明', async () => {
+    stubView();
+    stubPlayurl({
+      video: [videoTrack(1920, 1080, 2_000_000)],
+      audio: [{ bandwidth: 192_000, codecs: 'mp4a.40.2', baseUrl: `${CDN}a.m4s` }],
+    });
+    const seen: string[] = [];
+    stubCdn({ 'a.m4s': { total: A_TOTAL } }, seen);
+
+    const out = await getBilibiliApi(`https://www.bilibili.com/video/${BVID}`, 'audio', outDir);
+
+    expect(out.path.endsWith('.m4a')).toBe(true);
+    expect(out.bytes).toBe(A_TOTAL);
+    // 关键：音频模式不能顺手把视频轨也下了
+    expect(seen.some((u) => u.includes('v1920.m4s'))).toBe(false);
+    // 这个环境把 VDL_FFMPEG 指到了不存在的路径：必须如实说明「没转封装」
+    expect(out.warnings.join(' ')).toContain('ffmpeg');
+  });
+
+  test('B2d 没有音频轨时单独下音频：no_stream，不生成空文件', async () => {
+    stubView();
+    stubPlayurl({ video: [videoTrack(1920, 1080, 2_000_000)], audio: [] });
+    stubCdn({ 'v1920.m4s': { total: V_TOTAL } });
+
+    const code = await codeOf(() => getBilibiliApi(`https://www.bilibili.com/video/${BVID}`, 'audio', outDir));
+    expect(code).toBe('no_stream');
+  });
+
+  test('B9 不限速时两条轨并行下载（下载请求真的重叠）', async () => {
+    stubView();
+    stubPlayurl({
+      video: [videoTrack(1920, 1080, 2_000_000)],
+      audio: [{ bandwidth: 192_000, codecs: 'mp4a.40.2', baseUrl: `${CDN}a.m4s` }],
+    });
+    // 只统计「下载请求」（无 Range）；Range 是探测，先于下载发生
+    let inFlight = 0;
+    let maxInFlight = 0;
+    routes.push({
+      name: 'cdn-slow',
+      match: (url) => url.startsWith(CDN),
+      handle: async (url, init) => {
+        const total = url.includes('a.m4s') ? A_TOTAL : V_TOTAL;
+        if (headerOf(init, 'Range')) {
+          return new Response(null, { status: 206, headers: { 'content-range': `bytes 0-0/${total}` } });
+        }
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await new Promise((r) => setTimeout(r, 40));
+        inFlight -= 1;
+        return new Response(new Uint8Array(total), {
+          status: 200, headers: { 'content-type': 'video/mp4', 'content-length': String(total) },
+        });
+      },
+    });
+
+    // 此环境没有 ffmpeg：下载阶段会成功，停在合并（code 不是 http_403/incomplete_media 即可）
+    const code = await codeOf(() => getBilibiliApi(`https://www.bilibili.com/video/${BVID}`, null, outDir));
+    expect(code).not.toBe('incomplete_media');
+    expect(maxInFlight).toBeGreaterThanOrEqual(2);
+  });
+
+  test('B10 设了限速就退回串行（否则总带宽会是限速的两倍）', async () => {
+    stubView();
+    stubPlayurl({
+      video: [videoTrack(1920, 1080, 2_000_000)],
+      audio: [{ bandwidth: 192_000, codecs: 'mp4a.40.2', baseUrl: `${CDN}a.m4s` }],
+    });
+    let inFlight = 0;
+    let maxInFlight = 0;
+    routes.push({
+      name: 'cdn-slow',
+      match: (url) => url.startsWith(CDN),
+      handle: async (url, init) => {
+        const total = url.includes('a.m4s') ? A_TOTAL : V_TOTAL;
+        if (headerOf(init, 'Range')) {
+          return new Response(null, { status: 206, headers: { 'content-range': `bytes 0-0/${total}` } });
+        }
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await new Promise((r) => setTimeout(r, 10));
+        inFlight -= 1;
+        return new Response(new Uint8Array(total), {
+          status: 200, headers: { 'content-type': 'video/mp4', 'content-length': String(total) },
+        });
+      },
+    });
+
+    setLimitBytesPerSec(100 * 1024 * 1024); // 足够大，不会拖慢测试，但 > 0 就会走串行
+    const code = await codeOf(() => getBilibiliApi(`https://www.bilibili.com/video/${BVID}`, null, outDir));
+    expect(code).not.toBe('incomplete_media');
+    expect(maxInFlight).toBe(1);
+    setLimitBytesPerSec(0);
   });
 
   test('B3 稿件不存在（code=-404）：not_found，不是「下载失败」', async () => {

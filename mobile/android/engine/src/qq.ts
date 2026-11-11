@@ -124,6 +124,122 @@ export async function albumTracks(input: string): Promise<AlbumInfo> {
   };
 }
 
+/** 歌单链接：`/n/ryqq/playlist/<id>`、分享页 `taoge.html?id=<id>`，或裸数字。 */
+export function parsePlaylistId(input: string): string {
+  const raw = (input || '').trim();
+  if (/^\d+$/.test(raw)) return raw;
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return '';
+  }
+  const host = u.hostname.toLowerCase();
+  if (host !== 'qq.com' && !host.endsWith('.qq.com')) return '';
+  if (/albumDetail|albumdetail/i.test(u.pathname)) return '';
+  const fromPath = /\/playlist\/(\d+)/i.exec(u.pathname);
+  if (fromPath) return fromPath[1];
+  if (/taoge|playlist/i.test(u.pathname)) {
+    const id = u.searchParams.get('id') || u.searchParams.get('disstid') || '';
+    if (/^\d+$/.test(id)) return id;
+  }
+  return '';
+}
+
+/** 单页上限与桌面端一致（实测 song_num=100 一次能给整单）。 */
+export const PLAYLIST_PAGE = 100;
+export const PLAYLIST_MAX = 5000;
+
+/**
+ * 歌单曲目（端上）。接口与桌面端同一条：
+ * `musicu.fcg` 的 `music.srfDissInfo.aiDissInfo / uniform_get_Dissinfo`（匿名可用）。
+ */
+export async function playlistTracks(input: string): Promise<AlbumInfo> {
+  const id = parsePlaylistId(input);
+  if (!id) throw new VdlError('bad_input', `识别不出 QQ 音乐歌单 ID: ${input}`);
+
+  const songs: any[] = [];
+  const seen = new Set<string>();
+  const warnings: string[] = [];
+  let title = '';
+  let cover = '';
+  let declared = 0;
+
+  for (let begin = 0; begin < PLAYLIST_MAX; begin += PLAYLIST_PAGE) {
+    const payload = {
+      comm: { ct: 24, cv: 0 },
+      req: {
+        module: 'music.srfDissInfo.aiDissInfo',
+        method: 'uniform_get_Dissinfo',
+        param: {
+          disstid: Number(id), enc_host_uin: '', tag: 1, userinfo: 1,
+          song_begin: begin, song_num: PLAYLIST_PAGE,
+        },
+      },
+    };
+    const res = await request(MUSICU, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Referer: REFERER },
+      body: JSON.stringify(payload),
+      timeoutMs: 20_000,
+    });
+    const text = await res.text();
+    if (!res.ok) throw new VdlError('network', `歌单接口 HTTP ${res.status}`, '稍后重试');
+    let json: any;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      throw new VdlError('bad_json', `歌单接口不是 JSON（前 120 字节: ${JSON.stringify(text.slice(0, 120))}）`);
+    }
+    const req = json?.req || {};
+    if (Number(req.code) !== 0) {
+      throw new VdlError('playlist_failed',
+        `歌单接口 code=${req.code}${req.subcode ? ` subcode=${req.subcode}` : ''}`,
+        '确认歌单是公开的；私密歌单需要先在电脑上登录，再重试');
+    }
+    const data = req.data || {};
+    const dir = data.dirinfo || {};
+    if (!title) {
+      title = String(dir.title || `playlist_${id}`);
+      cover = String(dir.picurl || '');
+      declared = Number(dir.songnum || 0);
+    }
+    const list: any[] = Array.isArray(data.songlist) ? data.songlist : [];
+    for (const song of list) {
+      const mid = String(song?.mid || song?.songmid || '');
+      if (!mid || seen.has(mid)) continue;
+      seen.add(mid);
+      songs.push(song);
+    }
+    if (!list.length) break;
+    if (declared && songs.length >= declared) break;
+    if (list.length < PLAYLIST_PAGE) break;
+  }
+
+  if (!songs.length) {
+    throw new VdlError('not_found', `歌单里没有可下载的曲目（id=${id}）`,
+      declared > 0
+        ? `接口声明 ${declared} 首但没有给出曲目：可能整单下架或地区限制`
+        : '确认这个歌单不是空的');
+  }
+  if (declared > songs.length) {
+    warnings.push(`接口声明 ${declared} 首，只拿到 ${songs.length} 首，本次按实际拿到的列出`);
+  }
+  if (songs.length >= PLAYLIST_MAX) warnings.push(`单次最多列 ${PLAYLIST_MAX} 首，之后的不再取`);
+
+  const tracks: AlbumTrack[] = songs.map((song) => {
+    const mid = String(song.mid || song.songmid || '');
+    return {
+      id: mid,
+      title: String(song.name || song.songname || song.title || ''),
+      author: (song.singer || []).map((x: any) => String(x.name || '')).filter(Boolean).join(' / '),
+      url: SONG_PAGE + mid,
+    };
+  }).filter((t: AlbumTrack) => t.id);
+
+  return { id, kind: 'playlist', title, cover, tracks, warnings };
+}
+
 type Cached = { url: string; ext: string; declared: number };
 type SongDetail = {
   mid: string; name: string; singers: string[]; albumMid: string; albumName: string;

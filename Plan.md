@@ -71,7 +71,11 @@
 |---|---|
 | 弹幕 XML | ✅ 已完成（2026-10-23）：`--danmaku` 落同名 `.danmaku.xml`，与 `--subs` 同机制（跳过视频也会补）；实测 K/DA MV 1200 条 / 126,636 字节；番剧明确报「暂不支持」 |
 | 音乐专辑批量 | ✅ 已完成（2026-10-23）：`--album`（网易云 / QQ）+ `--dry-run` 预览，单批 20 首；**2026-10-26 补分批**：`offset` 续取（CLI `--offset`、`/api/album` 与界面「加载下一批」），仍逐首下载、失败继续并汇总。实测 173 首 → 第 1/2/9 批分别为 20/20/13，界面追加后保留勾选 |
+| 网易云歌单 | ✅ 已完成（2026-11-11，含真实接口实测）：`--playlist` / `/api/album` / 界面复用专辑列表卡（标签变 PLAYLIST）。`playlist/detail` 的 `n` 只控制内联曲目、`trackIds` 全量，`playlist/track/all` 匿名已 404，所以走 `trackIds` + 每批 100 条 `song/detail`。热度榜 3778678 实测 200 首 / 419–610ms / 0 warnings，CLI 与浏览器端到端均通。`163cn.tv` 短链同批补上（跟一次跳转，落在 `st.music.163.com` 活动页要明确报错）；Android 引擎已移植 |
+| QQ 音乐歌单 | ✅ 已完成（2026-11-11，含真实接口实测）：`musicu.fcg` 的 `music.srfDissInfo.aiDissInfo / uniform_get_Dissinfo`（匿名可用，`song_num=100` 一次给整单）；`fcg_ucc_getcdinfo_byids_cp` 对同一歌单回 `subcode=4000 check privacy error`，**不可用**。实测 66 首歌单 4 批 / 85–102ms。入口同上（`--playlist` / `kind=playlist` / 界面 PLAYLIST 卡），Android 同步移植 |
+| B站 音频单独下载 | ✅ 已完成（2026-11-11）：probe 多一条 `audio` 档（体积只按音频带宽算、不抢推荐），`get --format audio` 只下 DASH 音频轨并转封装 m4a；界面「音频」chip 从禁用改为可点。实测 `BV1SknF6KE5g`：4,981,362 字节 / aac 48kHz 立体声 173kbps / 228.3s，ffprobe 确认只有一条音轨 |
 | 酷我 / 酷狗 | ✅ 已完成（2026-10-23）：公开接口 probe + 下载 + 标签/封面（酷我还有 `.lrc`），已接路由。实测酷我 128kbps 3,368,054 字节 / 酷狗 128kbps 4,631,150 字节；320K/FLAC 需会员，接口拒绝时如实报试听档 |
+| 酷狗歌单 / 酷我歌单 | ✅ 酷狗已接（2026-11-11，真实实测）：`special/info` + `special/song?page=&pagesize=`，51 首歌单第 1 批 20 首，歌手歌名从 `filename` 拆分。❌ 酷我**不可用**：网页 API 要 `csrf` + `kw_token` 而首页不下发、桌面歌单页 430、移动页是压缩 NUXT 表达式（不 eval）；搜索接口只给歌单名不给曲目。两处都给出明确原因，不说「识别不出 ID」 |
 
 #### 2.2.4 P3 可选 / 长期
 
@@ -377,8 +381,19 @@ parity 稳定后再决定 Python 是否退化为 yt-dlp helper。
   验证分两层：①仓库内静态契约测试（manifest 字段、允许的 kind、entry 不出包、无 `node_modules`、
   体积 < 20 MiB、`definition` 形状）；②对真实本机服务的冒烟——解析「孤勇者」得 3 档、
   真下到 `done`（53.7 MB，验完删除）、错误档位异步 `no_stream`、缺 token 给出带路径的提示。
-  **未验证**：在真实 infOS 宿主里安装/激活（本机没有宿主）；`application` 仍是受控入口，
-  子应用路线不变。见 `integrations/infos/README.md`。
+  **真实宿主验证已完成（2026-11-11，`D:\infOS` 的 `@infos/backend` 0.9.12，127.0.0.1:9120）**：
+  ZIP（9,868 字节，根含 `manifest.json`）→ `POST /api/packages/install` →
+  `POST /api/packages/vdacc.media-acquire/authorize`（`runtime:execute`）→ `PUT .../enabled`
+  → `state=active / enabled=true / authorized=true / contributions=4`；
+  `GET /api/integrations/installed` 出现 `package:vdacc.media-acquire`（界面「工具与扩展」能看见）。
+  再用**安装目录里那份代码**（`@data/packages/.managed/releases/<uuid>/tools/probe.mjs`）真调一次：
+  `vdl_probe` → 本机 VDACC → 网易云 `在你的身边 / 盛哲`，三档齐全；删掉 `config.json` 后报的是
+  「请在 …\config.json 写入 {baseUrl,token}」而不是「请求失败」。
+  **一处与文档不一致（如实记）**：install 返回的 `digest`（`3b5509…`）与注册表里记的
+  `authorizedDigest`（`fb408f…`）不是同一个值，但 authorize 仍成功——「内容摘要」的实际算法
+  在宿主侧，不是上传 ZIP 的哈希，别拿它当校验幂等键。
+  **仍未验证**：`application` 仍是受控入口（子应用路线不变）；`web-ui` / `presenter` 贡献没做。
+  见 `integrations/infos/README.md`。
 
 执行依赖：F01–F07 → N01/N02 → N03/N04；N05 可在稳定源码上独立推进；N06 依赖设备和稳定连接恢复。
 N08–N18 于 2026-11-06/09 收口，N13 依赖 DeepSeek 额度（无 key 时自动跳过，不影响其余结果）。
@@ -682,27 +697,50 @@ items[] = { bvid, title, author, cover, duration_ms, url, state: 'ok'|'gone'|'pr
 - 验证：单测 11 条（链接解析 / 分页参数 / 映射 / 三种错误分支，假 fetch）；
   界面自检（桩数据）：3 行渲染、失效行 `disabled`、勾 2 条只发 2 个 `/api/jobs` 请求、零 page error；
   真实接口用无效 `media_id` 验证诚实报错（`collection_shape`）。全量 `bun test ts/tests` **237 pass**。
-- **未验证**：真实收藏夹/合集的完整响应体。`x/v3/fav/resource/list` 的有效形状是按公开文档
-  + 唧唧Down 的 `FavoriteResourceData`/`has_more` 结构写的；第一次用真实 ID 打开时若报
-  `collection_shape`，就是形状对不上，改 `toItem` 的字段名即可，不会误导成空列表。
+- **真实收藏夹已验（2026-11-11，用户提供的 `fid=3473916881`）**：形状假设全部对上——
+  `title=unity`、`owner=晨星成焰`、`total=6`、`hasMore=false`、6 条全 `ok`，
+  首条 `BV1KU4y1x7jH` / 126069000ms。界面：卡片标题/UP主/总数正确、默认一条不勾、
+  勾 2 条只发 2 个 `/api/jobs`（URL 是视频页而不是收藏夹链接）、零 page error。
+  **顺手修了两个真 bug**：
+  ① **翻过末页被误判成形状错误**：6 条时请求 `pn=2`，接口回 `data: {info, medias: null, has_more: false}`
+  （不是 `data: null`），旧代码一律抛 `collection_shape`。现在 `has_more === false` 时返回空页。
+  ② **第 2 页把总数覆盖成 0**：`info.media_count` 只在第一页有，前端 `{...data}` 会把 `total` 写成 0，
+  界面显示「已列 20 / 0」。现在保留首屏 total，并按 bvid 去重再追加。
+- **仍未验证**：合集（`season`）。手上只有收藏夹链接，合集走的是另一条接口
+  （`x/space/fav/season/list`），形状按同一套 `archives`/`has_more` 兼容，但没有真实 `sid` 跑过。
 
 ### 2.9 平台泛化：同样的两件事能不能搬到别的站
 
 能，但要按"只加适配器、不动 UI 与契约主干"的判据来做。现在要建的两块能力本质上都是**带适配器的通用件**：
 
-| 通用件 | 接口 | B站 | 网易云 | QQ 音乐 | 抖音 |
-|---|---|---|---|---|---|
-| 扫码登录 | `QrLoginAdapter`：`generate / poll / verify` | ✅ 已做（实测通过） | ❌ 试过被平台拒（8821），仍走 Edge | 未做（需 ptqrtoken，复杂度高） | 无登录需求 |
-| 列表入口 | `CollectionAdapter`：`fetch(page, pageSize)` | ✅ 收藏夹/合集 | 歌单/专辑 | 歌单 | 合集/主页 |
+| 通用件 | 接口 | B站 | 网易云 | QQ 音乐 | 酷狗 | 酷我 | 抖音 |
+|---|---|---|---|---|---|---|---|
+| 扫码登录 | `QrLoginAdapter`：`generate / poll / verify` | ✅ 已做（实测通过） | ❌ 试过被平台拒（8821），仍走 Edge | 未做（需 ptqrtoken，复杂度高） | 无登录 | 无登录 | 无登录需求 |
+| 列表入口 | `CollectionAdapter`：`fetch(page, pageSize)` | ✅ 收藏夹/合集 | ✅ 歌单（2026-11-11）/ 专辑 | ✅ 歌单（2026-11-11）/ 专辑 | ✅ 歌单（2026-11-11），专辑未做 | ❌ 歌单（接口要 csrf + kw_token，首页不下发） | ❌ 合集/主页（探测后不做） |
 
 **阶段**
 
 - **M3（进行中）**：B站 单平台打透 —— N19 扫码登录（含 19a 续期 / 19b 能力自检 / 19c 失败可诊断）、
   N20 分析页、N21 剪贴板、N22 地址过期重取、N23 收藏夹入口。
 - **M4**：把上面两块抽成适配器接口，接**网易云**（它的接口最公开、没有 wbi、验证成本最低）：
-  扫码登录 + 歌单/专辑入口（专辑已有 `/api/album` 与分页，只是入口还没接歌单）。
-- **M5**：QQ 音乐——先只做**歌单只读**；登录是否换扫码，取决于 ptqrtoken 流程实测结果，不预先承诺。
-- **M6**：抖音——合集/主页列表（无需登录）。
+  扫码登录 + 歌单/专辑入口。**歌单入口已完成（2026-11-11）**：专辑与歌单共用 `/api/album`
+  与同一套 `planAlbum` 分页（`kind` 区分），CLI 加 `--playlist`，界面零新组件；
+  网易云扫码登录已确认为平台侧拒绝（见 §2.9 表），维持 Edge 登录。
+  仍缺：`CollectionAdapter` 的通用接口抽取（当前 B站 与网易云各自一个函数）、QQ / 抖音 列表入口。
+- **M5**：QQ 音乐——先只做**歌单只读**。✅ 已完成（2026-11-11）：探测确认
+  `musicu.fcg` 的 `srfDissInfo.aiDissInfo / uniform_get_Dissinfo` 匿名可用（`song_num=100` 一次给整单），
+  而旧的 `fcg_ucc_getcdinfo_byids_cp` 回 `subcode=4000 check privacy error`；实现与网易云同形
+  （`kind` + `planAlbum` 分页），CLI/服务端/界面/Android 四处都通。
+  登录是否换扫码仍未定（ptqrtoken 未实测）。
+- **M6**：抖音——合集/主页列表。❌ **暂不做（2026-11-11 探测结论）**，三条证据：
+  ① `/aweme/v1/web/mix/aweme` 与 `/aweme/v1/web/aweme/post` 无签名一律 403 `Blocked by ArgusSecurityPlugin`；
+  ② 带上现有的 `x-secsdk-web-signature` 后 HTTP 200，但不存在的 `mix_id` 回 `status_code=4` +
+  `aweme_list:null`，而 `aweme/detail` 对不存在的视频回 `status_code=0` + 无 detail ——
+  两者形态不同，**无法判断** `status_code=4` 是「合集不存在」还是「还缺 `a_bogus`」；
+  ③ `douyin.com/collection/<id>` 返回 JS 挑战页（`jsvmprt`），拿不到 SSR 数据；两个已知真实视频的
+  `mix_info` 都为空，**没有真实 mix_id 可用于验证**。
+  因此本轮只做了一件事：把「合集/主页链接」的错误从「识别不出视频 ID」改成 `unsupported` +
+  「接口需要额外签名参数，尚未验证」，并给出下一步。重启条件：拿到一条真实合集链接。
 
 **落地顺序统一为「CLI 先通 → Web 渲染 → Skill 文档」**，避免为每个平台写一套界面；
 Android 壳复用同一批 HTTP 接口，不再单独实现。
@@ -987,6 +1025,55 @@ P3 之后的每一段都应能独立失败而不影响下载器。
 
 ## 4. 变更记录
 
+- 2026-11-11：**网易云歌单入口**（§2.9 M4 的「歌单」部分落地）。实测口径：
+  `playlist/detail?id=X&n=N` 的 `n` 只截内联曲目、`trackIds` 恒为全量；
+  `playlist/track/all` 匿名已 `code=404`。实现走 `trackIds` + 每批 100 条 `song/detail`、
+  按 id 顺序还原；缺失曲目与 `trackCount`/`trackIds` 不符全部进 `warnings`。
+  入口：CLI `--playlist`、`POST /api/album`（`kind`）、界面复用专辑列表卡（标签 PLAYLIST）。
+  实测热度榜 3778678 200 首 / 419–610ms、浏览器端到端通。
+  同日四件收尾：① **`163cn.tv` 短链**跟一次跳转（只接受 `music.163.com` / `y.` / `www.`，
+  落在 `st.music.163.com` 活动页要明确报错，无效码 403 给「重新复制」下一步）；
+  ② **Android 引擎移植** `playlistTracks`（网易云 trackIds 批量 + QQ musicu），
+  `entry.albumAny` 增加 `kind`，界面复用专辑卡；`bun selftest.mjs` 新增 11 条歌单断言全过；
+  ③ **QQ 歌单（M5）**：`musicu.fcg` 的 `srfDissInfo.aiDissInfo` 匿名可用（旧 fcg 接口回
+  `subcode=4000 privacy error`），66 首实测 85–102ms；
+  ④ **B站 音频单独下载（N20b）**：probe 多一条 `audio` 档，`--format audio` 只下 DASH 音频轨、
+  转封装 m4a，界面 chip 从禁用改为可点；实测 4,981,362 字节 / aac 48kHz / 228.3s。
+  抖音合集（M6）探测后**不做**（见 §2.9 M6 的三条证据），只把错误提示改准确。
+- 2026-11-11（第三批 · 三件「有外部条件」的验收）：
+  ① **真实收藏夹**（用户提供的 `fid=3473916881`）形状全对，顺手修两个真 bug：
+  翻过末页（`medias: null + has_more: false`）被误判成 `collection_shape`、第 2 页把 `total` 覆盖成 0
+  （界面会显示「已列 20 / 0」）。合集（`season`）仍无真实 `sid`。
+  ② **Android 真机复测**（realme RMX5200 / Android 16）：用 `%LOCALAPPDATA%\vdacc-tools` 的工具链
+  重新 `assembleDebug`（1,073,116 字节）并安装，分享 intent 送入两条链接后截图取证——
+  网易云「热歌榜 PLAYLIST 20 / 200 曲目」、QQ「甜度爆表 PLAYLIST 20 / 66 曲目」，均带「之后还剩 N」。
+  顺带补齐 `assets/ui/app` 与源码的 632 行欠账。
+  ③ **真实 infOS 宿主**（`D:\infOS`，0.9.12）：装包 → 授权 → 启用 = `active`，
+  `integrations/installed` 有投影，用安装目录那份代码真调 `vdl_probe` 成功（详见 §2.6.3 N18）。
+  测试基线 **278 pass / 0 fail**。
+- 2026-11-11（市场复核 + 两项暂停）：读完 `Astrmira/infOS-Market` 的 README / `CONTRIBUTING.md` /
+  `catalog/README.md`，确认**尚未开放正式收录协议**——仓库 2 个 commit、`catalog/` 只有占位说明、
+  条目格式/字段/分类规则全部未定义、客户端未接入（本机 0.9.12 里 `integration-market-card`
+  只是「拓展功能」页的样式类名，不是市场入口）。市场收的是 **Package / Skill / 角色包 / 桌宠资源**，
+  不是 `application`；当前唯一可执行的动作是**先开 Issue**（用途/来源/属性/截图）。
+  用户决定：**Android 开发暂停**（手机拔走；代码已过 `selftest.mjs` 与真机两平台歌单验证）、
+  **合集跳过**（没有真实 `sid`）。
+- 2026-11-11（第四批 · B/C）：① **分页器抽象**：新增 `ts/src/core/paging.ts` 的 `collectPages`
+  （去重 / 按声明总数收敛 / 上限**真截断** / 三条停止条件），QQ 与酷狗共用；
+  **不**把 B站（服务端 pn/ps）与网易云（trackIds + 批量补详情）塞进同一接口——语义不同，强并只会多一层适配。
+  ② **酷狗歌单接入**：`special/info` + `special/song`，实测 51 首 / 第 1 批 20 首；
+  `--playlist`、`/api/album`、界面 PLAYLIST 卡、服务端拒绝酷狗专辑都验过。
+  ③ **酷我歌单如实不做**：接口要 `csrf` + `kw_token` 而首页不下发（另试了 SSR 430 / 压缩 NUXT /
+  移动端 404），只给明确原因。测试基线 **292 pass / 0 fail**。
+- 2026-11-11（第五批 · B站 / 抖音 下载体验）：
+  ① **B站 预览有声音**：DASH 双轨下 `<video>` 只有画面，`/api/preview` 多回一个 `audioUrl`，
+  前端用隐藏 `<audio>` 跟随 `<video>`（播/停/跳/倍速，偏差 >250ms 才纠偏）。
+  途中抓到真 bug：`streamUrlAllowed` 拒绝**所有**非默认端口，而 B站 mcdn 是
+  `xxx.mcdn.bilivideo.cn:8082` —— 这类地址的预览一直 403。现在只额外放行 8082，其它端口仍拒。
+  ② **B站 双轨并行下载**：不限速时两条流同时下（进度 = 两者之和 / 探测总和）；
+  **设了限速自动退回串行**，否则总带宽会变成限速的两倍。实测 480P：25,283,896 字节 / 228.3s / 约 2 秒。
+  ③ **抖音图文作品**明确报 `unsupported`（「N 张图」+ 替代路径），不再掉进「没有解析到档位」。
+  测试基线 **298 pass / 0 fail**。
 - 2026-11-09：**N11 桌面分析面板**（A1 从 CLI 接到界面）；infOS 集成结论复核（见
   `integrations/infos/README.md`：子应用仍是宿主编译期内置，第三方可走 Package 的 tool/skill，
   Application Adapter 等 SDK）。测试基线 `bun test ts/tests` **178 pass / 0 fail**。

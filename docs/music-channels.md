@@ -45,7 +45,8 @@
 2. QQ → 酷我 → 酷狗，逐个实现 `probe`；
 3. 每个平台用一个免费样本验证：标题/歌手/时长/封面一致，下载文件容器与码率符合声明；
 4. 有账号后再补 320k/FLAC 与 cookie 过期提示；
-5. **不做**：歌单/专辑批量（后续单独评估）、DRM、客户端私有加密容器。
+5. ~~**不做**：歌单/专辑批量~~ —— 专辑批量 2026-10-23 已做，网易云歌单 2026-11-11 已接
+   （QQ 歌单仍未做）；DRM 与客户端私有加密容器仍不做。
 
 ## 当前状态（2026-10-23）
 
@@ -71,6 +72,13 @@
     因此不做关键词搜索，只吃 songmid / 分享链接。
 - **专辑批量已接**：`--album` 支持网易云 `/api/album/{id}` 与 QQ `fcg_v8_album_info_cp`，
   上限 20（`core/album.ts` 的 `planAlbum`），`--dry-run` 先看曲目；逐首下载，单首失败继续并在结尾汇总。
+- **QQ 歌单已接（2026-11-11，含真实接口实测）**：`musicu.fcg` 的
+  `music.srfDissInfo.aiDissInfo / uniform_get_Dissinfo`（POST，匿名可用）——
+  `data.dirinfo.songnum` 是总数，`data.dirinfo.title/picurl` 是标题与封面，
+  `data.songlist[]` 每项 `mid` / `name` / `singer[].name`。`song_begin`/`song_num` 分页，
+  `song_num=100` 一次能给整单（实测 66 首）。**旧接口不可用**：`fcg_ucc_getcdinfo_byids_cp`
+  对同一歌单回 `{"code":0,"subcode":4000,"msg":"check privacy error!"}`。
+  入口 `--playlist`、`POST /api/album`（`kind:'playlist'`）、界面 PLAYLIST 卡；Android 引擎同步移植。
 - **歌词已落盘**：`fcg_query_lyric_new.fcg`（`nobase64=1`）→ 同名 `.lrc`，失败不影响音频。
 - **状态口径（2026-10-27，仅离线验证）**：probe 现在返回全部四个档位，不可用档 `available:false`
   且 `reason` 带真实 `result` 代码（或「接口没有返回」），不再推断成会员/付费；
@@ -80,6 +88,16 @@
 - **酷我 / 酷狗已接入**：公开接口 probe + 下载（`.part` 续传 + 限速）+ ffmpeg 标签/封面，
   酷我另落 `.lrc`；已注册 `platformOf` / server / cli。实测：酷我《花海》128kbps 3,368,054 字节，
   酷狗《恒星不忘》128kbps 4,631,150 字节（带 `mjpeg` 封面）。
+- **酷狗歌单已接（2026-11-11，含真实接口实测）**：`special/info?specialid=` 给标题/作者/总数/封面
+  （`imgurl` 带 `{size}` 占位），`special/song?specialid=&page=&pagesize=` 给曲目
+  （`hash` / `filename`「歌手 - 歌名」/ `duration` 秒）。`pagesize=100` 一次能给整单。
+  入口 `--playlist`、`POST /api/album`（`kind:'playlist'`）、界面 PLAYLIST 卡。
+  实测 51 首歌单：第 1 批 20 首，歌名与歌手拆分正确。酷狗**专辑**批量没做，链接会明确说。
+- **酷我歌单不可用（同日实测）**：网页 API 要 `csrf` 头 + `kw_token` cookie，而首页 / 搜索页 /
+  H5 页都**不下发** `kw_token`；桌面歌单页直接 **430**，移动 UA 拿到的是压缩成单字母变量的
+  NUXT 表达式（静态解析不可靠，`eval` 远端脚本不做）。`search.kuwo.cn` 的 `ft=playlist` 只能给
+  歌单 id / 名字 / 曲目数，**拿不到曲目**。所以不做——`probe` 与 `/api/album` 都会明确说
+  「接口要求 csrf + kw_token，首页不下发」，而不是「识别不出 ID」。
 - **酷我元数据降级（2026-10-27，含真实验证）**：`songinfoandlrc` 偶发 `status=301`，此时标题先用
   rid，下载后从**文件自带 ID3** 补全（`core/tags.ts` 纯 JS 解析，不依赖 ffprobe）。
   实测《花海》落盘名 `474678847_花海 (DJ 阿若版)_128kbps.mp3`，ffprobe 标签正确。
@@ -92,5 +110,13 @@
   128K 与 96K 常返回字节相同的文件，已按字节判重并说明。未放行的
   `available:false` 且 `reason` 带平台 `code`；详情查不到歌改报 `not_found`；显式档位不可用报
   `no_stream` 不换档；下载字节 < 接口声明 60% 报 `incomplete_media`。
-  见 `docs/design/netease-capability-baseline.md`。
+ 见 `docs/design/netease-capability-baseline.md`。
+- **网易云歌单已接（2026-11-11，含真实接口实测）**：`/api/v6/playlist/detail?id=X&n=0` 的 `n`
+  只控制内联曲目数（0/3/1000/5000 都被截到 `trackCount`），`trackIds` 始终是全量；
+  `/api/playlist/track/all` 匿名已回 `code=404`，不能用。所以 `playlistTracks` 走
+  「detail 取 trackIds → 按 100 一批 `/api/song/detail` 补详情 → 按 trackIds 顺序还原」。
+  热度榜 3778678 实测 200 首 / 419–610ms、零 warnings。入口：CLI `--playlist`（歌单链接粘给
+  `--album` 也认）、`POST /api/album`（`kind` 透传）、界面复用专辑列表卡（标签随 `kind` 变 PLAYLIST）。
+  拿不到的曲目（下架/无版权）与 `trackCount` 对不上 `trackIds` 都进 `warnings`，不静默补齐。
+  未做：`163cn.tv` 短链跟随（要跟跳转才知道指向哪个歌单）、Android 端引擎的 `playlistTracks`。
 - 服务端设置页后续加「音乐账号」页签（与 B站/网易云并列）。

@@ -111,6 +111,113 @@ export async function albumTracks(input: string): Promise<AlbumInfo> {
   };
 }
 
+/** 歌单链接与桌面端同一套解析：裸数字 / `/playlist?id=` / `#/playlist?id=` / `/m/playlist` / `/playlist/<id>`。 */
+export function parsePlaylistId(input: string): string {
+  const raw = (input || '').trim();
+  if (/^\d+$/.test(raw)) return raw;
+  try {
+    const u = new URL(raw);
+    const hay = `${u.pathname}${u.hash}`;
+    if (!/\/playlist\b/i.test(hay)) return '';
+    const fromQuery = u.searchParams.get('id') || '';
+    if (/^\d+$/.test(fromQuery)) return fromQuery;
+    const hashQuery = u.hash.includes('?') ? u.hash.slice(u.hash.indexOf('?') + 1) : '';
+    const fromHash = new URLSearchParams(hashQuery).get('id') || '';
+    if (/^\d+$/.test(fromHash)) return fromHash;
+    const m = /\/playlist\/(\d+)/i.exec(hay);
+    return m ? m[1] : '';
+  } catch {
+    return '';
+  }
+}
+
+/** 单次 `song/detail` 的批量：与桌面端同一个数（实测 100 条正常返回）。 */
+export const PLAYLIST_SONG_BATCH = 100;
+
+/**
+ * 歌单曲目（端上）。与桌面端同一套实测口径：
+ * `playlist/detail?n=0` 只给元信息 + 全量 `trackIds`，曲目详情要另走 `song/detail`。
+ * 端上串行发请求（手机网络下并行更容易被限流），结果按 trackIds 顺序还原。
+ */
+export async function playlistTracks(input: string): Promise<AlbumInfo> {
+  const id = parsePlaylistId(input);
+  if (!id) throw new VdlError('bad_input', `识别不出网易云歌单 ID: ${input}`);
+  const warnings: string[] = [];
+
+  const detail = await apiJson(`/api/v6/playlist/detail?id=${id}&n=0`);
+  const playlist = detail?.playlist;
+  if (!playlist) {
+    const code = Number(detail?.code ?? 0);
+    throw new VdlError(code === 404 ? 'not_found' : 'api_error',
+      `没拿到歌单信息（id=${id}，code=${code || '无'}）`,
+      '确认歌单是公开的；私密歌单需要先在电脑上登录，再重试');
+  }
+
+  const pickIds = (list: unknown): string[] => (Array.isArray(list) ? list : [])
+    .map((x: any) => String(x?.id ?? x ?? ''))
+    .filter((v: string) => /^\d+$/.test(v));
+
+  let trackIds = pickIds(playlist.trackIds);
+  const declared = Number(playlist.trackCount || 0);
+  if (!trackIds.length && declared > 0) {
+    const fallback = await apiJson(`/api/v6/playlist/detail?id=${id}`);
+    const fp = fallback?.playlist || {};
+    trackIds = pickIds(fp.trackIds);
+    if (!trackIds.length) trackIds = pickIds(fp.tracks);
+    if (trackIds.length) warnings.push('接口没有返回完整曲目 ID 列表，本次只列详情里的首屏曲目');
+  }
+  if (!trackIds.length) {
+    throw new VdlError('not_found', `歌单里没有可下载的曲目（id=${id}）`,
+      declared > 0
+        ? `接口声明 ${declared} 首但没有给出曲目 ID：可能是私密歌单或地区限制`
+        : '确认这个歌单不是空的');
+  }
+  if (declared > trackIds.length) {
+    warnings.push(`接口声明 ${declared} 首，只给了 ${trackIds.length} 条曲目 ID，本次按实际拿到的列出`);
+  }
+
+  const songs: any[] = [];
+  for (let i = 0; i < trackIds.length; i += PLAYLIST_SONG_BATCH) {
+    const batch = trackIds.slice(i, i + PLAYLIST_SONG_BATCH);
+    const data = await apiJson(`/api/song/detail/?ids=%5B${batch.join(',')}%5D`);
+    const got: any[] = Array.isArray(data?.songs) ? data.songs : [];
+    if (got.length < batch.length) {
+      warnings.push(`第 ${i + 1}–${i + batch.length} 首里只拿到 ${got.length} 首详情`);
+    }
+    songs.push(...got);
+  }
+
+  const byId = new Map<string, any>();
+  for (const song of songs) byId.set(String(song?.id ?? ''), song);
+  const tracks: AlbumTrack[] = [];
+  for (const tid of trackIds) {
+    const song = byId.get(tid);
+    if (!song) continue;
+    tracks.push({
+      id: tid,
+      title: String(song.name || ''),
+      author: (song.ar || song.artists || [])
+        .map((a: any) => String(a.name || '')).filter(Boolean).join(' / '),
+      url: `${API}/song?id=${tid}`,
+    });
+  }
+  const missing = trackIds.length - tracks.length;
+  if (missing > 0) warnings.push(`${missing} 首拿不到详情（多为下架或无版权），本地列表里不会有它们`);
+  if (!tracks.length) {
+    throw new VdlError('not_found', `歌单里的曲目都拿不到详情（id=${id}）`,
+      '可能整单下架或地区限制；换一个歌单再试');
+  }
+
+  return {
+    id,
+    kind: 'playlist',
+    title: String(playlist.name || `playlist_${id}`),
+    cover: String(playlist.coverImgUrl || ''),
+    tracks,
+    warnings,
+  };
+}
+
 async function apiJson(path: string): Promise<any> {
   const res = await request(API + path, { headers: headers(), timeoutMs: 15000 });
   if (!res.ok) throw new VdlError('network', `网易云接口 HTTP ${res.status}`, '稍后重试');

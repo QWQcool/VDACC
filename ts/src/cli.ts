@@ -3,12 +3,15 @@ import { join } from 'node:path';
 
 import { getDouyin, probeDouyin } from './engines/douyin';
 import { MAX_ALBUM_TRACKS, planAlbum } from './core/album';
-import { albumTracks as neteaseAlbum, getNetease, probeNetease } from './engines/netease';
+import {
+  albumTracks as neteaseAlbum, playlistTracks as neteasePlaylist,
+  expandShortLink, getNetease, probeNetease,
+} from './engines/netease';
 import { probeBilibili } from './engines/bilibili';
-import { getBilibiliApi, probeBilibiliApi } from './engines/bilibili_api';
-import { albumTracks as qqAlbum, getQQ, probeQQ } from './engines/qq';
+import { AUDIO_FORMAT_ID, getBilibiliApi, probeBilibiliApi } from './engines/bilibili_api';
+import { albumTracks as qqAlbum, playlistTracks as qqPlaylist, getQQ, probeQQ } from './engines/qq';
 import { getKuwo, probeKuwo } from './engines/kuwo';
-import { getKugou, probeKugou } from './engines/kugou';
+import { playlistTracks as kugouPlaylist, getKugou, probeKugou } from './engines/kugou';
 import { canHandle as canSniff, getSniff, probeSniff } from './engines/sniff';
 import { loadConfig } from './core/config';
 import { exitCodeFor, runDoctor } from './core/doctor';
@@ -278,7 +281,7 @@ if (cmd === 'auth') {
   const url = positional[0];
   if (!url || !['probe', 'get'].includes(cmd)) {
     console.error('用法: bun src/cli.ts probe|get <url> [--format id] [-o dir] [--limit 2M] [--json]'
-    + ' [--album [--offset N]] [--subs] [--danmaku]');
+    + ' [--album|--playlist [--offset N]] [--subs] [--danmaku]');
     process.exit(2);
   }
 
@@ -308,20 +311,39 @@ if (cmd === 'auth') {
       process.exit(res.ok ? 0 : 1);
     }
 
-    // 专辑批量：显式 --album 才走这条路，默认仍然是单曲/单视频
-    if (cmd === 'get' && has('--album')) {
+    // 专辑 / 歌单批量：显式 --album / --playlist 才走这条路，默认仍然是单曲/单视频。
+    // 歌单链接（路径里带 playlist）粘给 --album 也认——用户不需要先分清两者。
+    if (cmd === 'get' && (has('--album') || has('--playlist'))) {
       const platform = platformOf(url);
-      if (platform !== 'netease' && platform !== 'qq') {
-        console.error('--album 目前只支持 网易云 / QQ 音乐');
+      if (platform !== 'netease' && platform !== 'qq' && platform !== 'kugou') {
+        console.error('--album / --playlist 目前只支持 网易云 / QQ 音乐 / 酷狗');
         process.exit(2);
       }
-      const album = platform === 'netease' ? await neteaseAlbum(url) : await qqAlbum(url);
+      // 短链要先跟跳转才知道是专辑还是歌单（其它输入原样返回，不发请求）
+      const resolved = platform === 'netease' ? await expandShortLink(url) : url;
+      // 各家歌单链接形状不同：网易云 `/playlist`、QQ `/playlist/<数字>` 或 `taoge.html`、
+      // 酷狗 `/special/single/<id>.html` 或 `/plist/list/<id>`
+      const wantsPlaylist = has('--playlist')
+        || (platform === 'netease' && /\/playlist\b/i.test(resolved))
+        || (platform === 'qq' && (/\/playlist\//i.test(resolved) || /taoge\.html/i.test(resolved)))
+        || (platform === 'kugou' && (/\/special\/single\//i.test(resolved) || /\/plist\/list\//i.test(resolved)));
+      if (platform === 'kugou' && !wantsPlaylist) {
+        console.error('酷狗目前只支持歌单（/special/single/<id>）；专辑批量还没做');
+        process.exit(2);
+      }
+      const album = platform === 'netease'
+        ? (wantsPlaylist ? await neteasePlaylist(resolved) : await neteaseAlbum(resolved))
+        : platform === 'kugou'
+          ? await kugouPlaylist(resolved)
+          : (wantsPlaylist ? await qqPlaylist(resolved) : await qqAlbum(resolved));
       const offset = Number(flag('--offset', '0')) || 0;
       const plan = planAlbum(album.tracks, offset);
       const { take, dropped, hasMore, nextOffset } = plan;
-      console.log(`专辑：${album.title}（共 ${album.tracks.length} 首，`
+      const label = album.kind === 'playlist' ? '歌单' : '专辑';
+      console.log(`${label}：${album.title}（共 ${album.tracks.length} 首，`
         + `本次第 ${Math.floor(plan.offset / MAX_ALBUM_TRACKS) + 1} 批：${take.length} 首`
         + `${dropped ? `，之后还剩 ${dropped}` : ''}）`);
+      for (const warning of album.warnings || []) console.error(`  提示：${warning}`);
       if (hasMore) console.log(`  下一批：--offset ${nextOffset}`);
       if (has('--dry-run')) {
         take.forEach((t, i) => console.log(`  ${plan.offset + i + 1}. ${t.title}${t.author ? ` — ${t.author}` : ''}`));
@@ -357,6 +379,10 @@ if (cmd === 'auth') {
     if (['douyin', 'bilibili', 'netease', 'qq', 'kuwo', 'kugou'].includes(platform)) {
       if ((has('--subs') || has('--danmaku')) && platform !== 'bilibili') {
         console.error(`--subs / --danmaku 目前只支持 B站，${platform} 会忽略这些参数`);
+      }
+      if (platform === 'bilibili' && flag('--format', '') === AUDIO_FORMAT_ID
+        && (has('--subs') || has('--danmaku'))) {
+        console.error('--format audio 只下音频轨，--subs / --danmaku 会被忽略');
       }
       const out = platform === 'douyin'
         ? await getDouyin(url, flag('--format'), flag('-o', '下载') || '下载', { cover: has('--cover') })
@@ -435,7 +461,11 @@ if (cmd === 'auth') {
   } catch (err) {
     const body = fail(platformOf(url), 'ts-spike', err);
     if (has('--json')) console.log(JSON.stringify(body, null, 2));
-    else console.error(`${(err as Error).message}`);
+    else {
+      console.error(`${(err as Error).message}`);
+      // 抛错路径也要给下一步：例如"这是歌单链接"后面紧跟 --playlist 的用法
+      if (body.error?.next_action) console.error(`下一步: ${body.error.next_action}`);
+    }
     process.exit(1);
   }
 }

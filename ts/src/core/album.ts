@@ -7,13 +7,19 @@ export interface AlbumTrack {
   title: string;
   author: string;
   url: string;
+  /** 只有部分平台给（酷狗歌单给秒数、B站收藏夹给毫秒）；没有就是 null，不要拿 0 冒充。 */
+  duration_ms?: number | null;
 }
 
 export interface AlbumInfo {
   id: string;
+  /** 网易云的专辑与歌单是两种入口，但曲目列表与分页口径完全一致，用同一结构承载。 */
+  kind?: 'album' | 'playlist';
   title: string;
   cover: string;
   tracks: AlbumTrack[];
+  /** 曲目数对不上、部分曲目拿不到详情这类事实，必须往上传，不能静默补齐。 */
+  warnings?: string[];
 }
 
 /**

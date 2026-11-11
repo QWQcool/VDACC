@@ -13,7 +13,7 @@ import { VdlError } from '../core/errors';
 import { UA } from '../core/http';
 import { safeName } from '../core/naming';
 import { report } from '../core/progress';
-import { throttle } from '../core/rate';
+import { currentLimitBytesPerSec, throttle } from '../core/rate';
 import { format, type Format, type Media, type Part, type ProbeResult } from '../core/types';
 
 const API = 'https://api.bilibili.com';
@@ -22,6 +22,9 @@ const BUCKETS: Array<[number, string]> = [
 ];
 
 const urlCache = operationState(() => new Map<string, { video: string; audio: string }>());
+
+/** 仅音频档位的固定 id：CLI `--format audio`、界面「音频」chip 都认它。 */
+export const AUDIO_FORMAT_ID = 'audio';
 
 /**
  * 「重新解析播放地址」的闭包。
@@ -41,9 +44,19 @@ const subtitleState = operationState(() => ({
   value: null as { bvid?: string; cid?: number; aid?: number; epId?: string; durationMs?: number } | null,
 }));
 
-/** 供下载前预览：只取视频轨（浏览器预览不需要音轨）。 */
+/** 供下载前预览：视频轨地址。 */
 export function previewBilibili(formatId: string): string {
   return urlCache().get(formatId)?.video || '';
+}
+
+/**
+ * 预览用的**音轨**地址。
+ *
+ * DASH 是双轨：`<video>` 只有画面没有声音，界面预览一直是哑片。前端再挂一个 `<audio>`
+ * 跟着 `<video>` 播/停/跳，预览才有声音。`audio` 档本身没有视频轨，这里返回空。
+ */
+export function previewBilibiliAudio(formatId: string): string {
+  return urlCache().get(formatId)?.audio || '';
 }
 
 /** 关键：不能把所有 cookie 拼进去（实测 64 条 / 8.9KB 会被 WAF 判 400），
@@ -256,6 +269,23 @@ function foldDash(dash: any, durationMs: number): Format[] {
     urlCache().set(id, {
       video: best.baseUrl || best.base_url,
       audio: bestAudio ? (bestAudio.baseUrl || bestAudio.base_url) : '',
+    });
+  }
+  // 单独一条「仅音频」：B站 的 DASH 音频轨本来就是独立文件（不下载视频轨就能拿），
+  // 以前界面上是个禁用的 chip。它的 bytes 只按音频带宽算，不混进视频档位的体积。
+  if (bestAudio) {
+    const audioBw = Number(bestAudio.bandwidth || 0);
+    out.push(format({
+      id: AUDIO_FORMAT_ID,
+      label: '仅音频 M4A',
+      ext: 'm4a',
+      acodec: String(bestAudio.codecs || '').split('.')[0],
+      bitrate: audioBw || null,
+      bytes: audioBw && seconds ? Math.round((audioBw * seconds) / 8) : null,
+    }));
+    urlCache().set(AUDIO_FORMAT_ID, {
+      video: '',
+      audio: bestAudio.baseUrl || bestAudio.base_url,
     });
   }
   // 推荐 1080P：批量/分P 默认勾 4K 会变成 1.4GB/集，用户一次误点就是几十 GB
@@ -776,8 +806,44 @@ async function getBilibiliApiImpl(
   const suffix = probe.media!.parts.length > 1 && selected
     ? `_${probe.media!.id.startsWith('ep') ? 'EP' : 'P'}${selected.index}` : '';
   const stem = `${probe.media!.id}_${safeName(probe.media!.title)}${suffix}_${safeName(fmt.label, 16, fmt.id)}`;
-  const dest = reserveDest(outDir, `${stem}.mp4`);
+  const isAudio = fmt.id === AUDIO_FORMAT_ID;
+  const dest = reserveDest(outDir, isAudio ? `${stem}.m4a` : `${stem}.mp4`);
   try {
+  // 仅音频：只下 DASH 的 audio 轨，不碰视频轨。字幕/弹幕对音频没有意义，这里也不取。
+  if (isAudio) {
+    const audioUrl = urlCache().get(AUDIO_FORMAT_ID)?.audio || '';
+    if (!audioUrl) throw new VdlError('no_stream', '这个视频没有音频轨，不能单独下载音频');
+    if (existsSync(dest)) return { path: dest, bytes: statSync(dest).size, skipped: true, warnings: [] };
+
+    const aPart = dest + '.audio.m4s';
+    const planned = await probeStreamSize(audioUrl);
+    await streamTo(audioUrl, aPart, (written, total) => report(written, total), async () => {
+      await refresher().value?.();
+      return urlCache().get(AUDIO_FORMAT_ID)?.audio || '';
+    });
+    const got = statSync(aPart).size;
+    if (planned > 0 && got < planned * 0.95) {
+      throw new VdlError('incomplete_media',
+        `音频轨只拿到 ${got} 字节，探测到 ${planned} 字节`, '重试可续传');
+    }
+
+    // DASH 音频是 fMP4：`-c copy` 只转封装、不重编码。没有 ffmpeg 时保留原始字节
+    // （多数播放器能直接放），但**要说明没转封装**，不能假装已经变成标准 m4a。
+    const warnings: string[] = [];
+    const tmp = dest.replace(/\.m4a$/i, '.mux.m4a');
+    const run = await runFfmpeg(['-y', '-hide_banner', '-loglevel', 'error', '-i', aPart, '-vn', '-c', 'copy', tmp]);
+    if (run.code === 0 && existsSync(tmp)) {
+      renameSync(tmp, dest);
+      try { unlinkSync(aPart); } catch { /* ignore */ }
+    } else {
+      if (existsSync(tmp)) { try { unlinkSync(tmp); } catch { /* ignore */ } }
+      renameSync(aPart, dest);
+      warnings.push(run.code === -2
+        ? '没有找到 ffmpeg：已保留 DASH 原始音频（多数播放器可播放，但未转封装）'
+        : `转封装为 m4a 失败（ffmpeg 退出码 ${run.code}）：已保留 DASH 原始音频`);
+    }
+    return { path: dest, bytes: statSync(dest).size, skipped: false, warnings };
+  }
   const completed = async (skipped: boolean) => {
     // 视频已存在也要让 --subs / --danmaku 生效：附属产物不能因为跳过视频就一起跳过
     const sub = opts.subs ? await saveSubtitle(dest) : { srt: null, count: 0 };
@@ -815,31 +881,46 @@ async function getBilibiliApiImpl(
   if (vPlanned) planned = urls.audio ? (aPlanned ? vPlanned + aPlanned : 0) : vPlanned;
   if (!planned) planned = expected;
 
-  let base = 0;
-  const sink = (written: number, total: number) => {
-    const [w, t] = aggregateProgress(base, written, planned, total);
-    report(w, t);
-  };
+  // 两条流各记各的字节，进度取「两条之和 / 探测到的总和」。
+  // 并行时不能再用「已完成流的 base + 当前流 written」那种算法（两流会同时增长）。
+  let vWritten = 0;
+  let aWritten = 0;
+  const progress = () => report(vWritten + aWritten, planned || vWritten + aWritten);
   // 地址过期时重取一次再续传（同一档位的新地址，不是换档）
   const refetchVideo = async () => {
     await refresher().value?.();
     return urlCache().get(fmt.id)?.video || '';
   };
-  await streamTo(urls.video, vPart, sink, refetchVideo);
-  base = statSync(vPart).size;
+  const refetchAudio = async () => {
+    await refresher().value?.();
+    return urlCache().get(fmt.id)?.audio || '';
+  };
+  const runVideo = () => streamTo(urls.video, vPart, (w) => { vWritten = w; progress(); }, refetchVideo);
+  const runAudio = () => streamTo(urls.audio, aPart, (w) => { aWritten = w; progress(); }, refetchAudio);
+
+  // 双轨并行：视频轨通常是大头，音轨几十 MB，并行能把音轨那段时间省掉。
+  // **限速时退回串行**——限速按「每条流」算（AGENTS 里写明的边界），
+  // 并行会让总带宽翻倍，那等于用户设的限速被悄悄打破。
+  if (urls.audio && currentLimitBytesPerSec() <= 0) {
+    // allSettled 而不是 all：一条失败时要等另一条收尾，否则函数返回后它还在写 .part，
+    // 下次同目标重试会与这个后台写入撞车。
+    const [vRes, aRes] = await Promise.allSettled([runVideo(), runAudio()]);
+    if (vRes.status === 'rejected') throw vRes.reason;
+    if (aRes.status === 'rejected') throw aRes.reason;
+  } else {
+    await runVideo();
+    if (urls.audio) await runAudio();
+  }
+
+  const vGot = statSync(vPart).size;
   // 探测到的总字节是同一个 CDN 给的真值：短了就是截断（或被中途降档）。
   // 校验必须放在合并之前——合并成功只说明 ffmpeg 跑通了，不说明内容完整。
-  if (vPlanned > 0 && base < vPlanned * 0.95) {
+  if (vPlanned > 0 && vGot < vPlanned * 0.95) {
     throw new VdlError('incomplete_media',
-      `视频轨只拿到 ${base} 字节，探测到 ${vPlanned} 字节`,
+      `视频轨只拿到 ${vGot} 字节，探测到 ${vPlanned} 字节`,
       '重试可续传；若持续偏小，可能是该清晰度被降级，换档再试');
   }
   if (urls.audio) {
-    const refetchAudio = async () => {
-      await refresher().value?.();
-      return urlCache().get(fmt.id)?.audio || '';
-    };
-    await streamTo(urls.audio, aPart, sink, refetchAudio);
     const aGot = statSync(aPart).size;
     if (aPlanned > 0 && aGot < aPlanned * 0.95) {
       throw new VdlError('incomplete_media',

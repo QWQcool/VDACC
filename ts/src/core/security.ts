@@ -25,7 +25,15 @@ export function jailedPath(root: string, candidate: string, fileOnly = true): st
   } catch { return null; }
 }
 
-/** 只接受媒体 CDN；不接受用户信息、非默认端口或把白名单当成前缀的域名。 */
+/**
+ * 白名单 CDN 上**实测存在**的非默认端口。
+ *
+ * B站 的 mcdn 节点是 `xxx.mcdn.bilivideo.cn:8082`（不是 443）——只放行默认端口的旧规则
+ * 会把这类地址整条拒掉，表现为「预览 403」。只放这一个端口，不放开任意端口。
+ */
+const ALLOWED_CDN_PORTS = new Set(['8082']);
+
+/** 只接受媒体 CDN；不接受用户信息、白名单之外的非标准端口或把白名单当成前缀的域名。 */
 export function streamUrlAllowed(input: string): boolean {
   try {
     const url = new URL(input);
@@ -33,7 +41,8 @@ export function streamUrlAllowed(input: string): boolean {
     const qq = ['qqmusic.qq.com', 'tc.qq.com'].some(match);
     const known = qq || ['douyin.com', 'douyinvod.com', 'byteicdn.com',
       'bilivideo.com', 'bilivideo.cn', '126.net', '127.net'].some(match);
-    return known && !url.username && !url.password && !url.port &&
+    const portOk = !url.port || ALLOWED_CDN_PORTS.has(url.port);
+    return known && !url.username && !url.password && portOk &&
       (url.protocol === 'https:' || (qq && url.protocol === 'http:'));
   } catch { return false; }
 }

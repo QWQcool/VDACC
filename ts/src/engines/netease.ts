@@ -93,10 +93,59 @@ async function headSize(url: string): Promise<number> {
   }
 }
 
-async function getJson(path: string, cookie: string): Promise<any> {
-  const res = await fetch(API + path, { headers: headers(cookie) });
+async function getJson(path: string, cookie: string, doFetch: typeof fetch = fetch): Promise<any> {
+  const res = await doFetch(API + path, { headers: headers(cookie) });
   if (!res.ok) throw new VdlError('network', `网易云接口 HTTP ${res.status}`);
   return res.json();
+}
+
+/**
+ * 网易云 App 分享出来的短链（`https://163cn.tv/xxxx`）要跟一次跳转才知道指向
+ * 歌曲 / 专辑 / 歌单。**只有它需要额外一次网络请求**，其它输入原样返回（零成本）。
+ *
+ * 2026-11-11 实测：`163cn.tv/` 根路径 301 到 `st.music.163.com/webpage-cntv`（活动页），
+ * 无效码直接 403 无 Location。所以「跟随后落在 music.163.com」才算解析成功；
+ * 落在活动页或 403 都要如实说，不能把它当成「识别不出歌曲 ID」。
+ */
+export async function expandShortLink(input: string, doFetch: typeof fetch = fetch): Promise<string> {
+  const raw = (input || '').trim();
+  let host = '';
+  try {
+    host = new URL(raw).hostname.toLowerCase();
+  } catch {
+    return raw;
+  }
+  if (!/(^|\.)163cn\.tv$/.test(host)) return raw;
+
+  let res: Response;
+  try {
+    res = await doFetch(raw, {
+      method: 'GET', redirect: 'follow',
+      headers: { 'User-Agent': UA, Accept: 'text/html,application/xhtml+xml,*/*;q=0.8' },
+      signal: AbortSignal.timeout(12000),
+    });
+  } catch (err) {
+    throw new VdlError('network', `短链请求失败：${(err as Error).message}`,
+      '检查网络后重试；也可以直接在 App 里复制「完整链接」');
+  }
+  if (res.status === 403 || res.status === 404) {
+    throw new VdlError('bad_input', `短链已失效（HTTP ${res.status}）：${raw}`,
+      '分享短链有有效期，回 App 重新复制一次；或改用浏览器地址栏里的完整链接');
+  }
+  // 跟随之后 res.url 是最终地址；只接受网易云内容站的三个域，别被短链带去任意站点。
+  // 不能写成 `*.music.163.com`：活动页在 `st.music.163.com`（实测根路径就跳到那里），
+  // 它同样是 music.163.com 的子域，放过去会把「指向活动页」当成「解析成功」。
+  let final = '';
+  try {
+    final = new URL(res.url).href;
+  } catch {
+    return raw;
+  }
+  if (!/^(?:y\.|www\.)?music\.163\.com$/i.test(new URL(final).hostname)) {
+    throw new VdlError('bad_input', `短链指向的不是歌曲/专辑/歌单：${final}`,
+      '这条短链可能指向活动页；回 App 重新复制目标内容的链接');
+  }
+  return final;
 }
 
 /** 专辑链接：`/album?id=123`、`/album/123`、`#/album?id=123`，或裸数字 ID。 */
@@ -126,8 +175,9 @@ export function parseAlbumId(input: string): string {
 
 /** 专辑曲目列表。返回空列表时抛错，不拿“空专辑”冒充成功。 */
 export async function albumTracks(input: string): Promise<AlbumInfo> {
-  const id = parseAlbumId(input);
-  if (!id) throw new VdlError('bad_input', `识别不出网易云专辑 ID: ${input}`);
+  const resolved = await expandShortLink(input);
+  const id = parseAlbumId(resolved);
+  if (!id) throw new VdlError('bad_input', `识别不出网易云专辑 ID: ${resolved}`);
   const data = await getJson(`/api/album/${id}`, cookieHeader());
   const album = data?.album || {};
   const songs: any[] = album.songs || [];
@@ -137,6 +187,7 @@ export async function albumTracks(input: string): Promise<AlbumInfo> {
   }
   return {
     id,
+    kind: 'album',
     title: String(album.name || `album_${id}`),
     cover: String(album.picUrl || ''),
     tracks: songs.map((s: any) => ({
@@ -148,9 +199,162 @@ export async function albumTracks(input: string): Promise<AlbumInfo> {
   };
 }
 
+/**
+ * 歌单链接：`/playlist?id=123`、`#/playlist?id=123`、手机分享的 `/m/playlist?...`、
+ * `/playlist/123`，或裸数字 ID。
+ *
+ * 与 `parseAlbumId` 一样只认自己的路径：把专辑或歌曲的 id 当歌单会列出完全不相干的东西。
+ */
+export function parsePlaylistId(input: string): string {
+  const raw = (input || '').trim();
+  if (/^\d+$/.test(raw)) return raw;
+  try {
+    const u = new URL(raw);
+    const hay = `${u.pathname}${u.hash}`;
+    if (!/\/playlist\b/i.test(hay)) return '';
+    const fromQuery = u.searchParams.get('id') || '';
+    if (/^\d+$/.test(fromQuery)) return fromQuery;
+    const hashQuery = u.hash.includes('?') ? u.hash.slice(u.hash.indexOf('?') + 1) : '';
+    const fromHash = new URLSearchParams(hashQuery).get('id') || '';
+    if (/^\d+$/.test(fromHash)) return fromHash;
+    const m = /\/playlist\/(\d+)/i.exec(hay);
+    return m ? m[1] : '';
+  } catch {
+    return '';
+  }
+}
+
+/** 单次 `song/detail` 的批量上限：实测 100 个 id 正常返回，再往上没有证据。 */
+export const PLAYLIST_SONG_BATCH = 100;
+
+export interface PlaylistDeps {
+  fetch?: typeof fetch;
+  /** 传 `''` 表示显式不带 cookie（测试用）；不传则读本机凭据。 */
+  cookie?: string;
+  /** 仅供测试缩小批量，验证分批与顺序还原。 */
+  batchSize?: number;
+}
+
+/**
+ * 歌单曲目（2026-11-11 实测口径）：
+ *
+ * - `GET /api/v6/playlist/detail?id=X&n=N` 的 `n` 只控制**内联曲目数**（0 / 3 / 1000 / 5000
+ *   实测都被截到 `trackCount`），`trackIds` 始终是**全量** id 列表；
+ * - `GET /api/playlist/track/all` 已不可用（匿名请求回 `code=404`），不能拿它做分页；
+ * - `GET /api/song/detail/?ids=[...]` 一次 100 条正常返回，用它把 trackIds 补成完整曲目。
+ *
+ * 所以路径是「detail 取 trackIds → 按 100 一批补详情 → 按 trackIds 顺序还原」。
+ * 顺序必须按 trackIds 还原：song/detail 的返回顺序不受请求顺序保证。
+ */
+export async function playlistTracks(input: string, deps: PlaylistDeps = {}): Promise<AlbumInfo> {
+  const doFetch = deps.fetch || fetch;
+  const resolved = await expandShortLink(input, doFetch);
+  const id = parsePlaylistId(resolved);
+  if (!id) throw new VdlError('bad_input', `识别不出网易云歌单 ID: ${resolved}`);
+  const cookie = deps.cookie === undefined ? cookieHeader() : deps.cookie;
+  const warnings: string[] = [];
+
+  // n=0：只要元信息与 trackIds，不把几百首曲目重复拉一遍（实测 472KB → 34KB）
+  const detail = await getJson(`/api/v6/playlist/detail?id=${id}&n=0`, cookie, doFetch);
+  const playlist = detail?.playlist;
+  if (!playlist) {
+    const code = Number(detail?.code ?? 0);
+    throw new VdlError(code === 404 ? 'not_found' : 'api_shape',
+      `没拿到歌单信息（id=${id}，code=${code || '无'}）`,
+      '确认歌单是公开的；私密歌单需要先在电脑上登录，再重试');
+  }
+
+  const pickIds = (list: unknown): string[] => (Array.isArray(list) ? list : [])
+    .map((x: any) => String(x?.id ?? x ?? ''))
+    .filter((v: string) => /^\d+$/.test(v));
+
+  let trackIds = pickIds(playlist.trackIds);
+  const declared = Number(playlist.trackCount || 0);
+
+  // trackIds 全量返回是实测结论、不是文档承诺：真遇到空的就退回「默认 n 的详情」再取一次，
+  // 仍为空才用首屏 tracks 的 id，并如实说明这是不完整的一屏。
+  if (!trackIds.length && declared > 0) {
+    const fallback = await getJson(`/api/v6/playlist/detail?id=${id}`, cookie, doFetch);
+    const fp = fallback?.playlist || {};
+    trackIds = pickIds(fp.trackIds);
+    if (!trackIds.length) trackIds = pickIds(fp.tracks);
+    if (trackIds.length) {
+      warnings.push('接口没有返回完整曲目 ID 列表，本次只列详情里的首屏曲目');
+    }
+  }
+
+  if (!trackIds.length) {
+    throw new VdlError('not_found', `歌单里没有可下载的曲目（id=${id}）`,
+      declared > 0
+        ? `接口声明 ${declared} 首但没有给出曲目 ID：可能是私密歌单或地区限制，登录后重试`
+        : '确认这个歌单不是空的');
+  }
+  if (declared > trackIds.length) {
+    warnings.push(`接口声明 ${declared} 首，只给了 ${trackIds.length} 条曲目 ID，本次按实际拿到的列出`);
+  }
+
+  const batchSize = Math.max(1, Math.min(500, deps.batchSize || PLAYLIST_SONG_BATCH));
+  const songs: any[] = [];
+  for (let i = 0; i < trackIds.length; i += batchSize) {
+    const batch = trackIds.slice(i, i + batchSize);
+    const data = await getJson(`/api/song/detail/?ids=%5B${batch.join(',')}%5D`, cookie, doFetch);
+    const got: any[] = Array.isArray(data?.songs) ? data.songs : [];
+    if (got.length < batch.length) {
+      // 不在这里抛：下架曲目本来就查不到详情，但同批其它曲目是好的
+      warnings.push(`第 ${i + 1}–${i + batch.length} 首里只拿到 ${got.length} 首详情`);
+    }
+    songs.push(...got);
+  }
+
+  const byId = new Map<string, any>();
+  for (const song of songs) byId.set(String(song?.id ?? ''), song);
+  const tracks: AlbumTrack[] = [];
+  for (const tid of trackIds) {
+    const song = byId.get(tid);
+    if (!song) continue;
+    tracks.push({
+      id: tid,
+      title: String(song.name || ''),
+      author: (song.ar || song.artists || [])
+        .map((a: any) => String(a.name || '')).filter(Boolean).join(' / '),
+      url: `${API}/song?id=${tid}`,
+    });
+  }
+  const missing = trackIds.length - tracks.length;
+  if (missing > 0) {
+    warnings.push(`${missing} 首拿不到详情（多为下架或无版权），本地列表里不会有它们`);
+  }
+  if (!tracks.length) {
+    throw new VdlError('not_found', `歌单里的曲目都拿不到详情（id=${id}）`,
+      '可能整单下架或地区限制；换一个歌单或登录后重试');
+  }
+
+  return {
+    id,
+    kind: 'playlist',
+    title: String(playlist.name || `playlist_${id}`),
+    cover: String(playlist.coverImgUrl || ''),
+    tracks,
+    warnings,
+  };
+}
+
 async function probeNeteaseImpl(url: string): Promise<ProbeResult> {
-  const sid = extractId(url);
-  if (!sid) throw new VdlError('bad_input', `识别不出歌曲 ID: ${url}`);
+  // App 分享的 163cn.tv 短链要先跟一次跳转（其它输入原样返回，不发请求）
+  const resolved = await expandShortLink(url);
+  const sid = extractId(resolved);
+  if (!sid) {
+    // 歌单/专辑不是"解析失败"：它们是另一条批量入口，错误里直接给出怎么走，
+    // 否则用户会以为是链接坏了（界面上由 isAlbumUrl 提前分流，走不到这里）。
+    const batch = parsePlaylistId(resolved) ? { kind: '歌单', flag: '--playlist' }
+      : parseAlbumId(resolved) ? { kind: '专辑', flag: '--album' }
+        : null;
+    throw new VdlError(
+      'bad_input',
+      batch ? `这是${batch.kind}链接，不是单曲：${resolved}` : `识别不出歌曲 ID: ${resolved}`,
+      batch ? `走批量入口：bun ts/src/cli.ts get "<链接>" ${batch.flag} --dry-run` : '',
+    );
+  }
   const cookie = cookieHeader();
   formatUrls().clear();
   songState().lastSong = null;

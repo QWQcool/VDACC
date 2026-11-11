@@ -16,6 +16,8 @@ import { releaseDest, reserveDest } from '../core/dest';
 import { VdlError } from '../core/errors';
 import { UA, request } from '../core/http';
 import { safeName } from '../core/naming';
+import type { AlbumInfo, AlbumTrack } from '../core/album';
+import { collectPages } from '../core/paging';
 import { format, type Format, type Media, type ProbeResult } from '../core/types';
 
 const SONG_INFO = 'https://m.kugou.com/app/i/getSongInfo.php?cmd=playInfo&hash=';
@@ -55,12 +57,106 @@ export function canHandle(input: string): boolean {
   return parseHash(input) !== '';
 }
 
+/**
+ * 歌单链接：`www.kugou.com/yy/special/single/<id>.html`、`m.kugou.com/plist/list/<id>`、
+ * `?specialid=`，或裸数字。
+ *
+ * 不认 `album/single/<albumid>.html`：那是专辑，id 与歌单不在一个命名空间。
+ */
+export function parsePlaylistId(input: string): string {
+  const raw = (input || '').trim();
+  if (/^\d+$/.test(raw)) return raw;
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return '';
+  }
+  if (!/(^|\.)kugou\.com$/i.test(u.hostname)) return '';
+  if (/\/album\//i.test(u.pathname)) return '';
+  const fromQuery = u.searchParams.get('specialid') || u.searchParams.get('plistid') || '';
+  if (/^\d+$/.test(fromQuery)) return fromQuery;
+  const m = /\/(?:special\/single|plist\/list)\/(\d+)/i.exec(u.pathname);
+  return m ? m[1] : '';
+}
+
+/** 单页上限：实测 `pagesize=100` 一次能返回整单（51 首）。 */
+export const PLAYLIST_PAGE = 100;
+
+const SPECIAL_INFO = 'https://mobiles.kugou.com/api/v3/special/info';
+const SPECIAL_SONG = 'https://mobiles.kugou.com/api/v3/special/song';
+
+/** 酷狗把「歌手 - 歌名」放在一个 `filename` 字段里，没有独立的 songname/singername。 */
+function splitFilename(filename: string): { title: string; author: string } {
+  const at = filename.lastIndexOf(' - ');
+  if (at <= 0) return { title: filename.trim(), author: '' };
+  return { title: filename.slice(at + 3).trim(), author: filename.slice(0, at).trim() };
+}
+
+/**
+ * 歌单曲目（2026-11-11 实测，匿名可用）：
+ *   `special/info?specialid=` → `specialname` / `nickname` / `songcount` / `imgurl`（带 `{size}` 占位）
+ *   `special/song?specialid=&page=&pagesize=` → `data.total` + `data.info[]`
+ * 每项有 `hash`（下载 key）/ `filename` / `duration`（秒）/ `album_id`。
+ * 不存在的 id 不是报错，而是 `total:0 + info:[]`——按空歌单处理，别冒充成功。
+ */
+export async function playlistTracks(
+  input: string, deps: { fetch?: typeof fetch } = {},
+): Promise<AlbumInfo> {
+  const id = parsePlaylistId(input);
+  if (!id) throw new VdlError('bad_input', `识别不出酷狗歌单 ID: ${input}`);
+  const doFetch = deps.fetch || fetch;
+
+  const meta = await json(`${SPECIAL_INFO}?specialid=${id}&format=json`, doFetch);
+  const info = meta?.data || {};
+
+  const collected = await collectPages({
+    pageSize: PLAYLIST_PAGE,
+    keyOf: (song: any) => String(song?.hash || '').toLowerCase(),
+    fetchPage: async (cursor, size) => {
+      const page = await json(
+        `${SPECIAL_SONG}?specialid=${id}&page=${Math.floor(cursor / size) + 1}&pagesize=${size}&format=json`,
+        doFetch,
+      );
+      return { raws: Array.isArray(page?.data?.info) ? page.data.info : [], total: page?.data?.total };
+    },
+  });
+
+  const tracks: AlbumTrack[] = (collected.raws as any[]).map((song) => {
+    const hash = String(song?.hash || '').toLowerCase();
+    const { title, author } = splitFilename(String(song?.filename || ''));
+    return {
+      id: hash,
+      title,
+      author,
+      url: SONG_PAGE + hash,
+      duration_ms: Number(song?.duration || 0) ? Number(song.duration) * 1000 : null,
+    };
+  }).filter((t: AlbumTrack) => t.id);
+
+  if (!tracks.length) {
+    throw new VdlError('not_found', `歌单里没有可下载的曲目（id=${id}）`,
+      Number(info.songcount || 0) > 0
+        ? `接口声明 ${info.songcount} 首但没有给出曲目：可能整单下架或地区限制`
+        : '确认这个歌单不是空的');
+  }
+
+  return {
+    id,
+    kind: 'playlist',
+    title: String(info.specialname || `酷狗歌单 ${id}`),
+    cover: String(info.imgurl || '').replace('{size}', '240').replace(/^http:/i, 'https:'),
+    tracks,
+    warnings: collected.warnings,
+  };
+}
+
 function headers(): Record<string, string> {
   return { Referer: REFERER, Accept: 'application/json, text/plain, */*' };
 }
 
-async function json(url: string): Promise<any> {
-  const res = await request(url, { headers: headers() });
+async function json(url: string, doFetch?: typeof fetch): Promise<any> {
+  const res = await request(url, { headers: headers(), doFetch });
   if (!res.ok) throw new VdlError(`http_${res.status}`, `酷狗接口 HTTP ${res.status}`);
   return res.json();
 }

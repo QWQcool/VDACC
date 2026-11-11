@@ -256,7 +256,19 @@ function labelOf(cand: Candidate, size: number, duration: number): { label: stri
 
 async function probeKuwoImpl(input: string): Promise<ProbeResult> {
   const rid = parseRid(input);
-  if (!rid) throw new VdlError('bad_input', `识别不出酷我音乐 id: ${input}`);
+  if (!rid) {
+    // 酷我歌单是明确的「暂不支持」，不是「链接坏了」。实测（2026-11-11）：
+    // 网页 API `api/www/playlist/playListInfo` 要求 `csrf` 头 + `kw_token` cookie，
+    // 而首页/搜索页/H5 页都不下发 kw_token；桌面 UA 的歌单页直接 430，
+    // 移动端 UA 拿到的是压缩成单字母变量的 NUXT 表达式（静态解析不可靠，eval 更不行）。
+    // 搜索接口能给歌单 id/名字，但拿不到曲目，所以不做。
+    if (/\/playlist_detail\/|\/playlist\/\d+|playlistId=/i.test(input)) {
+      throw new VdlError('unsupported',
+        '酷我歌单暂不支持（接口要求 csrf + kw_token，首页不下发）',
+        '可以粘单曲链接；歌单请在酷我 App 里逐首复制');
+    }
+    throw new VdlError('bad_input', `识别不出酷我音乐 id: ${input}`);
+  }
   urlCache().clear();
 
   const info = await songInfo(rid);

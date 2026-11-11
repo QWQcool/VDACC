@@ -42,6 +42,18 @@ interface Candidate {
   fps: number; codec: string; watermark: boolean;
 }
 
+/**
+ * 图文作品 = 有 `images` 且没有可播的视频流。
+ *
+ * 有些图文作品也带 `video`（背景音乐/封面），这时仍按视频处理——
+ * 判据必须是「有图**且**没有 play_addr」，只看 `images` 会误杀。
+ */
+export function isImageOnly(aweme: any): boolean {
+  const images: any[] = Array.isArray(aweme?.images) ? aweme.images : [];
+  const hasVideo = (aweme?.video?.play_addr?.url_list || []).length > 0;
+  return images.length > 0 && !hasVideo;
+}
+
 function extractVid(text: string): string {
   for (const re of [VID_RE, MODAL_RE]) {
     const m = re.exec(text || '');
@@ -252,7 +264,21 @@ async function probeDouyinImpl(input: string): Promise<ProbeResult> {
       vid = extractVid(await res.text().catch(() => ''));
     }
   }
-  if (!vid) throw new VdlError('bad_input', '没能从这个输入里识别出视频 ID');
+  if (!vid) {
+    // 合集 / 主页不是"链接坏了"，是另一条（尚未验证的）列表入口。
+    // 2026-11-11 探测结论：`/aweme/v1/web/mix/aweme` 与 `/aweme/v1/web/aweme/post` 都要求
+    // 签名，现有 `x-secsdk-web-signature` 能过 Argus（HTTP 200），但对不存在的 mix_id 回
+    // `status_code=4` + `aweme_list:null`；没有真实合集 ID 无法区分"合集不存在"与"还缺 a_bogus"，
+    // 所以不做列表功能，只在错误里说明，而不是报「识别不出视频 ID」。
+    const batch = /\/collection\//i.test(input) ? '合集'
+      : /\/user\//i.test(input) ? '主页作品列表' : '';
+    if (batch) {
+      throw new VdlError('unsupported',
+        `抖音${batch}暂不支持（接口需要额外签名参数，尚未验证）`,
+        '粘单个视频链接；合集/主页可以在 App 里逐条复制分享链接');
+    }
+    throw new VdlError('bad_input', '没能从这个输入里识别出视频 ID');
+  }
 
   const { status, text } = await fetchDetail(jar, vid);
   if (status !== 200) {
@@ -279,6 +305,11 @@ async function probeDouyinImpl(input: string): Promise<ProbeResult> {
   }
 
   const video = aweme.video || {};
+  if (isImageOnly(aweme)) {
+    throw new VdlError('unsupported',
+      `抖音图文作品（${aweme.images.length} 张图）暂不支持`,
+      '只支持视频；图文请在抖音 App 里保存图片');
+  }
   const formats = buildFormats(candidates(video));
   if (!formats.length) throw new VdlError('no_stream', '没有解析到任何可下载档位');
 

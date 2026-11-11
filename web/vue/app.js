@@ -31,7 +31,7 @@ createApp({
     // 附属产物开关：只对 B站 生效，持久化免得每次重开都要勾
     const withSubs = ref(localStorage.getItem('vdl-subs') === '1');
     const withDanmaku = ref(localStorage.getItem('vdl-danmaku') === '1');
-    // 专辑：与单条结果互斥，独立走 /api/album；默认一首都不勾（防误点整张专辑）
+    // 专辑 / 歌单：与单条结果互斥，独立走 /api/album；默认一首都不勾（防误点整张专辑）
     const album = ref(null);
     const albumTracks = ref([]);
     const checkedTracks = ref([]);
@@ -48,12 +48,15 @@ createApp({
     const compStatus = ref('');
     const compBusy = ref(false);
     const previewUrl = ref('');
+    // B站 是 DASH 双轨：<video> 只有画面，音轨单独给一个隐藏 <audio>（成品预览没有这一项）
+    const previewAudioUrl = ref('');
     // A1 分析结果（/api/analyze）；analysisBusy 只用于按钮转圈，不阻塞其它操作
     const analysis = ref(null);
     const analysisBusy = ref(false);
     const canAnalyze = ref(true);
     const previewSeek = ref(null);
     const videoEl = ref(null);
+    const audioEl = ref(null);
     // 账号状态（/api/auth）：本地凭据 + 在线校验结果
     const authRows = ref([]);
     const authBusy = ref(false);
@@ -182,7 +185,17 @@ createApp({
         album.value = null;
         url.value = value;
       } else {
-        collection.value = { ...data, items: [...(collection.value?.items || []), ...(data.items || [])] };
+        // 第 2 页起后端给不出 media_count（B站 只在第一页的 info 里带），不能让 total 被 0 覆盖，
+        // 否则界面会显示「已列 20 / 0」。按 bvid 去重，翻页边界重复的条目不重复追加。
+        const known = collection.value?.items || [];
+        const ids = new Set(known.map((i) => i.bvid));
+        const added = (data.items || []).filter((i) => !ids.has(i.bvid));
+        collection.value = {
+          ...collection.value,
+          ...data,
+          total: data.total || collection.value?.total || known.length + added.length,
+          items: [...known, ...added],
+        };
       }
     }
 
@@ -264,8 +277,15 @@ createApp({
       else selected.value.push(id);
     }
 
+    // 歌单与专辑走同一个端点（/api/album）：两者都是「列一批曲目让用户勾选」，
+    // 后端按路径里的 playlist 分派，界面复用同一张列表卡。
     const isAlbumUrl = (value) =>
-      /music\.163\.com\/(?:#\/)?album/i.test(value) || /y\.qq\.com\/.*albumDetail/i.test(value);
+      /music\.163\.com\/(?:#\/)?(?:m\/)?(?:album|playlist)/i.test(value)
+      || /y\.qq\.com\/.*albumDetail/i.test(value)
+      // QQ 歌单：`/n/ryqq/playlist/<数字>` 与分享页 `taoge.html?id=<数字>`
+      || /y\.qq\.com\/.*\/(?:playlist\/\d+|taoge\.html)/i.test(value)
+      // 酷狗歌单：`/yy/special/single/<id>.html`、`/plist/list/<id>`
+      || /kugou\.com\/.*\/(?:special\/single|plist\/list)\/\d+/i.test(value);
 
     async function probeUrl(target) {
       const value = (target || url.value).trim();
@@ -273,7 +293,7 @@ createApp({
       busy.value = true;
       message.value = '';
 
-      // 专辑链接：先列曲目（上限 20），再按勾选逐首建任务
+      // 专辑 / 歌单链接：先列曲目（上限 20），再按勾选逐首建任务
       if (isAlbumUrl(value)) {
         const data = await api('/api/album', {
           method: 'POST',
@@ -291,10 +311,14 @@ createApp({
           dropped: data.dropped || 0,
           hasMore: !!data.hasMore,
           nextOffset: data.nextOffset || 0,
+          warnings: data.warnings || [],
         };
         albumTracks.value = data.tracks || [];
         checkedTracks.value = [];
         result.value = null;
+        // 列表卡互斥：先粘收藏夹再粘专辑/歌单时，不能两张卡同时挂着
+        collection.value = null;
+        collectionChecked.value = [];
         selected.value = [];
         url.value = value;
         return;
@@ -371,6 +395,18 @@ createApp({
         hasMore: !!data.hasMore,
         nextOffset: data.nextOffset || albumTracks.value.length,
       };
+    }
+
+    // 仅音频档位由 probe 的 formats 提供（B站 DASH 音频轨是独立文件）。
+    // 手机端引擎没有这一档 → 这里为 undefined，chip 自动禁用，不假装能点。
+    const audioFormat = computed(() => (result.value?.formats || [])
+      .find((f) => f.id === 'audio' && f.available));
+
+    /** 「音频」chip：只下音频轨。勾选状态仍回到 normally 的 selected，用户能再改。 */
+    function downloadAudioOnly() {
+      if (!audioFormat.value || submitting.value || busy.value) return;
+      selected.value = ['audio'];
+      download();
     }
 
     async function download() {
@@ -544,6 +580,8 @@ createApp({
 
     async function previewSelected() {
       if (!result.value || !selected.value.length) return;
+      // 音频档没有视频轨，服务端预览地址为空：说清楚，而不是让按钮转一圈再报 failed
+      if (selected.value[0] === 'audio') { message.value = t('audioNoPreview'); return; }
       const data = await api('/api/preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -552,8 +590,33 @@ createApp({
           formatId: selected.value[0],
         },
       });
-      if (data.ok) previewUrl.value = data.url;
-      else message.value = errorText(data);
+      if (data.ok) {
+        previewUrl.value = data.url;
+        previewAudioUrl.value = data.audioUrl || '';
+      } else message.value = errorText(data);
+    }
+
+    /**
+     * 让隐藏的 `<audio>` 跟着 `<video>` 走：播放 / 暂停 / 跳转 / 倍速。
+     *
+     * 为什么只纠偏不硬同步：`timeupdate` 约 4Hz，每帧都写 `currentTime` 会让音频打嗝；
+     * 偏差超过 250ms 才拉回一次，正常播放时两边各播各的（同源、同一时间轴）。
+     */
+    function syncPreviewAudio() {
+      const video = videoEl.value;
+      const audio = audioEl.value;
+      if (!video || !audio) return;
+      if (Math.abs(audio.currentTime - video.currentTime) > 0.25) {
+        audio.currentTime = video.currentTime;
+      }
+      audio.playbackRate = video.playbackRate;
+      audio.volume = video.volume;
+      audio.muted = video.muted;
+      if (video.paused) {
+        if (!audio.paused) audio.pause();
+      } else if (audio.paused) {
+        audio.play().catch(() => { /* 自动播放被拒时保持静音，不弹错 */ });
+      }
     }
 
     async function loadAuth() {
@@ -835,9 +898,13 @@ createApp({
       if (data.ok && data.url) {
         previewSeek.value = null; // 普通预览从头放；只有从分析面板跳过来才带时间
         previewUrl.value = data.url;
+        previewAudioUrl.value = ''; // 本地成品自带音轨，不要再叠一条
       } else message.value = (data.error && data.error.message) || 'failed';
     }
-    function closePreview() { previewUrl.value = ''; }
+    function closePreview() {
+      previewUrl.value = '';
+      previewAudioUrl.value = '';
+    }
 
     /**
      * A1 分析：只对视频文件发请求。
@@ -910,6 +977,7 @@ createApp({
       }
       previewSeek.value = tMs;
       previewUrl.value = data.url;
+      previewAudioUrl.value = ''; // 分析面板跳的是本地成品，同样自带音轨
     }
     const seekToFrame = (frame) => seekTo(frame.t_ms);
     const seekToScene = (scene) => seekTo(Math.round((scene.start_ms + scene.end_ms) / 2));
@@ -988,7 +1056,7 @@ createApp({
       withCover, withSubs, withDanmaku, size, statusLabel, dur,
       connected, outDir, limitRate, rateText, platformClass, jobName,
       settingsOpen, sOutDir, sTheme, sLimitRateMB, sConcurrency, sGeneric,
-      compStatus, compBusy, previewUrl,
+      compStatus, compBusy, previewUrl, previewAudioUrl, audioEl, syncPreviewAudio,
       authRows, authBusy, loadAuth, loginSite, authBadge, authText, renewInfo, loadRenew,
       qrOpen, qrSites, qrSite, qrImage, qrState, qrMessage,
       clipWatch, clipHit, toggleClipWatch, acceptClip, dismissClip,
@@ -1004,7 +1072,8 @@ createApp({
       removeJob, clearFinished, retryFailed, revealJob,
       album, albumTracks, checkedTracks, allTracks, toggleTrack, toggleAllTracks,
       loadingMore, loadMoreTracks,
-      toggleLang, toggleTheme, toggleFormat, persistSidecars, probe, probePart, download, cancel, retry,
+      toggleLang, toggleTheme, toggleFormat, persistSidecars, probe, probePart, download, downloadAudioOnly,
+      audioFormat, cancel, retry,
       openSettings, saveSettings, installComponent, previewSelected, previewJob, closePreview,
       analysis, analysisBusy, analysisName, analyzable, analyzeJob, closeAnalysis,
       descConfirm, describeShots,

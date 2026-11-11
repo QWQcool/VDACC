@@ -111,3 +111,39 @@ bun test ts/tests/tags.test.ts      → 6 pass（三种编码 + 边界）
 bun test ts/tests/kuwo-probe.test.ts → 6 pass（新增 K5 降级补全标题）
 bun test ts/tests                    → 154 pass / 0 fail
 ```
+
+## 7. 增补：歌单（2026-11-11，真实接口实测）
+
+### 酷狗：✅ 可用
+
+| 请求 | 结果 |
+|---|---|
+| `mobiles.kugou.com/api/v3/special/info?specialid=123456&format=json` | `specialname` / `nickname` / `songcount=51` / `imgurl`（带 `{size}` 占位） |
+| `…/api/v3/special/song?specialid=123456&page=1&pagesize=100` | `data.total=51` + `data.info[]`（一次给全） |
+| `page=1` vs `page=2` | 返回不同曲目（分页生效） |
+| 不存在的 `specialid` | HTTP 200 + `total:0` + `info:[]`（不是报错） |
+
+曲目字段：`hash`（下载 key，32 hex）/ `filename`（「歌手 - 歌名」，没有独立的 `songname`/`singername`）/
+`duration`（秒）/ `album_id`。实现 `parsePlaylistId` + `playlistTracks`（`ts/src/engines/kugou.ts`），
+分页走 `core/paging.ts`。实测 `special/single/123456.html` → 「震惊！这些歌居然被翻唱这么多次」
+51 首 / 第 1 批 20 首、歌手与歌名拆分正确。
+
+### 酷我：❌ 不可用（不做，也不假装）
+
+| 尝试 | 结果 |
+|---|---|
+| `api/www/playlist/playListInfo?pid=…`（无 csrf） | `The request is illegal!` |
+| 同上 + `csrf` 头 + `kw_token` cookie | 仍 illegal —— **首页 / 搜索页 / H5 页都不下发 `kw_token`**（只有 `Hm_Iuvt_…`） |
+| 桌面 UA 的 `/playlist_detail/<id>` | HTTP **430**，`__NUXT__` 里 `error.statusCode=430`、`songlist.list` 为空 |
+| 移动 UA 的 `/h5app/playlist/<id>` | 200，`musicList` 有数据，但整段是**压缩成单字母变量的 NUXT 表达式**（`artist:y`），静态解析不可靠；**eval 远端脚本不做** |
+| `search.kuwo.cn/r.s?ft=playlist` | 可用（单引号 dict），能给 `playlistid` / `name` / `songnum`，但**没有曲目** |
+| `m.kuwo.cn/newh5app/api/mobile/v1/…` | 404 |
+
+结论：拿不到曲目就不做。`probeKuwo` 对歌单链接改报 `unsupported` + 「接口要求 csrf + kw_token，首页不下发」，
+服务端 `/api/album` 给同一条文案。**不把「接口要签名」说成「链接坏了」，也不 eval 远端脚本。**
+
+### 复用：分页器只抽「分页」
+
+QQ 与酷狗是同一套「每页 N 条 + 声明总数」，循环抽到 `ts/src/core/paging.ts` 的 `collectPages`
+（去重、按总数收敛、上限**真截断**、三条停止条件）。**没有**把 B站（服务端 pn/ps）与网易云
+（trackIds + 批量补详情）也塞进同一个接口——抓取语义不同，强行统一只会多一层无意义适配。

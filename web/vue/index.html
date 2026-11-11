@@ -119,11 +119,11 @@
               </div>
             </section>
 
-            <!-- 专辑 -->
+            <!-- 专辑 / 歌单：同一个列表卡，标题上的标签按 kind 区分 -->
             <section class="card" id="album" v-if="album">
               <div class="card-head">
                 <h2>{{ album.title }}</h2>
-                <span class="en">ALBUM</span>
+                <span class="en">{{ album.kind === 'playlist' ? 'PLAYLIST' : 'ALBUM' }}</span>
                 <span class="spacer"></span>
                 <span class="badge purple">{{ albumTracks.length }} / {{ album.total }} {{ t('tracks') }}</span>
               </div>
@@ -131,6 +131,12 @@
               <div class="alert" v-if="album.dropped">
                 <b>!</b>
                 <div>{{ t('albumDropped') }} <b>{{ album.dropped }}</b> {{ t('tracks') }}</div>
+              </div>
+
+              <!-- 曲目数对不上 / 部分曲目拿不到详情：后端如实给，界面如实显示 -->
+              <div class="alert" v-for="(w, i) in (album.warnings || [])" :key="'w' + i">
+                <b>!</b>
+                <div>{{ w }}</div>
               </div>
 
               <div class="batch-head" style="margin-top:12px">
@@ -266,7 +272,7 @@
                     <span class="badge ok" v-if="chosenFormat">
                       {{ chosenFormat.label }}{{ chosenFormat.fps > 30 ? chosenFormat.fps : '' }}
                     </span>
-                    <!-- 每 P 的资源：弹幕/字幕/封面；音频单独下还没做，标出来而不是假装能选 -->
+                    <!-- 每 P 的资源：弹幕/字幕/封面；「音频」= 只下 DASH 音频轨（有 audio 档位时才能点） -->
                     <span class="part-opts" v-if="result.platform === 'bilibili'">
                       <button type="button" class="chip" :class="{ on: optOf(p.index).danmaku }"
                               @click="togglePartOpt(p.index, 'danmaku')">{{ t('danmaku') }}</button>
@@ -274,8 +280,10 @@
                               @click="togglePartOpt(p.index, 'subs')">{{ t('subs') }}</button>
                       <button type="button" class="chip" :class="{ on: optOf(p.index).cover }"
                               @click="togglePartOpt(p.index, 'cover')">{{ t('cover') }}</button>
-                      <button type="button" class="chip dim" disabled
-                              :title="t('audioOnlyUnsupported')">{{ t('audio') }}</button>
+                      <button type="button" class="chip" :class="{ on: selected.includes('audio'), dim: !audioFormat }"
+                              :disabled="!audioFormat"
+                              :title="audioFormat ? t('audioOnlyHint') : t('audioNoTrack')"
+                              @click="downloadAudioOnly">{{ t('audio') }}</button>
                     </span>
                   </div>
                 </div>
@@ -573,7 +581,11 @@
           <span>{{ t('preview') }}</span>
           <button class="icon-btn" :aria-label="t('close')" @click="closePreview">✕</button>
         </div>
-        <video ref="videoEl" :src="previewUrl" controls autoplay @loadedmetadata="applySeek"></video>
+        <!-- B站 是 DASH 双轨：视频轨在这里，音轨用一个隐藏 <audio> 跟着它同步播 -->
+        <video ref="videoEl" :src="previewUrl" controls autoplay @loadedmetadata="applySeek"
+               @play="syncPreviewAudio" @pause="syncPreviewAudio" @seeked="syncPreviewAudio"
+               @timeupdate="syncPreviewAudio" @ratechange="syncPreviewAudio"></video>
+        <audio v-if="previewAudioUrl" ref="audioEl" :src="previewAudioUrl" preload="auto"></audio>
       </div>
     </div>
 

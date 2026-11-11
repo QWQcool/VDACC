@@ -152,3 +152,39 @@ HEAD 在真实 CDN 上的可用性、网易云/酷我/酷狗的同类问题。
 ② 统一网络错误码（影响面大，需先定方案）；
 ③ 真实账号验证必须先取得明确授权，且只在用户自有权益范围内观察。
 
+## 9. 增补：歌单（2026-11-11，真实接口实测）
+
+### 探测结论
+
+| 请求 | 结果 |
+|---|---|
+| `c.y.qq.com/qzone/fcg-bin/fcg_ucc_getcdinfo_byids_cp.fcg?disstid=7707261125…` | HTTP 200，54 B：`{"code":0,"subcode":4000,"msg":"check privacy error!"}` —— **不可用** |
+| `musicu.fcg` `music.musichallSongListServer / getSongListDetail` | `req.code=500003 subcode=860100005` |
+| `musicu.fcg` `music.srfDissInfo.aiDissInfo / uniform_get_Dissinfo` | ✅ `req.code=0`，41 KB，`data.dirinfo.songnum=66`、`data.songlist` 20 条 |
+| 同上 `song_begin=20` | 返回的是另一批 20 首（分页生效） |
+| 同上 `song_num=100` / `200` | 都返回 66（即整单；超过 songnum 按 songnum 截断） |
+| `i.y.qq.com/n2/m/share/details/taoge.html?id=<id>` | HTML 可访问、title 正确，但没有可解析的曲目 JSON —— 不靠页面解析 |
+
+曲目字段：`mid`（不是 `songmid`）、`name`、`singer[].name`；封面 `dirinfo.picurl`；标题 `dirinfo.title`。
+
+### 实现
+
+`playlistTracks()`（`ts/src/engines/qq.ts`）：`parsePlaylistId`（`/playlist/<数字>`、`taoge.html?id=`、裸数字）
+→ 每批 100 条 `uniform_get_Dissinfo` → 按 `declared = dirinfo.songnum` 收敛 → 按 mid 去重并保留首次顺序；
+`declared` 与实际不符、超过 5000 首上限都进 `warnings`。
+入口：CLI `--playlist`、`POST /api/album`（`kind:'playlist'` 或路径含 `playlist`/`taoge`）、
+界面复用专辑列表卡（标签 PLAYLIST）、Android 引擎同步移植。
+
+### 验证
+
+```
+bun ts/src/cli.ts get "https://y.qq.com/n/ryqq/playlist/7707261125" --playlist --dry-run
+  → 歌单：甜度爆表 | 旋律说唱狙击少女心（共 66 首，本次第 1 批：20 首，之后还剩 46）
+  → --offset 60 第 4 批：6 首（61–66）
+bun test ts/tests/qq-playlist.test.ts → 9 pass / 0 fail（假 fetch：映射/分页/去重/warnings/错误码）
+bun test ts/tests                    → 277 pass / 0 fail
+```
+
+Android：`bun selftest.mjs` 覆盖「QQ 歌单标题 / kind / 曲目数 / songDetail 链接」（假 http 按
+`song_begin` 分页）。**真机未复测**。
+

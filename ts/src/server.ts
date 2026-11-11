@@ -18,12 +18,17 @@ import { isSameActiveJob } from './core/jobmatch';
 import { runOperation } from './core/operation';
 import { currentLimitBytesPerSec, setLimitBytesPerSec } from './core/rate';
 import { getDouyin, previewDouyin, probeDouyin } from './engines/douyin';
-import { albumTracks as neteaseAlbum, previewNetease, getNetease, probeNetease } from './engines/netease';
-import { albumTracks as qqAlbum, getQQ, previewQQ, probeQQ } from './engines/qq';
+import {
+  albumTracks as neteaseAlbum, playlistTracks as neteasePlaylist,
+  expandShortLink, previewNetease, getNetease, probeNetease,
+} from './engines/netease';
+import { albumTracks as qqAlbum, playlistTracks as qqPlaylist, getQQ, previewQQ, probeQQ } from './engines/qq';
 import { getKuwo, probeKuwo } from './engines/kuwo';
-import { getKugou, probeKugou } from './engines/kugou';
+import { playlistTracks as kugouPlaylist, getKugou, probeKugou } from './engines/kugou';
 import { canHandle as canSniff, getSniff, probeSniff } from './engines/sniff';
-import { getBilibiliApi, previewBilibili, probeBilibiliApi, refetchSidecars } from './engines/bilibili_api';
+import {
+  getBilibiliApi, previewBilibili, previewBilibiliAudio, probeBilibiliApi, refetchSidecars,
+} from './engines/bilibili_api';
 import {
   SITES as AUTH_SITES, authErrorOf, clearAuthError, login as authLogin,
   noteAuthError, status as authStatus, verify as authVerify,
@@ -403,33 +408,71 @@ const server = Bun.serve({
       }
     }
 
-    // 专辑曲目预览：只列前 20（planAlbum），下载仍由 /api/jobs 逐首建任务
+    // 专辑 / 歌单曲目预览：只列前 20（planAlbum），下载仍由 /api/jobs 逐首建任务。
+    // 网易云的歌单与专辑在「一批 20 首 + nextOffset」这件事上完全同形，所以共用这个端点：
+    // 路径里带 playlist 或显式 body.kind='playlist' 才走歌单，裸数字仍按专辑（不改变既有行为）。
     if (path === '/api/album' && req.method === 'POST') {
       const body = (await req.json().catch(() => null)) || {};
       const target = String(body.url || '').trim();
       if (!target) return json({ ok: false, error: { code: 'bad_input', message: '缺少 url' } }, 400);
       const platform = platformOf(target);
-      if (platform !== 'netease' && platform !== 'qq') {
+      // 酷我歌单单独说清楚原因：接口要 `csrf` + `kw_token`，而首页/搜索页/H5 页都不下发它
+      // （2026-11-11 实测），不是"我们忘了支持"。
+      if (platform === 'kuwo' && /playlist/i.test(target)) {
         return json({
           ok: false,
-          error: { code: 'unsupported', message: '专辑只支持 网易云 / QQ 音乐' },
+          error: {
+            code: 'unsupported',
+            message: '酷我歌单暂不支持（接口要求 csrf + kw_token，首页不下发）',
+          },
         }, 400);
       }
-      // offset 用于「加载下一批」：单批仍最多 20 首，不按整张专辑硬下
+      if (platform !== 'netease' && platform !== 'qq' && platform !== 'kugou') {
+        return json({
+          ok: false,
+          error: { code: 'unsupported', message: '专辑 / 歌单只支持 网易云 / QQ 音乐 / 酷狗' },
+        }, 400);
+      }
+      // offset 用于「加载下一批」：单批仍最多 20 首，不按整个列表硬下
       const offset = Number(body.offset) || 0;
       try {
-        const info = platform === 'netease' ? await neteaseAlbum(target) : await qqAlbum(target);
+        // 网易云 App 分享的 163cn.tv 短链要先跟跳转才知道是专辑还是歌单；
+        // 其它输入原样返回（不发请求，也不改变既有行为）。短链失效要如实报，不能吞成「识别不出 ID」。
+        const resolved = platform === 'netease' ? await expandShortLink(target) : target;
+        // 各家歌单链接形状不同：网易云 `/playlist`、QQ `/playlist/<数字>` 或 `taoge.html`、
+        // 酷狗 `/special/single/<id>.html` 或 `/plist/list/<id>`
+        const wantsPlaylist = body.kind === 'playlist'
+          || (platform === 'netease' && /\/playlist\b/i.test(resolved))
+          || (platform === 'qq' && (/\/playlist\//i.test(resolved) || /taoge\.html/i.test(resolved)))
+          || (platform === 'kugou' && (/\/special\/single\//i.test(resolved) || /\/plist\/list\//i.test(resolved)));
+        if (platform === 'kugou' && !wantsPlaylist) {
+          return json({
+            ok: false,
+            error: {
+              code: 'unsupported',
+              message: '酷狗目前只支持歌单（/special/single/<id>）；专辑批量还没做',
+            },
+          }, 400);
+        }
+        const info = platform === 'netease'
+          ? (wantsPlaylist ? await neteasePlaylist(resolved) : await neteaseAlbum(resolved))
+          : platform === 'kugou'
+            ? await kugouPlaylist(resolved)
+            : (wantsPlaylist ? await qqPlaylist(resolved) : await qqAlbum(resolved));
         const plan = planAlbum(info.tracks, offset);
         return json({
           ok: true,
           album: {
             id: info.id, title: info.title, cover: info.cover, total: info.tracks.length,
+            kind: info.kind || 'album',
           },
           tracks: plan.take,
           dropped: plan.dropped,
           offset: plan.offset,
           hasMore: plan.hasMore,
           nextOffset: plan.nextOffset,
+          // 曲目数对不上 / 部分曲目拿不到详情这类事实，跟着响应一起给界面
+          warnings: info.warnings || [],
         });
       } catch (err) {
         return json(failBody('ts', err));
@@ -701,9 +744,15 @@ const server = Bun.serve({
       const formatId = String(body.formatId || '');
       let src = '';
       let ref = '';
+      // B站 是 DASH 双轨：视频轨给 <video>，音轨单独给一个 <audio>，否则预览永远是哑片
+      let audioSrc = '';
       switch (platformOf(target)) {
         case 'douyin': src = previewDouyin(formatId); ref = 'https://www.douyin.com/'; break;
-        case 'bilibili': src = previewBilibili(formatId); ref = 'https://www.bilibili.com/'; break;
+        case 'bilibili':
+          src = previewBilibili(formatId);
+          audioSrc = previewBilibiliAudio(formatId);
+          ref = 'https://www.bilibili.com/';
+          break;
         case 'netease': src = previewNetease(formatId); ref = 'https://music.163.com/'; break;
         case 'qq': src = previewQQ(formatId); ref = 'https://y.qq.com/'; break;
         default: break;
@@ -712,7 +761,13 @@ const server = Bun.serve({
         return json({ ok: false, error: { code: 'no_stream', message: '没有可预览的地址' } });
       }
       const q = new URLSearchParams({ token: TOKEN, src, ref });
-      return json({ ok: true, formatId, url: `/api/stream?${q}` });
+      const audioQ = audioSrc ? new URLSearchParams({ token: TOKEN, src: audioSrc, ref }) : null;
+      return json({
+        ok: true,
+        formatId,
+        url: `/api/stream?${q}`,
+        ...(audioQ ? { audioUrl: `/api/stream?${audioQ}` } : {}),
+      });
     }
 
     if (path === '/api/stream') {

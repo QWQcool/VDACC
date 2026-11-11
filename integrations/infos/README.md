@@ -24,8 +24,30 @@
 
 ## 2. 因此推荐路线（按可交付顺序）
 
-**Phase 1 · 现在能做：Package（skill + tool），调本机服务** —— ✅ 骨架已实现，见
-[`package/`](package/)（`manifest.json` + `tools/{probe,get,jobs}.mjs` + `skills/vdacc-usage/`）。
+**Phase 1 · 现在能做：Package（skill + tool），调本机服务** —— ✅ **已在真实宿主验证（2026-11-11）**，
+见 [`package/`](package/)（`manifest.json` + `tools/{probe,get,jobs}.mjs` + `skills/vdacc-usage/`）。
+
+真实宿主实测（`D:\infOS`，`@infos/backend` 0.9.12，`127.0.0.1:9120`）：
+
+```
+打包 9,868 字节 ZIP（根含 manifest.json，8 个文件，无依赖）
+POST /api/packages/install                     → state=installed, digest=3b5509…
+POST /api/packages/vdacc.media-acquire/authorize  {digest, permissions:['runtime:execute']}
+PUT  /api/packages/vdacc.media-acquire/enabled  {enabled:true}
+GET  /api/packages                            → state=active / enabled=true / authorized=true
+GET  /api/integrations/installed              → package:vdacc.media-acquire（界面能看见）
+```
+
+然后用**安装目录里那份代码**（`@data/packages/.managed/releases/<uuid>/tools/probe.mjs`）
+真调一次：`vdl_probe` → 本机 VDACC → 网易云《在你的身边》三档齐全。
+删掉 `config.json` 后报的是「请在 …\config.json 写入 {baseUrl,token}」，不是「请求失败」。
+
+**两处如实记录**：
+
+- install 返回的 `digest`（3b5509…）与注册表里的 `authorizedDigest`（fb408f…）不是同一个值，
+  但 authorize 仍成功 —— 「内容摘要」的算法在宿主侧重算（不是上传 ZIP 的哈希），别拿它当幂等键；
+- 宿主需要 `Authorization: Bearer <localToken>`；`localToken` 在 `%USERPROFILE%\.infos\client-access.json`
+  （`INFOS_API_TOKEN` 环境变量优先）。**这是本机凭据，不进仓库也不要贴日志。**
 
 - `skill` 贡献放我们已有的 `ts/skill/SKILL.md`（什么时候该用、错误码怎么读）。
 - `tool` 贡献放 2–3 个薄函数：`vdl_probe` / `vdl_get` / `vdl_jobs`，
@@ -45,11 +67,23 @@
 Frontend Adapter（UI 插槽）、以及我们这侧的 Sidecar（其实就是现在的 `vdl serve`）。
 在那之前动手等于对着草案写代码，返工概率极高。
 
-**Phase 3 · 市场收录：等目录格式**
+**Phase 3 · 市场收录：现在还不能提交条目（2026-11-11 复核）**
 
-`Astrmira/infOS-Market` 目前只有 2 个提交、`catalog/` 是空骨架，
-README 明说「目录格式、安装流程与工坊关联方式将在对应功能设计时确定」，客户端也尚未接入。
-所以现在能做的只是准备元数据（介绍、版本、兼容范围、下载来源），不能提交条目。
+读了 `Astrmira/infOS-Market` 的 README / `CONTRIBUTING.md` / `catalog/README.md`，
+结论比 11-09 那次更明确：
+
+| 事实 | 出处 |
+|---|---|
+| 仓库 **2 个 commit**，`catalog/` 只有一份占位 README，**无任何正式条目** | 仓库页 / `catalog/README.md` |
+| **「当前仓库尚未开放正式收录协议」** | `CONTRIBUTING.md` 开篇 |
+| 目录格式、条目字段、分类规则**全部未定义**（无 schema、无字段类型、无目录层级） | `catalog/README.md`：「正式条目格式与贡献校验，将与 infOS 统一内容管理功能一并确定」 |
+| **客户端尚未接入市场** | README「当前状态」 |
+| 唯一成文的动作：想收录**先开 Issue**（用途 / 来源 / 属性 / 界面类附截图），PR 阶段用 Conventional Commits + 改动 + 验证方式 | `CONTRIBUTING.md` §1 §5 |
+
+所以**不能提交条目**，也不必按草案写格式——官方自己说格式会随功能设计再定。
+**现在唯一值得做的一步是开 Issue 占位/沟通**：格式还没定，早期沟通能影响它怎么定。
+另外市场收的是 **Package / Skill / 角色包 / 桌宠资源**，不是 `application` 子应用
+（第三方上传包声明 `application` 会激活失败，这是 infOS 自身的受控入口）。
 
 ## 3. 与「薄页面」的关系
 

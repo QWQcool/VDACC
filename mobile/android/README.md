@@ -20,7 +20,7 @@
 rem 1) 引擎 bundle（Bun 自带 bundler，无第三方依赖）
 cd mobile\android\engine
 bun build.mjs
-bun selftest.mjs          rem 无设备自检：75 条纯函数/桥 + 8 条落盘 + 8 条标签 + 16 条专辑分批
+bun selftest.mjs          rem 无设备自检：75 条纯函数/桥 + 8 条落盘 + 8 条标签 + 16 条专辑 + 11 条歌单
 
 rem 2) APK
 set JAVA_HOME=%LOCALAPPDATA%\vdacc-tools\jdk17
@@ -319,6 +319,15 @@ QQ 用 `fcg_play_single_song` + `vkey.GetVkeyServer`。
 | 打开 | 点「打开」→ `topResumedActivity=com.heytap.yoli/SysVideoPlayActivity` |
 | 账号区 | 三个站点都在：B站 大会员、网易云 黑胶、`QQ音乐 端上未登录`（如实） |
 | 缺失文件 | `previewFile('__nope__')` → `not_found`，不返回假地址 |
+
+## 二·六、三期：歌单入口（2026-11-11）
+
+| 项 | 状态 | 做法与验证 |
+|---|---|---|
+| **网易云 / QQ 歌单** | ✅ 真机已验证（2026-11-11） | 引擎补 `playlistTracks`：网易云走 `playlist/detail?n=0` 的 `trackIds` + 每批 100 条 `song/detail`（`playlist/track/all` 匿名已 `code=404`）；QQ 走 `musicu.fcg` 的 `music.srfDissInfo.aiDissInfo / uniform_get_Dissinfo`（`song_num=100` 一次给整单）。`entry.albumAny` 增加 `kind` 参数并按路径分流（`/playlist`、`taoge.html`），`local-api` 透传 `body.kind`，界面复用专辑卡（标签随 `kind` 变 `PLAYLIST`）。**假 http 自检新增 11 条歌单断言**（含「按 trackIds 顺序还原」——假响应故意倒序，端上不能直接用返回顺序）；`bun selftest.mjs` 全绿。真机（realme RMX5200 / Android 16，APK 1,073,116 字节）：分享 intent 送入链接后，网易云显示「热歌榜 PLAYLIST 20 / 200 曲目」+「之后还剩 180」，QQ 显示「甜度爆表 PLAYLIST 20 / 66 曲目」+「之后还剩 46」 |
+| **收藏夹 / 合集** | ⛔ 端上不做 | `local-api` 明确回 `unsupported`「手机端暂不支持收藏夹/合集，请在电脑的网页界面里挑」，不再是通用的「本地引擎模式暂不支持：/api/collection」 |
+
+同批把 `assets/ui/app` 与源码的欠账补齐：之前几轮桌面前端（分析页 / 剪贴板 / 收藏夹 / 统一面板）改过 `web/vue` 却**没有重跑 `build-ui.mjs`**，APK 里一直是旧界面（diff 632 行）。这次按脚本重新生成，端上文案改写（账号说明 / 「打开」）与 LF 归一仍由脚本校验。
 
 ## 三、桥与目录（M0 已实现的部分）
 

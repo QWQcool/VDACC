@@ -125,6 +125,48 @@ function fakeBridge(method, payload) {
             ],
           },
         };
+      } else if (/\/api\/v6\/playlist\/detail/.test(url)) {
+        // 与真实接口同形：n=0 时 tracks 为空、trackIds 全量
+        body = {
+          code: 200,
+          playlist: {
+            name: '自检歌单',
+            coverImgUrl: 'https://p1.music.126.net/playlist.jpg',
+            trackCount: 25,
+            trackIds: Array.from({ length: 25 }, (_, i) => ({ id: 2000 + i })),
+            tracks: [],
+          },
+        };
+      } else if (/\/api\/song\/detail/.test(url)) {
+        // 故意**倒序**返回：端上必须按 trackIds 还原，不能直接用返回顺序
+        const raw = decodeURIComponent(url);
+        const ids = (/ids=\[([^\]]*)\]/.exec(raw)?.[1] || '').split(',').filter(Boolean).map(Number);
+        body = {
+          code: 200,
+          songs: ids.slice().reverse().map((id) => ({
+            id,
+            name: `歌 ${id - 2000 + 1}`,
+            ar: [{ name: id % 2 ? '歌手B' : '歌手A' }],
+          })),
+        };
+      } else if (/musicu\.fcg/.test(url)) {
+        // QQ 歌单：按 body 里的 song_begin 分页（与真实请求同一个字段）
+        const rawBody = Buffer.from(payload.bodyBase64 || '', 'base64').toString('utf8');
+        const begin = Number(/"song_begin":(\d+)/.exec(rawBody)?.[1] || 0);
+        const all = Array.from({ length: 25 }, (_, i) => ({
+          mid: `qqmid${String(i).padStart(9, '0')}`,
+          name: `Q歌 ${i + 1}`,
+          singer: [{ name: '甲' }],
+        }));
+        body = {
+          req: {
+            code: 0,
+            data: {
+              dirinfo: { title: 'QQ 自检歌单', songnum: 25, picurl: 'https://p1/cover.jpg' },
+              songlist: all.slice(begin, begin + 100),
+            },
+          },
+        };
       }
       const text = body ? JSON.stringify(body) : JSON.stringify({ code: -404 });
       return {
@@ -262,6 +304,37 @@ const albumChecks = [
 
 console.log('[selftest] 专辑分批（假 http）');
 for (const [name, actual, expected] of albumChecks) {
+  const ok = JSON.stringify(actual) === JSON.stringify(expected);
+  console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}${ok ? '' : `  期望=${JSON.stringify(expected)} 实际=${JSON.stringify(actual)}`}`);
+  if (!ok) report.ok = false;
+}
+
+/* ─────────────── 6. 歌单（假 http，验 trackIds 还原与 kind 透传） ─────────────── */
+
+// 与桌面端同一套口径：网易云走 trackIds + 分批 song/detail，QQ 走 musicu 分页。
+// 这里最关键的断言是「曲目按 trackIds 顺序还原」——假 http 故意倒序返回。
+const plNetease = await engine.albumAny('https://music.163.com/playlist?id=7777');
+const plNeteaseSecond = await engine.albumAny('https://music.163.com/playlist?id=7777', plNetease.nextOffset);
+const plQQ = await engine.albumAny('https://y.qq.com/n/ryqq/playlist/8888');
+const plByKind = await engine.albumAny('9999', 0, 'playlist');
+
+const playlistChecks = [
+  ['网易云歌单 kind=playlist', plNetease.album.kind, 'playlist'],
+  ['网易云歌单总数如实上报', plNetease.album.total, 25],
+  ['网易云歌单首批 20 首', plNetease.tracks.length, 20],
+  ['网易云歌单按 trackIds 顺序还原', plNetease.tracks[0].id, '2000'],
+  ['网易云歌单第二批从第 21 首开始', plNeteaseSecond.tracks[0].id, '2020'],
+  ['网易云歌单只剩 5 首', plNeteaseSecond.tracks.length, 5],
+  ['QQ 歌单标题正确', plQQ.album.title, 'QQ 自检歌单'],
+  ['QQ 歌单 kind=playlist', plQQ.album.kind, 'playlist'],
+  ['QQ 歌单曲目数正确', plQQ.tracks.length, 20],
+  ['QQ 歌单曲目 url 指向 songDetail 页', plQQ.tracks[0].url,
+    'https://y.qq.com/n/ryqq/songDetail/qqmid000000000'],
+  ['裸数字 + kind=playlist 走歌单', plByKind.album.kind, 'playlist'],
+];
+
+console.log('[selftest] 歌单（假 http）');
+for (const [name, actual, expected] of playlistChecks) {
   const ok = JSON.stringify(actual) === JSON.stringify(expected);
   console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}${ok ? '' : `  期望=${JSON.stringify(expected)} 实际=${JSON.stringify(actual)}`}`);
   if (!ok) report.ok = false;

@@ -26,14 +26,20 @@ import { cancelTransferById, startTransfer } from '../shims/transfer';
 import {
   buildAudioTag, buildFlacTag, buildMp3Tag, existingId3Size, imageSize, parseFlacChain,
 } from './audiometa';
-import { albumTracks as neteaseAlbumTracks, downloadNetease, probeNetease } from './netease';
+import {
+  albumTracks as neteaseAlbumTracks, playlistTracks as neteasePlaylistTracks,
+  downloadNetease, probeNetease,
+} from './netease';
 import {
   aggregateProgress, bucketOf, chooseFormat as chooseBilibiliFormat, countDanmaku,
   downloadBilibili, foldDash, parseContentRangeTotal, parseTarget, probeBilibili, srtTime, toSrt,
 } from './bilibili';
 import { downloadKuwo, probeKuwo, parseRid, toLrc } from './kuwo';
 import { downloadKugou, probeKugou, parseHash } from './kugou';
-import { albumTracks as qqAlbumTracks, downloadQQ, probeQQ, parseSongmid } from './qq';
+import {
+  albumTracks as qqAlbumTracks, playlistTracks as qqPlaylistTracks,
+  downloadQQ, probeQQ, parseSongmid,
+} from './qq';
 import { readHead, rewriteStaged } from './staging';
 
 /**
@@ -641,23 +647,31 @@ export async function probeAny(text: string) {
  * 3. 返回形状与桌面 `POST /api/album` 完全一致，`web/vue/app.js` 的
  *    「加载下一批」原样可用（它的 `offset` 取自上一批的 `nextOffset`）。
  */
-export async function albumAny(text: string, offset = 0) {
+export async function albumAny(text: string, offset = 0, kind?: string) {
   const target = firstUrl(text) || (text || '').trim();
   const platform = platformOf(target);
   if (platform !== 'netease' && platform !== 'qq') {
-    throw codedError('unsupported', `专辑只支持 网易云 / QQ 音乐（识别为 ${platform}）`);
+    throw codedError('unsupported', `专辑 / 歌单只支持 网易云 / QQ 音乐（识别为 ${platform}）`);
   }
+  // 两家的歌单链接形状不同；显式 kind 优先，其次看路径（与桌面 /api/album 同一口径）
+  const wantsPlaylist = kind === 'playlist'
+    || (platform === 'netease' && /\/playlist\b/i.test(target))
+    || (platform === 'qq' && (/\/playlist\//i.test(target) || /taoge\.html/i.test(target)));
   const info = platform === 'netease'
-    ? await neteaseAlbumTracks(target)
-    : await qqAlbumTracks(target);
+    ? (wantsPlaylist ? await neteasePlaylistTracks(target) : await neteaseAlbumTracks(target))
+    : (wantsPlaylist ? await qqPlaylistTracks(target) : await qqAlbumTracks(target));
   const plan = planAlbum(info.tracks, offset);
   return {
-    album: { id: info.id, title: info.title, cover: info.cover, total: info.tracks.length },
+    album: {
+      id: info.id, title: info.title, cover: info.cover,
+      total: info.tracks.length, kind: info.kind || 'album',
+    },
     tracks: plan.take,
     dropped: plan.dropped,
     offset: plan.offset,
     hasMore: plan.hasMore,
     nextOffset: plan.nextOffset,
+    warnings: info.warnings || [],
   };
 }
 

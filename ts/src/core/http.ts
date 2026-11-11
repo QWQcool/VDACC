@@ -41,6 +41,8 @@ export interface RequestOptions {
   body?: string;
   jar?: CookieJar;
   timeoutMs?: number;
+  /** 仅供测试注入；不传就用全局 `fetch`（线上永远是后者）。 */
+  doFetch?: typeof fetch;
 }
 
 export async function request(url: string, opts: RequestOptions = {}): Promise<Response> {
@@ -56,8 +58,9 @@ export async function request(url: string, opts: RequestOptions = {}): Promise<R
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 20000);
+  const doFetch = opts.doFetch || fetch;
   try {
-    const res = await fetch(url, {
+    const res = await doFetch(url, {
       method: opts.method || 'GET',
       headers,
       body: opts.body,

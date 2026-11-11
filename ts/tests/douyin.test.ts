@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { isBlockedResponse } from '../src/engines/douyin';
+import { isBlockedResponse, isImageOnly } from '../src/engines/douyin';
 
 describe('抖音风控响应识别', () => {
   test('HTTP 403 一律算拦截', () => {
@@ -27,5 +27,25 @@ describe('抖音风控响应识别', () => {
   test('其它 HTTP 错误不算拦截，交给上层按状态码报错', () => {
     expect(isBlockedResponse(500, '<html>internal error</html>')).toBe(false);
     expect(isBlockedResponse(404, 'not found')).toBe(false);
+  });
+});
+
+describe('抖音图文作品识别', () => {
+  test('有图且没有可播视频流 → 图文', () => {
+    expect(isImageOnly({ images: [{ url_list: ['http://a/1.jpg'] }, { url_list: ['http://a/2.jpg'] }] })).toBe(true);
+    expect(isImageOnly({ images: [{ url_list: [] }], video: { play_addr: { url_list: [] } } })).toBe(true);
+  });
+
+  test('有图但 video 带 play_addr → 按视频处理，不误杀', () => {
+    expect(isImageOnly({
+      images: [{ url_list: ['http://a/1.jpg'] }],
+      video: { play_addr: { url_list: ['http://v/1.mp4'] } },
+    })).toBe(false);
+  });
+
+  test('普通视频与空对象都不算图文', () => {
+    expect(isImageOnly({ video: { play_addr: { url_list: ['http://v/1.mp4'] } } })).toBe(false);
+    expect(isImageOnly({})).toBe(false);
+    expect(isImageOnly(null)).toBe(false);
   });
 });
