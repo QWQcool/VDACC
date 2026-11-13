@@ -14,6 +14,7 @@ import { UA } from '../core/http';
 import { safeName } from '../core/naming';
 import { report } from '../core/progress';
 import { currentLimitBytesPerSec, throttle } from '../core/rate';
+import { parseDanmakuXml, toAss } from '../core/danmaku';
 import { format, type Format, type Media, type Part, type ProbeResult } from '../core/types';
 
 const API = 'https://api.bilibili.com';
@@ -21,10 +22,18 @@ const BUCKETS: Array<[number, string]> = [
   [3840, '4K'], [2560, '2K'], [1920, '1080P'], [1280, '720P'], [854, '480P'],
 ];
 
-const urlCache = operationState(() => new Map<string, { video: string; audio: string }>());
+const urlCache = operationState(() => new Map<string, {
+  video: string;
+  /** 合并下载用的音轨（可能是 FLAC / 杜比 / AAC）。 */
+  audio: string;
+  /** 预览专用音轨：一律用 AAC，浏览器对 flac-in-mp4 与 ec-3 的支持并不可靠。 */
+  previewAudio?: string;
+}>());
 
 /** 仅音频档位的固定 id：CLI `--format audio`、界面「音频」chip 都认它。 */
 export const AUDIO_FORMAT_ID = 'audio';
+/** 仅音频的 Hi-Res FLAC 档（只有带 `dash.flac` 的稿件才有）。 */
+export const AUDIO_FLAC_FORMAT_ID = 'audio-flac';
 
 /**
  * 「重新解析播放地址」的闭包。
@@ -56,7 +65,8 @@ export function previewBilibili(formatId: string): string {
  * 跟着 `<video>` 播/停/跳，预览才有声音。`audio` 档本身没有视频轨，这里返回空。
  */
 export function previewBilibiliAudio(formatId: string): string {
-  return urlCache().get(formatId)?.audio || '';
+  const hit = urlCache().get(formatId);
+  return hit?.previewAudio || hit?.audio || '';
 }
 
 /** 关键：不能把所有 cookie 拼进去（实测 64 条 / 8.9KB 会被 WAF 判 400），
@@ -234,10 +244,71 @@ function codecScore(codec: string): number {
   return 0;
 }
 
+/** 一条音轨的取舍结果：`url` 用于合并下载，`previewUrl` 给预览（AAC，兼容性最好）。 */
+interface AudioTrack {
+  url: string;
+  previewUrl: string;
+  codecs: string;
+  bandwidth: number;
+  kind: 'flac' | 'dolby' | 'aac';
+  label: string;
+}
+
+/** `dash.flac.audio` 是对象、`dash.dolby.audio` 是数组、`dash.audio` 也是数组——统一成单条。 */
+function asTrack(node: any): any | null {
+  if (!node) return null;
+  if (Array.isArray(node)) return asTrack(node.find((x) => x && (x.baseUrl || x.base_url)));
+  if (node.audio) return asTrack(node.audio);
+  return node.baseUrl || node.base_url ? node : null;
+}
+
+function byBandwidth(list: any): any | null {
+  if (!Array.isArray(list)) return null;
+  return list.filter((x) => x && (x.baseUrl || x.base_url))
+    .sort((a, b) => Number(b.bandwidth || 0) - Number(a.bandwidth || 0))[0] || null;
+}
+
+const urlOf = (track: any): string => String(track?.baseUrl || track?.base_url || '');
+
+/**
+ * 音轨优先级：**Hi-Res FLAC > 杜比全景声 > 带宽最大的 AAC**（与唧唧Down 的取舍一致）。
+ *
+ * 实测（2026-11-12，BV1nutz6mEgY，大会员登录）：
+ * `dash.flac = { display: true, audio: { id: 30251, codecs: 'fLaC', bandwidth: 1434259 } }`
+ * `dash.dolby = { type: 2, audio: [{ id: 30250, codecs: 'ec-3', bandwidth: 1665173 }] }`
+ * 匿名访问同一个稿件时 `flac.display` 仍是 true、但 `audio` 为空，`dolby.type=0` ——
+ * 所以判据必须是「有没有可用的 audio」，不能只看 display / type 这两个标志。
+ */
+function pickAudio(dash: any): AudioTrack | null {
+  const aac = byBandwidth(dash?.audio);
+  const flac = asTrack(dash?.flac?.audio);
+  const dolby = asTrack(dash?.dolby?.audio);
+  const mk = (track: any, kind: AudioTrack['kind'], label: string): AudioTrack | null => {
+    const url = urlOf(track);
+    if (!url) return null;
+    return {
+      url,
+      previewUrl: urlOf(aac) || url,
+      codecs: String(track?.codecs || ''),
+      bandwidth: Number(track?.bandwidth || 0),
+      kind,
+      label,
+    };
+  };
+  return mk(flac, 'flac', 'Hi-Res FLAC')
+    || mk(dolby, 'dolby', '杜比全景声')
+    || mk(aac, 'aac', 'AAC');
+}
+
+/** 音轨 codec → 合并后的容器。FLAC / ec-3 装进 mp4 兼容性差，统一用 mkv。 */
+function containerFor(acodec: string): 'mp4' | 'mkv' {
+  return acodec === 'flac' || acodec === 'eac3' ? 'mkv' : 'mp4';
+}
+
 function foldDash(dash: any, durationMs: number): Format[] {
   const videos: any[] = dash?.video || [];
-  const audios: any[] = dash?.audio || [];
-  const bestAudio = audios.sort((a, b) => Number(b.bandwidth || 0) - Number(a.bandwidth || 0))[0];
+  const aac = byBandwidth(dash?.audio);
+  const audio = pickAudio(dash);
   const seconds = durationMs / 1000;
 
   const groups = new Map<number, any[]>();
@@ -253,39 +324,62 @@ function foldDash(dash: any, durationMs: number): Format[] {
       .sort((a, b) => codecScore(b.codecs) - codecScore(a.codecs) ||
         Number(b.bandwidth || 0) - Number(a.bandwidth || 0))[0];
     const id = `bili-${limit || 'sd'}`;
-    const totalBw = Number(best.bandwidth || 0) + Number(bestAudio?.bandwidth || 0);
+    const acodec = audio
+      ? (audio.kind === 'flac' ? 'flac' : audio.kind === 'dolby' ? 'eac3' : 'aac')
+      : '';
+    const totalBw = Number(best.bandwidth || 0) + Number(audio?.bandwidth || 0);
     out.push(format({
       id,
       // 不落在已知档位的（竖屏 720×1280、640×360 等）用「宽×高」，别只报高度——
       // 竖屏视频只报高度会显示成「1280P」，看着像 4K 档
       label: BUCKETS.find(([l]) => l === limit)?.[1] || `${best.width}×${best.height}`,
       width: Number(best.width || 0), height: Number(best.height || 0),
-      ext: 'mp4', vcodec: String(best.codecs || '').split('.')[0],
-      acodec: bestAudio ? String(bestAudio.codecs || '').split('.')[0] : '',
+      // 体积按**实际会下到的那条音轨**算：带 FLAC 的稿件一选 4K 就是 900MB 级，
+      // 界面上的预估必须把这个也算进去，否则用户会以为只有几百兆。
+      ext: containerFor(acodec), vcodec: String(best.codecs || '').split('.')[0],
+      acodec,
       fps: Number(best.frameRate || 0) || 0,
       bytes: Math.round((totalBw * seconds) / 8) || null,
       bitrate: Math.round(totalBw) || null,
     }));
     urlCache().set(id, {
-      video: best.baseUrl || best.base_url,
-      audio: bestAudio ? (bestAudio.baseUrl || bestAudio.base_url) : '',
+      video: urlOf(best),
+      audio: audio?.url || '',
+      previewAudio: audio?.previewUrl || '',
     });
   }
-  // 单独一条「仅音频」：B站 的 DASH 音频轨本来就是独立文件（不下载视频轨就能拿），
-  // 以前界面上是个禁用的 chip。它的 bytes 只按音频带宽算，不混进视频档位的体积。
-  if (bestAudio) {
-    const audioBw = Number(bestAudio.bandwidth || 0);
+  // 单独一条「仅音频」：B站 的 DASH 音频轨本来就是独立文件（不下载视频轨就能拿）。
+  // 它的 bytes 只按音频带宽算，不混进视频档位的体积。
+  if (aac || audio) {
+    const track = aac || audio!;
+    const audioBw = Number(track.bandwidth || 0);
     out.push(format({
       id: AUDIO_FORMAT_ID,
       label: '仅音频 M4A',
       ext: 'm4a',
-      acodec: String(bestAudio.codecs || '').split('.')[0],
+      acodec: String(track.codecs || '').split('.')[0],
       bitrate: audioBw || null,
       bytes: audioBw && seconds ? Math.round((audioBw * seconds) / 8) : null,
     }));
     urlCache().set(AUDIO_FORMAT_ID, {
-      video: '',
-      audio: bestAudio.baseUrl || bestAudio.base_url,
+      video: '', audio: urlOf(track), previewAudio: urlOf(track),
+    });
+  }
+  // 有 Hi-Res FLAC 时再单列一条：它是「整轨无损」，与上面的 320K AAC 不是一个东西，
+  // 而且体积差 8 倍，必须单独成一个可选档位而不是偷偷替换。
+  const flacTrack = asTrack(dash?.flac?.audio);
+  if (flacTrack) {
+    const bw = Number(flacTrack.bandwidth || 0);
+    out.push(format({
+      id: AUDIO_FLAC_FORMAT_ID,
+      label: '仅音频 Hi-Res FLAC',
+      ext: 'flac',
+      acodec: 'flac',
+      bitrate: bw || null,
+      bytes: bw && seconds ? Math.round((bw * seconds) / 8) : null,
+    }));
+    urlCache().set(AUDIO_FLAC_FORMAT_ID, {
+      video: '', audio: urlOf(flacTrack), previewAudio: urlOf(aac) || urlOf(flacTrack),
     });
   }
   // 推荐 1080P：批量/分P 默认勾 4K 会变成 1.4GB/集，用户一次误点就是几十 GB
@@ -454,11 +548,26 @@ async function probeBangumi(target: Target): Promise<ProbeResult> {
 }
 
 async function streamOnce(url: string, part: string,
-                          onProgress: (w: number, t: number) => void = report): Promise<number> {
+                          onProgress: (w: number, t: number) => void = report,
+                          expected = 0): Promise<number> {
   let resume = existsSync(part) ? statSync(part).size : 0;
   const headers: Record<string, string> = { 'User-Agent': UA, Referer: 'https://www.bilibili.com/' };
   if (resume) headers.Range = `bytes=${resume}-`;
   const res = await fetch(url, { headers });
+  if (res.status === 416 && resume > 0) {
+    // 续传起点落在文件末尾（或更后面）：最常见的是「上次其实已经下完，只是最后一块的响应被中断」
+    // ——实测 2026-11-12 一次 ECONNRESET 之后，两个 .part 都是完整长度，重试却报 416。
+    // CDN 这时给 `content-range: bytes */<total>`，据此判断到底是不是已经够了。
+    // 实测：B站 的 416 **不带** content-range，所以还要退回调用方探测到的总字节
+    const total = parseContentRangeTotal(res.headers.get('content-range')) || expected;
+    if (total > 0 && resume >= total) {
+      onProgress(resume, resume);
+      return resume;
+    }
+    // 其它情况（part 比远端还大 / 远端换了文件）：丢掉重下一次，别让任务永久卡在 416
+    try { unlinkSync(part); } catch { /* ignore */ }
+    return streamOnce(url, part, onProgress);
+  }
   if (!res.ok && res.status !== 206) throw new VdlError(`http_${res.status}`, `下载失败 ${res.status}`);
   if (resume && res.status !== 206) resume = 0;
   const total = Number(res.headers.get('content-length') || 0) + resume;
@@ -487,6 +596,8 @@ async function streamOnce(url: string, part: string,
 
 /** 重试上限。地址过期不是「网络抖动」，2 次足够；再多说明是账号/权限问题，重试没用。 */
 const URL_EXPIRED_RETRIES = 2;
+/** 连接中断的重试次数：CDN 在长传输里掐连接时，续传一次通常就好了。 */
+const NETWORK_RETRIES = 2;
 
 /**
  * 下载一条流，遇到 **403 / 410**（B站 签名地址过期）时先刷新地址再续传。
@@ -499,25 +610,36 @@ async function streamTo(
   url: string, part: string,
   onProgress: (w: number, t: number) => void = report,
   refetch?: () => Promise<string>,
+  expected = 0,
 ): Promise<number> {
   let current = url;
   for (let attempt = 0; ; attempt += 1) {
     try {
-      return await streamOnce(current, part, onProgress);
+      return await streamOnce(current, part, onProgress, expected);
     } catch (err) {
       const code = err instanceof VdlError ? err.code : '';
       const expired = code === 'http_403' || code === 'http_410';
-      if (!expired || !refetch || attempt >= URL_EXPIRED_RETRIES) {
-        // 已经到了上限还失败：把「地址过期」说明白，别让用户以为是网络问题
-        if (expired && refetch && attempt >= URL_EXPIRED_RETRIES) {
-          throw new VdlError('url_expired',
-            `播放地址已过期，刷新 ${URL_EXPIRED_RETRIES} 次后仍然失败`,
-            '该视频可能刚被限权/删除；重试可续传，或换档位再试');
-        }
-        throw err;
+      // 连接被对端掐断（ECONNRESET / terminated / socket closed）在这类 CDN 上很常见，
+      // 尤其传到几百兆时。续传是现成的（.part + Range），所以直接接着下，不必让任务失败。
+      const transient = !(err instanceof VdlError)
+        && /ECONNRESET|EPIPE|ETIMEDOUT|terminated|socket|fetch failed/i.test(String((err as Error)?.message || err));
+
+      if (expired && refetch && attempt < URL_EXPIRED_RETRIES) {
+        current = await refetch();
+        if (!current) throw err;
+        continue;
       }
-      current = await refetch();
-      if (!current) throw err;
+      if (transient && attempt < NETWORK_RETRIES) {
+        await new Promise((r) => setTimeout(r, 300 * (attempt + 1)));
+        continue;
+      }
+      // 已经到了上限还失败：把「地址过期」说明白，别让用户以为是网络问题
+      if (expired && refetch && attempt >= URL_EXPIRED_RETRIES) {
+        throw new VdlError('url_expired',
+          `播放地址已过期，刷新 ${URL_EXPIRED_RETRIES} 次后仍然失败`,
+          '该视频可能刚被限权/删除；重试可续传，或换档位再试');
+      }
+      throw err;
     }
   }
 }
@@ -572,22 +694,36 @@ export function countDanmaku(xml: string): number {
  * 不要用空文件冒充。
  */
 async function saveDanmaku(videoPath: string): Promise<{
-  xml: string | null; count: number; supported: boolean;
+  xml: string | null; ass: string | null; count: number;
+  rendered: number; skipped: number; supported: boolean;
 }> {
+  const empty = { xml: null, ass: null, count: 0, rendered: 0, skipped: 0 };
   const subCtx = subtitleState().value;
-  if (!subCtx?.bvid || !subCtx.cid) return { xml: null, count: 0, supported: false };
+  if (!subCtx?.bvid || !subCtx.cid) return { ...empty, supported: false };
   try {
     const res = await fetch(`https://api.bilibili.com/x/v1/dm/list.so?oid=${subCtx.cid}`,
       { headers: { 'User-Agent': UA, Referer: 'https://www.bilibili.com/' } });
-    if (!res.ok) return { xml: null, count: 0, supported: true };
+    if (!res.ok) return { ...empty, supported: true };
     const text = await res.text();
     const count = countDanmaku(text);
-    if (!count) return { xml: null, count: 0, supported: true };
-    const target = videoPath.replace(/\.mp4$/i, '.danmaku.xml');
+    if (!count) return { ...empty, supported: true };
+    // 容器可能是 mkv（合入无损音轨时），不能再按 .mp4 推名字——否则会覆盖视频本身
+    const base = videoPath.replace(/\.[^.]+$/, '');
+    const target = `${base}.danmaku.xml`;
     writeFileSync(target, text, 'utf8');
-    return { xml: target, count, supported: true };
+    // 同时落一份 ASS：XML 只有专用播放器认，ASS 几乎所有播放器都能挂
+    const { ass, stats } = toAss(parseDanmakuXml(text));
+    let assPath: string | null = null;
+    if (stats.rendered > 0) {
+      assPath = `${base}.danmaku.ass`;
+      writeFileSync(assPath, ass, 'utf8');
+    }
+    return {
+      xml: target, ass: assPath, count,
+      rendered: stats.rendered, skipped: stats.skipped, supported: true,
+    };
   } catch {
-    return { xml: null, count: 0, supported: true };
+    return { ...empty, supported: true };
   }
 }
 
@@ -770,6 +906,7 @@ export async function refetchSidecars(
   return {
     srt: sub.srt, srtCount: sub.count, srtLang: sub.lang || null, srtReason: sub.reason || null,
     danmaku: dm?.xml || null, danmakuCount: dm?.count || 0,
+    danmakuAss: dm?.ass || null, danmakuRendered: dm?.rendered || 0, danmakuSkipped: dm?.skipped || 0,
     danmakuSupported: dm ? dm.supported : null,
   };
 }
@@ -806,12 +943,14 @@ async function getBilibiliApiImpl(
   const suffix = probe.media!.parts.length > 1 && selected
     ? `_${probe.media!.id.startsWith('ep') ? 'EP' : 'P'}${selected.index}` : '';
   const stem = `${probe.media!.id}_${safeName(probe.media!.title)}${suffix}_${safeName(fmt.label, 16, fmt.id)}`;
-  const isAudio = fmt.id === AUDIO_FORMAT_ID;
-  const dest = reserveDest(outDir, isAudio ? `${stem}.m4a` : `${stem}.mp4`);
+  const isAudioOnly = fmt.id === AUDIO_FORMAT_ID || fmt.id === AUDIO_FLAC_FORMAT_ID;
+  // 音轨是无损/环绕时容器必须是 mkv（flac-in-mp4 与 ec-3-in-mp4 的播放器支持都很差）
+  const destExt = isAudioOnly ? fmt.ext : containerFor(fmt.acodec);
+  const dest = reserveDest(outDir, `${stem}.${destExt}`);
   try {
   // 仅音频：只下 DASH 的 audio 轨，不碰视频轨。字幕/弹幕对音频没有意义，这里也不取。
-  if (isAudio) {
-    const audioUrl = urlCache().get(AUDIO_FORMAT_ID)?.audio || '';
+  if (isAudioOnly) {
+    const audioUrl = urlCache().get(fmt.id)?.audio || '';
     if (!audioUrl) throw new VdlError('no_stream', '这个视频没有音频轨，不能单独下载音频');
     if (existsSync(dest)) return { path: dest, bytes: statSync(dest).size, skipped: true, warnings: [] };
 
@@ -819,18 +958,18 @@ async function getBilibiliApiImpl(
     const planned = await probeStreamSize(audioUrl);
     await streamTo(audioUrl, aPart, (written, total) => report(written, total), async () => {
       await refresher().value?.();
-      return urlCache().get(AUDIO_FORMAT_ID)?.audio || '';
-    });
+      return urlCache().get(fmt.id)?.audio || '';
+    }, planned);
     const got = statSync(aPart).size;
     if (planned > 0 && got < planned * 0.95) {
       throw new VdlError('incomplete_media',
         `音频轨只拿到 ${got} 字节，探测到 ${planned} 字节`, '重试可续传');
     }
 
-    // DASH 音频是 fMP4：`-c copy` 只转封装、不重编码。没有 ffmpeg 时保留原始字节
-    // （多数播放器能直接放），但**要说明没转封装**，不能假装已经变成标准 m4a。
+    // DASH 音频是 fMP4：`-c copy` 只转封装、不重编码（FLAC 也是原样搬，不重采样）。
+    // 没有 ffmpeg 时保留原始字节，但**要说明没转封装**，不能假装已经变成标准容器。
     const warnings: string[] = [];
-    const tmp = dest.replace(/\.m4a$/i, '.mux.m4a');
+    const tmp = `${dest}.mux.${destExt}`;
     const run = await runFfmpeg(['-y', '-hide_banner', '-loglevel', 'error', '-i', aPart, '-vn', '-c', 'copy', tmp]);
     if (run.code === 0 && existsSync(tmp)) {
       renameSync(tmp, dest);
@@ -839,8 +978,8 @@ async function getBilibiliApiImpl(
       if (existsSync(tmp)) { try { unlinkSync(tmp); } catch { /* ignore */ } }
       renameSync(aPart, dest);
       warnings.push(run.code === -2
-        ? '没有找到 ffmpeg：已保留 DASH 原始音频（多数播放器可播放，但未转封装）'
-        : `转封装为 m4a 失败（ffmpeg 退出码 ${run.code}）：已保留 DASH 原始音频`);
+        ? `没有找到 ffmpeg：已保留 DASH 原始音频（仍是 fMP4 容器，部分播放器可能不识别 .${destExt}）`
+        : `转封装为 ${destExt} 失败（ffmpeg 退出码 ${run.code}）：已保留 DASH 原始音频`);
     }
     return { path: dest, bytes: statSync(dest).size, skipped: false, warnings };
   }
@@ -858,10 +997,18 @@ async function getBilibiliApiImpl(
     }
     if (opts.danmaku && !dm?.xml) warnings.push(dm?.supported
       ? '没有可用弹幕或弹幕获取失败，主文件已保留' : '番剧弹幕暂不支持，主文件已保留');
+    // 音轨不是 AAC 时体积与播放器要求都变了，必须在结果里说清楚，不能悄悄给个 mkv
+    if (fmt.acodec === 'flac') {
+      warnings.push('已合入 Hi-Res FLAC 无损音轨；容器为 mkv（Windows 自带播放器可能不放），建议用 VLC / PotPlayer');
+    } else if (fmt.acodec === 'eac3') {
+      warnings.push('已合入杜比全景声（ec-3）音轨；容器为 mkv，需要支持杜比解码的播放器');
+    }
     return {
       path: dest, bytes: statSync(dest).size, skipped, cover: cover.cover, warnings,
       srt: sub.srt, srtCount: sub.count, srtLang: sub.lang || null, srtReason: sub.reason || null,
       danmaku: dm?.xml || null, danmakuCount: dm?.count || 0,
+      danmakuAss: dm?.ass || null, danmakuRendered: dm?.rendered || 0,
+      danmakuSkipped: dm?.skipped || 0,
       danmakuSupported: dm ? dm.supported : null,
     };
   };
@@ -895,8 +1042,8 @@ async function getBilibiliApiImpl(
     await refresher().value?.();
     return urlCache().get(fmt.id)?.audio || '';
   };
-  const runVideo = () => streamTo(urls.video, vPart, (w) => { vWritten = w; progress(); }, refetchVideo);
-  const runAudio = () => streamTo(urls.audio, aPart, (w) => { aWritten = w; progress(); }, refetchAudio);
+  const runVideo = () => streamTo(urls.video, vPart, (w) => { vWritten = w; progress(); }, refetchVideo, vPlanned);
+  const runAudio = () => streamTo(urls.audio, aPart, (w) => { aWritten = w; progress(); }, refetchAudio, aPlanned);
 
   // 双轨并行：视频轨通常是大头，音轨几十 MB，并行能把音轨那段时间省掉。
   // **限速时退回串行**——限速按「每条流」算（AGENTS 里写明的边界），
@@ -933,7 +1080,7 @@ async function getBilibiliApiImpl(
       'expected', expected, 'vPart', statSync(vPart).size, 'aPart', statSync(aPart).size);
   }
 
-  const merged = dest.replace(/\.mp4$/i, '.mux.mp4');
+  const merged = dest.replace(/\.(mp4|mkv)$/i, '.mux.$1');
   const args = urls.audio
     ? ['-y', '-hide_banner', '-loglevel', 'error', '-i', vPart, '-i', aPart, '-c', 'copy', merged]
     : ['-y', '-hide_banner', '-loglevel', 'error', '-i', vPart, '-c', 'copy', merged];

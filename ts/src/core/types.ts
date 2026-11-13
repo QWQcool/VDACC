@@ -26,6 +26,10 @@ export interface Job extends DownloadOptions {
   cancelRequested?: boolean;
   srtCount?: number;
   danmakuCount?: number;
+  /** 弹幕的 ASS 副本（能直接挂播放器看）；XML 原文始终是主产物。 */
+  danmakuAss?: string;
+  danmakuRendered?: number;
+  danmakuSkipped?: number;
   warnings?: string[];
 }
 

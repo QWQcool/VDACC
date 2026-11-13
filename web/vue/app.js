@@ -892,6 +892,12 @@ createApp({
      */
     async function previewJob(job) {
       if (!job.path) return;
+      // mkv / flac 浏览器放不了（Chromium 不支持 matroska 与原生 flac 文件）：
+      // 直接说清楚并引导用「打开」，而不是让用户对着黑屏猜
+      if (/\.(mkv|flac|eac3)$/i.test(job.path)) {
+        message.value = t('previewUnsupported');
+        return;
+      }
       const data = await api('/api/preview-url', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { path: job.path },
       });

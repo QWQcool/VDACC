@@ -281,6 +281,10 @@ async function runJob(job: Job): Promise<void> {
         path: out.path, finishedAt: Date.now(),
         ...(extra.srtCount ? { srtCount: extra.srtCount } : {}),
         ...(extra.danmakuCount ? { danmakuCount: extra.danmakuCount } : {}),
+        // ASS 副本的路径与条数跟着任务一起存：用户在界面上能看到"弹幕已转成可直接播放的字幕"
+        ...(extra.danmakuAss ? { danmakuAss: extra.danmakuAss } : {}),
+        ...(extra.danmakuRendered ? { danmakuRendered: extra.danmakuRendered } : {}),
+        ...(extra.danmakuSkipped ? { danmakuSkipped: extra.danmakuSkipped } : {}),
         warnings: extra.warnings || [],
       });
     } catch (err) {
@@ -612,6 +616,9 @@ const server = Bun.serve({
         Object.assign(job, {
           ...(out.srtCount ? { srtCount: out.srtCount } : {}),
           ...(out.danmakuCount ? { danmakuCount: out.danmakuCount } : {}),
+          ...(out.danmakuAss ? { danmakuAss: out.danmakuAss } : {}),
+          ...(out.danmakuRendered ? { danmakuRendered: out.danmakuRendered } : {}),
+          ...(out.danmakuSkipped ? { danmakuSkipped: out.danmakuSkipped } : {}),
         });
         scheduleSave();
         return json({
@@ -619,6 +626,9 @@ const server = Bun.serve({
           // 轨与失败原因都要回：字幕拿不到时界面要能说清是「平台没有」还是「给的是别人的，已丢弃」
           srtLang: out.srtLang || null, srtReason: out.srtReason || null,
           danmaku: out.danmaku, danmakuCount: out.danmakuCount,
+          danmakuAss: out.danmakuAss || null,
+          danmakuRendered: out.danmakuRendered || 0,
+          danmakuSkipped: out.danmakuSkipped || 0,
           danmakuSupported: out.danmakuSupported,
         });
       } catch (err) {

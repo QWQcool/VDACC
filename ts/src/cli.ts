@@ -421,8 +421,14 @@ if (cmd === 'auth') {
         if (has('--danmaku')) {
           const dm = out as any;
           if (dm.danmakuSupported === false) console.log('弹幕：番剧的弹幕暂不支持');
-          else if (dm.danmaku) console.log(`弹幕 ${dm.danmaku}（${dm.danmakuCount} 条）`);
-          else console.log('弹幕：该视频没有弹幕');
+          else if (dm.danmaku) {
+            console.log(`弹幕 ${dm.danmaku}（${dm.danmakuCount} 条）`);
+            // ASS 是给人直接挂播放器看的；跳过的条数也报出来，免得以为丢弹幕
+            if (dm.danmakuAss) {
+              const skipped = Number(dm.danmakuSkipped || 0);
+              console.log(`弹幕字幕 ${dm.danmakuAss}（${dm.danmakuRendered} 条${skipped ? `，跳过 ${skipped} 条高级/代码弹幕` : ''}）`);
+            }
+          } else console.log('弹幕：该视频没有弹幕');
         }
       }
       process.exit(0);

@@ -1025,6 +1025,22 @@ P3 之后的每一段都应能独立失败而不影响下载器。
 
 ## 4. 变更记录
 
+- 2026-11-12：**B站 Hi-Res FLAC / 杜比音轨优先**（真实稿件 `BV1nutz6mEgY` 驱动）。
+  实测（大会员登录）：`dash.flac = {display:true, audio:{id:30251, codecs:'fLaC', bandwidth:1434259}}`
+  是**对象**，`dash.dolby = {type:2, audio:[{id:30250, codecs:'ec-3', bandwidth:1665173}]}`
+  是**数组**；匿名访问同一稿件 `display` 仍为 true 但 `audio` 为空、`dolby.type=0`——
+  判据必须是「有没有可用的 audio」，不能看 display/type。
+  取舍：FLAC > 杜比 > 带宽最大的 AAC；容器按音轨定（flac/eac3 → mkv，否则 mp4），
+  并在结果里说明「为什么是 mkv」。仅音频侧另加 `audio-flac` 档（实测落成 74,240,791 字节原生 flac）。
+  顺带修两处长传输的健壮性：**416**（续传起点落在文件末尾，B站 的 416 不带 content-range，
+  要退回探测到的总字节判定「其实已经下完」）与 **ECONNRESET/连接中断自动续传**（2 次）。
+  实测：480P + FLAC → 92,366,771 字节 mkv（ffprobe：h264 + flac 48kHz 立体声，414.2s）。
+  同一批把**弹幕转 ASS** 补齐（唧唧Down 有、我们原来只有 XML）：新增 `core/danmaku.ts`
+  （解析 `<d p>` → 轨道分配 → ASS），`--danmaku` 现在同时落 `.danmaku.xml` 与 `.danmaku.ass`；
+  滚动/顶部/底部三类还原、颜色转 BGR、同一时刻多条分轨；**高级(7)/代码(8)弹幕跳过并计入
+  `danmakuSkipped`**。实测 `BV1GJ411x7h7`：1200 条 → 1190 条进 ASS（133,779 字节）/ 跳过 10 条，
+  ffprobe 认作 `ass`。杜比视界视频轨维持「默认兼容」选 avc（不改成 hvc1）。
+  测试基线 **310 pass / 0 fail**。
 - 2026-11-11：**网易云歌单入口**（§2.9 M4 的「歌单」部分落地）。实测口径：
   `playlist/detail?id=X&n=N` 的 `n` 只截内联曲目、`trackIds` 恒为全量；
   `playlist/track/all` 匿名已 `code=404`。实现走 `trackIds` + 每批 100 条 `song/detail`、

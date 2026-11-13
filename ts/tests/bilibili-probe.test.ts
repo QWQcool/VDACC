@@ -314,6 +314,66 @@ describe('B站 probe：档位、音轨与接口错误', () => {
     setLimitBytesPerSec(0);
   });
 
+  test('B11 有 Hi-Res FLAC：优先用它，容器转 mkv，体积把 1.4Mbps 音轨算进去', async () => {
+    stubView();
+    stubPlayurl({
+      video: [videoTrack(1920, 1080, 2_000_000)],
+      audio: [{ bandwidth: 166_109, codecs: 'mp4a.40.2', baseUrl: `${CDN}a.m4s` }],
+      // 实测形状：dash.flac.audio 是**对象**（不是数组）
+      flac: { display: true, audio: { id: 30251, codecs: 'fLaC', bandwidth: 1_434_259, baseUrl: `${CDN}f.m4s` } },
+      dolby: { type: 2, audio: [{ id: 30250, codecs: 'ec-3', bandwidth: 1_665_173, baseUrl: `${CDN}d.m4s` }] },
+    } as any);
+    stubCdn({ 'v1920.m4s': { total: 8_000_000 } });
+
+    const probe = await probeBilibiliApi(BVID);
+    const video = probe.formats.find((f) => f.id === 'bili-1920')!;
+    expect(video.acodec).toBe('flac');
+    // flac 装 mp4 播放器支持差，容器必须是 mkv
+    expect(video.ext).toBe('mkv');
+    // 240s × (2,000,000 + 1,434,259) / 8
+    expect(video.bytes).toBe(Math.round((2_000_000 + 1_434_259) * 240 / 8));
+    // 单列一条仅音频 FLAC，且不和 320K 那条混在一起
+    const flacOnly = probe.formats.find((f) => f.id === 'audio-flac');
+    expect(flacOnly?.ext).toBe('flac');
+    expect(flacOnly?.label).toContain('FLAC');
+    expect(flacOnly?.bytes).toBe(Math.round(1_434_259 * 240 / 8));
+  });
+
+  test('B12 只有杜比（flac 为空）：取 ec-3，容器仍是 mkv', async () => {
+    stubView();
+    stubPlayurl({
+      video: [videoTrack(1920, 1080, 2_000_000)],
+      audio: [{ bandwidth: 166_109, codecs: 'mp4a.40.2', baseUrl: `${CDN}a.m4s` }],
+      flac: { display: true, audio: null },
+      dolby: { type: 2, audio: [{ id: 30250, codecs: 'ec-3', bandwidth: 448_000, baseUrl: `${CDN}d.m4s` }] },
+    } as any);
+    stubCdn({ 'v1920.m4s': { total: 8_000_000 } });
+
+    const probe = await probeBilibiliApi(BVID);
+    const video = probe.formats.find((f) => f.id === 'bili-1920')!;
+    expect(video.acodec).toBe('eac3');
+    expect(video.ext).toBe('mkv');
+    expect(probe.formats.some((f) => f.id === 'audio-flac')).toBe(false);
+  });
+
+  test('B13 flac.display=true 但没有音轨（匿名态）：退回 AAC，不能当成有 FLAC', async () => {
+    stubView();
+    stubPlayurl({
+      video: [videoTrack(1920, 1080, 2_000_000)],
+      audio: [{ bandwidth: 166_109, codecs: 'mp4a.40.2', baseUrl: `${CDN}a.m4s` }],
+      // 实测：未登录同一个稿件 `display` 仍是 true，但 audio 为 null
+      flac: { display: true, audio: null },
+      dolby: { type: 0 },
+    } as any);
+    stubCdn({ 'v1920.m4s': { total: 8_000_000 } });
+
+    const probe = await probeBilibiliApi(BVID);
+    const video = probe.formats.find((f) => f.id === 'bili-1920')!;
+    expect(video.acodec).toBe('aac');
+    expect(video.ext).toBe('mp4');
+    expect(probe.formats.some((f) => f.id === 'audio-flac')).toBe(false);
+  });
+
   test('B3 稿件不存在（code=-404）：not_found，不是「下载失败」', async () => {
     routes.push({
       name: 'view-404',

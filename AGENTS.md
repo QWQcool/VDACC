@@ -88,6 +88,9 @@
 | 抖音合集 / 主页 | `aweme/v1/web/mix/aweme` 与 `aweme/post` 无签名一律 403 `Blocked by ArgusSecurityPlugin`；带现有 `x-secsdk-web-signature` 后 200，但对不存在的 `mix_id` 回 `status_code=4` + `aweme_list:null`，而 `aweme/detail` 对不存在的视频是 `status_code=0` + 无 detail —— **无法区分「合集不存在」与「还缺 a_bogus」**。`www.douyin.com/collection/<id>` 返回 JS 挑战页（`jsvmprt`），无 SSR 数据。没有真实 mix_id 前不做列表功能 |
 | B站 音频单独下 | `dash.audio` 本来就是独立轨（`playurl` 同一次返回），只下音频 = 只请求 audio 轨 + `ffmpeg -c copy` 转封装 m4a。没有 ffmpeg 也能落盘（改名保留），但必须说明「未转封装」。实测 228s 视频：4,981,362 字节 / aac 48kHz 立体声 / 173kbps |
 | 酷狗歌单 | `mobiles.kugou.com/api/v3/special/info?specialid=<id>&format=json` 给 `specialname`/`nickname`/`songcount`/`imgurl`（`{size}` 占位）；`…/special/song?specialid=&page=&pagesize=` 给 `data.total` + `data.info[]`。曲目字段 `hash`（32 hex）/`filename`（「歌手 - 歌名」，**没有** songname/singername）/`duration`（**秒**）。`pagesize=100` 一次给整单；不存在的 id 是 `total:0 + info:[]`（不是报错）。酷狗**专辑**批量未做 |
+| B站 Hi-Res / 杜比音轨 | `dash.flac = {display:true, audio:{id:30251, codecs:'fLaC', bandwidth}}` —— **audio 是对象**；`dash.dolby = {type:2, audio:[{id:30250, codecs:'ec-3'}]}` —— **audio 是数组**。匿名态 `flac.display` 仍为 true 但 `audio` 为空、`dolby.type=0`，**必须看有没有 audio**。取舍 FLAC > 杜比 > AAC；容器 flac/eac3 → mkv（flac-in-mp4 播放器支持差）。实测 `BV1nutz6mEgY` 415s：flac 1,434,259bps（约 71MB）、dolby 1,665,173bps |
+| B站 弹幕 → ASS | `--danmaku` 同时落 `.danmaku.xml`（原文）与 `.danmaku.ass`（可直接挂播放器）。解析 `<d p="时间,模式,字号,颜色,...">文本</d>`；模式 1/2/3 滚动（`\an7\move`）、5 顶部（`\an8\pos`）、4 底部（`\an2\pos`）；**7 高级 / 8 代码弹幕跳过并计入 `danmakuSkipped`**（要执行脚本才能定位）。颜色是十进制 RGB，ASS 要写 `&HBBGGRR&`（红 0xFF0000 → `&H0000FF&`）。文本里的 `{` `}` 必须转义，换行必须压平（否则一条事件被拆成多条）。实测 1200 条 → 1190 进 ASS / 10 跳过 |
+| B站 长传输健壮性 | **416** 会在「`.part` 已到文件末尾、最后一块响应被掐断」时出现，且 B站 的 416 **不带 content-range** —— 只能用探测到的总字节判断「其实已下完」，否则删 part 重下。**ECONNRESET/terminated** 在几百兆的传输里常见，续传（`.part` + Range）能接上，重试 2 次即可 |
 | B站 预览 / 代理端口 | DASH 双轨：`<video>` 只有画面，音轨要单独挂一个 `<audio>` 跟随（`/api/preview` 回 `audioUrl`）。**B站 mcdn 节点是 `xxx.mcdn.bilivideo.cn:8082`**，`streamUrlAllowed` 原先拒绝所有非默认端口 → 这类地址预览恒 403；现在只额外放行 8082，其它端口仍拒。双轨**并行下载**只在未设限速时启用（限速按每条流算，并行 = 2 倍总带宽） |
 | 抖音图文 | 判据是「有 `images` **且** `video.play_addr.url_list` 为空」——只看 `images` 会把带背景视频的图文误杀。命中的作品跑不出视频流，应报 `unsupported` 而不是「没有解析到档位」 |
 | 酷我歌单 | **不可用**（2026-11-11 实测）：`api/www/playlist/playListInfo` 要 `csrf` 头 + `kw_token` cookie，而首页/搜索页/H5 页都**不下发 kw_token**（只有 `Hm_Iuvt_…`）；桌面 `/playlist_detail/<id>` 直接 **430**；移动 UA 的 `/h5app/playlist/<id>` 是压缩成单字母变量的 NUXT 表达式（**不 eval**）。`search.kuwo.cn/r.s?ft=playlist` 能给 `playlistid`/`name`/`songnum`（单引号 dict），但**没有曲目** |
@@ -125,7 +128,7 @@ ffmpeg 为什么是硬前提：B站/YouTube 全是 DASH 音视频分离，yt-dlp
 │  ├─ core/          契约层：types / platform / config / http / progress / cancel / rate / naming / errors
 │  ├─ engines/       douyin / netease / qq / kuwo / kugou / bilibili(_api) / sniff(L2) / generic(yt-dlp)
 │  └─ analyze/       A1：分镜(scdet) / 抽帧 / 台词 / 客观指标（不依赖任何模型）
-├─ ts/tests/         bun test（当前 298 个）
+├─ ts/tests/         bun test（当前 310 个）
 ├─ web/              Vue 3 界面（默认入口 /）+ vendor / assets（无 PWA：sw/manifest 已删）
 ├─ ts/skill/         TS Skill 源（SKILL.md + references），由 tools/build_skill_ts.py 组装
 ├─ legacy/python/    Python 归档：vdl / skill / tests / tools / dy_* / VDACC.bat（冻结，仅参考）
@@ -160,7 +163,7 @@ venv\Scripts\python.exe -m pip install playwright yt-dlp   # 仅 legacy 需要
 ```bash
 bun --version                              # 1.4.x
 ffmpeg -version                            # 9.x；缺了 B站/音乐/m3u8 全废
-bun test ts/tests                          # 298 pass
+bun test ts/tests                          # 310 pass
 bun ts/src/cli.ts probe "<抖音或B站链接>" --json
 ```
 
