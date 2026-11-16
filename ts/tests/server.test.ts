@@ -3,6 +3,8 @@ import { mkdtempSync, mkdirSync, readFileSync, renameSync, rmSync, rmdirSync, wr
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { FFMPEG_PATH, HAS_FFMPEG } from './env';
+
 const PORT = 18000 + Math.floor(Math.random() * 2000);
 const TOKEN = 'test-token';
 const TMP = mkdtempSync(join(tmpdir(), 'vdl-ts-test-'));
@@ -67,7 +69,7 @@ describe('服务端安全边界', () => {
     expect(res.status).toBe(200);
     const data = await res.json() as any;
     expect(data.ok).toBe(true);
-    expect(data.version).toBe('3.5.0');
+    expect(data.version).toBe('3.6.0');
   });
 
   test('伪造 Origin 403', async () => {
@@ -240,12 +242,10 @@ describe('队列持久化与事件重连', () => {
 });
 
 describe('A1 分析接口', () => {
-  const hasFfmpeg = !!Bun.which('ffmpeg');
-
-  test.skipIf(!hasFfmpeg)('成品能出分镜与帧，帧图片能直接显示', async () => {
+  test.skipIf(!HAS_FFMPEG)('成品能出分镜与帧，帧图片能直接显示', async () => {
     const clip = join(TMP, 'out', 'clip.mp4');
     const made = Bun.spawn([
-      'ffmpeg', '-hide_banner', '-loglevel', 'error', '-y',
+      FFMPEG_PATH as string, '-hide_banner', '-loglevel', 'error', '-y',
       '-f', 'lavfi', '-i', 'testsrc=duration=2:size=160x120:rate=10',
       '-pix_fmt', 'yuv420p', clip,
     ], { stdout: 'ignore', stderr: 'ignore', windowsHide: true });
@@ -283,7 +283,7 @@ describe('A1 分析接口', () => {
     });
     expect(bad.status).toBe(400);
 
-    if (!hasFfmpeg) return;
+    if (!HAS_FFMPEG) return;
     const notVideo = await authed('/api/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

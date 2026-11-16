@@ -17,6 +17,7 @@ import { VdlError } from '../core/errors';
 import { UA, request } from '../core/http';
 import { safeName } from '../core/naming';
 import type { AlbumInfo, AlbumTrack } from '../core/album';
+import { bareNumericId, emptyCollection } from '../core/collection';
 import { collectPages } from '../core/paging';
 import { format, type Format, type Media, type ProbeResult } from '../core/types';
 
@@ -64,11 +65,11 @@ export function canHandle(input: string): boolean {
  * 不认 `album/single/<albumid>.html`：那是专辑，id 与歌单不在一个命名空间。
  */
 export function parsePlaylistId(input: string): string {
-  const raw = (input || '').trim();
-  if (/^\d+$/.test(raw)) return raw;
+  const bare = bareNumericId(input);
+  if (bare) return bare;
   let u: URL;
   try {
-    u = new URL(raw);
+    u = new URL((input || '').trim());
   } catch {
     return '';
   }
@@ -135,10 +136,13 @@ export async function playlistTracks(
   }).filter((t: AlbumTrack) => t.id);
 
   if (!tracks.length) {
-    throw new VdlError('not_found', `歌单里没有可下载的曲目（id=${id}）`,
-      Number(info.songcount || 0) > 0
-        ? `接口声明 ${info.songcount} 首但没有给出曲目：可能整单下架或地区限制`
-        : '确认这个歌单不是空的');
+    const declared = Number(info.songcount || 0);
+    // 酷狗没有登录态可用，这里不能照抄别处的「登录后重试」
+    emptyCollection({
+      id,
+      declared,
+      blockedHint: `接口声明 ${declared} 首但没有给出曲目：可能整单下架或地区限制`,
+    });
   }
 
   return {

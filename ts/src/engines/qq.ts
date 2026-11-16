@@ -18,6 +18,7 @@ import { open } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import type { AlbumInfo, AlbumTrack } from '../core/album';
+import { bareNumericId, emptyCollection } from '../core/collection';
 import { LIST_MAX, collectPages } from '../core/paging';
 import { throwIfCancelled } from '../core/cancel';
 import { releaseDest, reserveDest } from '../core/dest';
@@ -542,10 +543,10 @@ export const PLAYLIST_MAX = LIST_MAX;
  * 只认自己的路径：`albumDetail/<mid>` 的 mid 是 base62，拿它当歌单会列出不相干的东西。
  */
 export function parsePlaylistId(input: string): string {
-  const raw = (input || '').trim();
-  if (/^\d+$/.test(raw)) return raw;
+  const bare = bareNumericId(input);
+  if (bare) return bare;
   try {
-    const u = new URL(raw);
+    const u = new URL((input || '').trim());
     if (/albumDetail|albumdetail/i.test(u.pathname)) return '';
     const fromPath = /\/playlist\/(\d+)/i.exec(u.pathname);
     if (fromPath) return fromPath[1];
@@ -638,10 +639,7 @@ export async function playlistTracks(
   }).filter((t: AlbumTrack) => t.id);
 
   if (!tracks.length) {
-    throw new VdlError('not_found', `歌单里没有可下载的曲目（id=${id}）`,
-      collected.declared > 0
-        ? `接口声明 ${collected.declared} 首但没有给出曲目：可能整单下架或地区限制，登录后重试`
-        : '确认这个歌单不是空的');
+    emptyCollection({ id, declared: collected.declared });
   }
 
   return { id, kind: 'playlist', title, cover, tracks, warnings: collected.warnings };

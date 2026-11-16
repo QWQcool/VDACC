@@ -99,8 +99,9 @@
 | B站扫码登录（`vdl auth bilibili --qr`，**只有 B站**） | 只需两个 GET、**不需要 cookie 也不需要浏览器**：`passport-login/web/qrcode/generate` → `{url, qrcode_key}`（32 位 hex）；`/qrcode/poll?qrcode_key=` 的**外层 `code` 恒 0，状态在内层 `data.code`**（86101 未扫码 / 86090 已扫码待确认 / 86038 已过期 / 0 成功）。**扫码是可选快路径，默认 `vdl auth <site>` 仍走 Edge**（见下一行）。**网易云扫码已试过并撤掉**：`unikey` 流程连续 `801` 后直接 `8821`（无 `802`），平台侧不放行，适配器已删除；QQ 音乐没做扫码（需 ptqrtoken）。落盘必须**同时写 `storage_state` 与 Netscape 两份**——引擎的 `cookieHeader()` 优先读 txt，只写 json 会让旧 txt 盖住新 cookie（表面「登录成功、档位没变」）；落盘后仍用 `nav` 判真，验不通标 `unverified` 而不是绿 |
 | 路由顺序 | 专用引擎（抖音/网易云/QQ/酷我/酷狗/B站）→ L2 直链/m3u8（`sniff`）→ `ytdlp-generic` 兜底。抖音裸 ID 规则最宽，必须排最前；QQ/酷我/酷狗 只认域名（裸串不路由）；L2 只认媒体扩展名，不跑页面 JS |
 | ffmpeg | 本机 **9.0.2-full_build**（`winget install Gyan.FFmpeg`，shim 在 `%LOCALAPPDATA%\Microsoft\WinGet\Links`，在用户 PATH）。TS 主线用 `VDL_FFMPEG` 或 PATH；legacy 的查找顺序 `venv\Scripts` → `PATH`（`legacy/python/vdl/core/env.py`）。缺失会让 B站/YouTube 变无声视频 |
-| Bun | 本机 **1.4.4**（`winget install Oven-sh.Bun`，shim 同目录）。装在用户 PATH 的目录里，**已开着的终端不会刷新**，新装后 `where bun` 报找不到属正常，新开窗口或直接探 `%LOCALAPPDATA%\Microsoft\WinGet\Links\bun.exe` 即可 |
-| Playwright | `playwright-core`（`package.json` 写 `^1.64.1`，实装 1.65.0）。**绝对不能用 Bun 跑**：它的 WebSocket 在 Bun 下握手永远不返回（同机同版本 Edge，node 正常、bun 30s 超时），而 Playwright 官方只支持 Node。所以 Edge 登录路径由 `ts/src/auth-node.mjs` 用 **node 子进程**执行（`auth.ts` 只负责 spawn + 收 JSON）。该脚本自己拉系统 Edge：`--remote-debugging-port=0` + **`--remote-allow-origins=*`**（Chromium 111+ 硬要求），读 `DevToolsActivePort`（**每次先删旧文件**，否则连到死端口 ECONNREFUSED）再 `connectOverCDP`；profile 必须用**一次性目录**（复用 `%LOCALAPPDATA%\vdl\profile` 会 `browser has been closed`）。不下载 chromium |
+| Bun | 本机 **1.4.4**。2026-11-16 复原后 winget（App Installer）整机缺失，现由 `scripts/setup.ps1` 从官方 zip 装到 **`%USERPROFILE%\.bun\bin\bun.exe`** 并写入用户 PATH（不再依赖 `%LOCALAPPDATA%\Microsoft\WinGet\Links`）。**已开着的终端不会刷新**，装完 `where bun` 报找不到属正常，新开窗口或直接探上述绝对路径即可 |
+| ffmpeg（2026-11-16） | 同样由 `scripts/setup.ps1` 装到 **`%LOCALAPPDATA%\Programs\ffmpeg\bin`**（gyan.dev essentials，实测 **9.0.2**）。PATH 里没有时 `doctor` 会 fail；脚本会把它补进当前进程 PATH 再跑 doctor |
+| Playwright | `playwright-core`（`package.json` 写 `^1.64.1`，`bun.lock` 实装 **1.64.1**）。**绝对不能用 Bun 跑**：它的 WebSocket 在 Bun 下握手永远不返回（同机同版本 Edge，node 正常、bun 30s 超时），而 Playwright 官方只支持 Node。所以 Edge 登录路径由 `ts/src/auth-node.mjs` 用 **node 子进程**执行（`auth.ts` 只负责 spawn + 收 JSON）。该脚本自己拉系统 Edge：`--remote-debugging-port=0` + **`--remote-allow-origins=*`**（Chromium 111+ 硬要求），读 `DevToolsActivePort`（**每次先删旧文件**，否则连到死端口 ECONNREFUSED）再 `connectOverCDP`；profile 必须用**一次性目录**（复用 `%LOCALAPPDATA%\vdl\profile` 会 `browser has been closed`）。不下载 chromium |
 | venv | `venv\Scripts\python.exe` = **3.13.4**（系统 `python` = 3.13.14），已装 playwright 1.64.0 + yt-dlp 2026.8.19，legacy 可直接跑 |
 | Android 端 M0 | 引擎 bundle 8.5KB（gzip 4.6KB）、APK 846KB、minSdk 26；桥（paths / md5 / fs 分块+publish）在 realme RMX5200 / Android 16 真机跑通，落盘 md5 与 `md5sum` 一致。JS 侧 md5 必须纯 JS（`node:crypto` 是同步 API，桥是异步），已与原生 `MessageDigest` 交叉校验 |
 | MiniMax H3 | 提示词是**三字段结构**：`integrated_multimodal_description` / `overall_soundscape` / `non_diegetic_music`（官方 guide）；纯文本生成直接从三字段开始，用首/尾帧才加 instruction 行。时长 **4–15s**；原生 32kHz 立体声，声音必须写进提示词；**2K 不是超分**，是 768P 的 in-context regeneration。详见 `docs/style-transfer-plan.md` §3 |
@@ -128,15 +129,17 @@ ffmpeg 为什么是硬前提：B站/YouTube 全是 DASH 音视频分离，yt-dlp
 │  ├─ core/          契约层：types / platform / config / http / progress / cancel / rate / naming / errors
 │  ├─ engines/       douyin / netease / qq / kuwo / kugou / bilibili(_api) / sniff(L2) / generic(yt-dlp)
 │  └─ analyze/       A1：分镜(scdet) / 抽帧 / 台词 / 客观指标（不依赖任何模型）
-├─ ts/tests/         bun test（当前 310 个）
+├─ ts/tests/         bun test（当前 330 个）；env.ts 是能力探测（非测试文件），
+│                    capabilities.test.ts 把 ffmpeg/Bun 版本打进输出，缺什么一眼能看到
 ├─ web/              Vue 3 界面（默认入口 /）+ vendor / assets（无 PWA：sw/manifest 已删）
 ├─ ts/skill/         TS Skill 源（SKILL.md + references），由 tools/build_skill_ts.py 组装
 ├─ legacy/python/    Python 归档：vdl / skill / tests / tools / dy_* / VDACC.bat（冻结，仅参考）
-├─ docs/             CHANGELOG.md、music-channels.md、design/
+├─ docs/             CHANGELOG.md、music-channels.md、design/、archive/（已收口章节）
 ├─ mobile/android/   Android 壳：本地引擎模式（引擎 bundle 在 assets）+ 连电脑模式
 │                    engine/ 是引擎打包工程（Bun.build + shims），见同目录 README
 │                    源码入库，build/ 与 .gradle/ 不入库
 ├─ tools/            构建脚本（build_skill_ts.py；legacy 构建在 legacy/python/tools/）
+├─ scripts/setup.ps1 环境准备（Bun/ffmpeg/依赖/doctor），**必须存成 UTF-8 with BOM**
 ├─ VDACC.bat         双击启动：起服务 + --open 打开浏览器
 ├─ 下载/             输出目录（不入库）
 └─ venv/             Python 环境（只给 legacy 用，不入库）
@@ -150,7 +153,17 @@ cd ts && bun install          # auth 需要 playwright-core（复用系统 Edge�
 bun test ts/tests
 ```
 
-**环境准备（新机器 / 重装）**
+**环境准备（新机器 / 重装 / 从快照复原后）**
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\setup.ps1   # 装 Bun 1.4.4 + ffmpeg → bun install → doctor
+```
+
+脚本**不依赖 winget**（本机实测 App Installer 缺失）：直接从官方发布地址下载 zip 解到用户目录
+（Bun → `%USERPROFILE%\.bun\bin`、ffmpeg → `%LOCALAPPDATA%\Programs\ffmpeg\bin`），并把目录写进用户 PATH。
+装完必须**新开终端**，旧窗口不会刷新。只检查不安装加 `-SkipInstall`。
+
+手工等价（有 winget 时更省事）：
 
 ```bash
 winget install Oven-sh.Bun Gyan.FFmpeg    # 都装到用户目录；装完必须新开终端，旧窗口 PATH 不刷新
@@ -158,12 +171,16 @@ cd ts && bun install                       # 只装 playwright-core（复用系�
 venv\Scripts\python.exe -m pip install playwright yt-dlp   # 仅 legacy 需要
 ```
 
+> 复原快照后**源码不会缺**（266 个跟踪文件与 `origin/main` 逐字节一致），缺的永远是这些不入库的东西：
+> `ts/node_modules`、`venv/`、`下载/`、`browser_profile/` 与 `cookies.txt`（凭据要重新 `auth`）、
+> `mobile/android/build/`。`setup.ps1` 负责前两项，凭据只能重新登录。
+
 验收（缺一不可）：
 
 ```bash
 bun --version                              # 1.4.x
 ffmpeg -version                            # 9.x；缺了 B站/音乐/m3u8 全废
-bun test ts/tests                          # 310 pass
+bun test ts/tests                          # 330 pass（缺 ffmpeg 时 2 条端到端 skip，capabilities.test.ts 会写明）
 bun ts/src/cli.ts probe "<抖音或B站链接>" --json
 ```
 

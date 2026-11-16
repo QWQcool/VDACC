@@ -3,7 +3,25 @@
 > 只记「用户可感知的变化」与「验证结论」。设计与取舍见 `Plan.md`。
 > 每个版本的 GitHub Release 从这里摘取。
 
-## 未发布（2026-11-10）
+## 3.6.0（2026-11-16）
+
+- **换机器 / 复原快照后，一条命令把环境补齐**：仓库里只有源码，Bun、ffmpeg、`ts/node_modules`
+  本来就不入库，以前只能照文档逐条敲。现在：
+
+  ```powershell
+  powershell -NoProfile -ExecutionPolicy Bypass -File scripts\setup.ps1
+  ```
+
+  它依次检查并安装 **Bun 1.4.4** 与 **ffmpeg**（装到用户目录，不需要管理员），再
+  `cd ts && bun install`，最后用 `doctor` 给出可读结论；缺什么装什么，装完提醒「新开终端」。
+  脚本**刻意不用 winget**——实测这台机器连 App Installer 都没有，所以改成从官方发布地址
+  直接下 zip 解压；只检查不安装用 `-SkipInstall`。
+  两个 `package.json` 都补了 `engines.bun >= 1.4.4`，避免「本地能跑、CI 却跑不动」。
+
+- **版本号不再各说各话**：`package.json` / `ts/package.json` / `/api/health` / 服务端断言
+  四处曾被漏改（发布基线还停在 3.4.2），现在有一条用例把它们钉在一起，任何一处单独改动都会失败。
+  同时按 3.6.0 重算发布体积基线：**exe 110.0 MB / zip 52.2 MB**（3.4.2 时是 92.0 / 44.6 MB，
+  增长来自新增的引擎与界面，不是打包回归）。
 
 - **弹幕现在能直接挂播放器看了**：`--danmaku` 以前只落 `.danmaku.xml`（只有专用播放器认），
   现在同时生成同名 `.danmaku.ass`——VLC / PotPlayer / mpv / 电视盒子都能当字幕挂上去。

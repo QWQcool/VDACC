@@ -13,6 +13,8 @@ import { buildStyleCard, cameraFamily, renderStyleCardMarkdown } from '../src/an
 import { buildDescribePrompt, parseShotDescription } from '../src/analyze/describe';
 import { ffmpegBin } from '../src/core/ffmpeg';
 
+import { HAS_FFMPEG } from './env';
+
 describe('分镜：scdet 解析', () => {
   test('配对的 score/time 被识别成切点', () => {
     const out = [
@@ -382,8 +384,7 @@ describe('外部描述文件（Agent/人工写好的语义描述）', () => {
 });
 
 describe('端到端：真跑 ffmpeg（没装就跳过）', () => {
-  const hasFfmpeg = !!Bun.which(ffmpegBin());
-  test.skipIf(!hasFfmpeg)('3 秒测试片：分镜/帧/指标/result.json 都对得上', async () => {
+  test.skipIf(!HAS_FFMPEG)('3 秒测试片：分镜/帧/指标/result.json 都对得上', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'vdacc-analyze-'));
     try {
       const clip = join(dir, 'clip.mp4');

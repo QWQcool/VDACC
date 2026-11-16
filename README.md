@@ -2,7 +2,7 @@
 
 > **3.0 起后端主线为 TypeScript（Bun）**：抖音 / B站（含分P、番剧）/ 网易云的解析与本地服务
 > 已迁移，Python 版本已归档到 `legacy/python/`（`vdl/`、`skill/`、`tests/`、`tools/`），
-> 冻结为参考实现。需要 **Bun 1.2+**。
+> 冻结为参考实现。需要 **Bun 1.4.4+**（CI 与基线固定在这个版本）。
 >
 > ```bash
 > bun ts/src/server.ts --port 8765 --token <token>   # Web 界面（仓库根 web/，Vue）
@@ -23,7 +23,7 @@
 >
 > 迁移状态：引擎 ✅（抖音 / 网易云 / QQ 音乐 / 酷我 / 酷狗 / B站 分P·番剧 / L2 直链·m3u8）、
 > 服务 ✅（probe / jobs / SSE / files / settings / cancel / retry / 持久化）、`auth` ✅（在线校验）、
-> **Skill ✅**、**TS 测试 100 个 ✅**、**yt-dlp 可选组件 ✅（SHA256 校验）**、**设置面板 ✅**、**限速 ✅**（`--limit 2M`）、**并发 1–4 ✅**、
+> **Skill ✅**、**TS 测试 310 个 ✅**、**yt-dlp 可选组件 ✅（SHA256 校验）**、**设置面板 ✅**、**限速 ✅**（`--limit 2M`）、**并发 1–4 ✅**、
 > **B站字幕 `--subs` / 弹幕 `--danmaku` ✅**（CLI 与 Web UI 都能开）、
 > **专辑 `--album` ✅**（CLI `--offset` + `--dry-run`；Web UI 分批加载，每批 20 首）、
 > **QQ 音乐 ✅**（`auth qq` 扫码；档位由账号会员权限决定）。
@@ -31,19 +31,44 @@
 > 首次运行 `auth` 前需要装依赖：`cd ts && bun install`（只装 `playwright-core`，复用系统 Edge）。
 >
 > TS 版 Skill：`python tools/build_skill_ts.py --zip` → `dist/video-acquire-ts.zip`
-> （实测 zip 42.6MB，内含 91.9MB 的 `vdl.exe`，不需要 Python/Node；包内有 `manifest.json` 与 `SHA256SUMS`）。
+> （3.6.0 实测 zip 52.2MB，内含 110.0MB 的 `vdl.exe`，不需要 Python/Node；包内有 `manifest.json` 与 `SHA256SUMS`）。
 >
 > 前端：`/` 是 **Vue 3** 界面，已按 **infOS 风格 V2** 重做（侧栏 + 双栏、浅槽画质、开关、Slide-over 设置）；
 > 解析/多选/分P批量/专辑/下载/SSE/主题/中英切换/下载前预览都在。旧版原生界面已删除，Vue 是唯一入口。
 
-## 当前修复与验收（3.3.1，2026-10-26）
+## 环境准备（新机器 / 复原后先跑这个）
 
-本轮修复同源与文件访问边界、设置/历史假保存、Skill 未支持平台误路由、
-解析与下载串状态、封面开关和断线恢复。源码版本为 3.5.0；标签与 Release 分发另行安排。
+仓库里只有源码。**Bun、ffmpeg、`ts/node_modules`、`venv/`、登录凭据、Android 构建产物都不入库**——
+所以只把仓库拉下来（或从快照复原）时，`bun` 命令是不存在的。一条命令补齐：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\setup.ps1
+```
+
+它会：检查并安装 **Bun 1.4.4** → 检查并安装 **ffmpeg** → `cd ts && bun install` → 跑 `doctor` 汇总，
+缺什么装什么，装到用户目录（不需要管理员）。只检查不安装用 `-SkipInstall`。
+
+脚本刻意**不依赖 winget**（Windows 上 App Installer 本身经常缺失），改为从官方发布地址下载 zip 解压。
+装完必须**新开终端**——已经开着的窗口不会刷新 PATH。
+
+装完还缺的是凭据（游客档也能下，会员档位才需要登录）：
+
+```bash
+bun ts/src/cli.ts auth bilibili    # B站：4K / Hi-Res / 字幕 / 弹幕
+bun ts/src/cli.ts auth netease     # 网易云：黑胶无损
+bun ts/src/cli.ts auth qq          # QQ 音乐：会员档位
+```
+
+## 当前修复与验收（3.6.0，2026-11-16）
+
+3.6.0 这一轮只做发布收口与环境可复现：补 `scripts/setup.ps1`、把版本号四处对齐、
+刷新发布体积基线，并把 3.5.0 之后累积的功能统一写进 `docs/CHANGELOG.md`。
+上一轮（2026-10-26）修的是同源与文件访问边界、设置/历史假保存、Skill 未支持平台误路由、
+解析与下载串状态、封面开关和断线恢复。
 后续开发见 [Plan.md §2.6](Plan.md) 与 [交互详情图](docs/design/development-roadmap-2026-10-25.html)。
 
 ```bash
-bun test ts/tests                          # 75 项离线回归
+bun test ts/tests                          # 310 项离线回归
 node tools/accept_regression_ui.cjs         # Edge + 临时用户目录 + 本地媒体
 python tools/build_skill_ts.py --zip        # Skill 编译与组装（含 manifest.json / SHA256SUMS）
 python tools/verify_skill_ts.py dist/video-acquire-ts   # 解压后核对每个文件的 SHA256

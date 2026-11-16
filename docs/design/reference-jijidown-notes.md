@@ -178,7 +178,7 @@ Rust 侧轮询 Win32 剪贴板 → 解析出视频 URL → `emit` 事件 → 前
 | 点 | 判断 | 理由 |
 |---|---|---|
 | 纯 HTTP 扫码登录（无浏览器） | ✅ 借鉴 | 3 个 GET 就能拿到 cookie，彻底绕开"卡网页"、Edge 缺失、profile 单例锁 |
-| 二维码在服务端渲染成 PNG | ✅ 借鉴（方式待定） | 一处实现同时喂 Web 与 CLI；具体用依赖还是自研见 Plan.md §2.7 决策 D1 |
+| 二维码在服务端渲染成 PNG | ✅ 借鉴（方式待定） | 一处实现同时喂 Web 与 CLI；具体用依赖还是自研见 `docs/archive/plan-2026-11-bilibili-experience.md` 决策 D1（原 Plan §2.7，已归档） |
 | "先 probe 再承诺档位" | ✅ 已有 | 我们 `/api/probe` 返回的就是实际可用档位 |
 | 每 P 五类资源勾选 + 批量下载 | ✅ 借鉴 | 我们 probe 已回 `parts[]`/`formats[]`，缺的是界面 |
 | 剪贴板 → 右下角卡片 | 🟡 改形态 | 它是 Rust 读 Win32 剪贴板；我们是浏览器页，只能靠 `navigator.clipboard`（需授权）或粘贴事件 |

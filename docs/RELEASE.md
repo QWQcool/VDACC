@@ -9,7 +9,7 @@
 |---|---|
 | `package.json` | `"version"` |
 | `ts/package.json` | `"version"` |
-| `ts/src/server.ts` | `/api/health` 返回的 `version`（约 328 行） |
+| `ts/src/server.ts` | `/api/health` 返回的 `version`（搜 `ok: true, version:`） |
 | `ts/tests/server.test.ts` | 断言 `data.version`（约 70 行） |
 
 四处任一不同步，`bun test` 会红——这是有意为之的护栏。
@@ -44,7 +44,8 @@ node tools/release_baseline.cjs
 - 有意变更体积时执行 `node tools/release_baseline.cjs --update`，**在同一个提交里**说明原因；
 - 阈值：合计漂移 ≥10% 提示、≥25% 失败；单文件 ≥20% 提示。
 
-当前基线（2026-10-27，Bun 1.4.4）：exe **91.95 MB**、合计 91.95 MB、zip **42.58 MB**、3 个文件。
+当前基线（2026-11-16，3.6.0，Bun 1.4.4）：exe **110.0 MB**、合计 110.0 MB、zip **52.2 MB**、3 个文件。
+（3.4.2 时的数字是 91.95 MB / 42.58 MB；增量来自新增引擎与界面，不是打包回归。）
 两次构建之间体积漂移为 0.0%（可复现）。
 
 ## 3. CI
@@ -67,7 +68,7 @@ git push origin vX.Y.Z
 ```
 
 Release 说明从 `docs/CHANGELOG.md` 的对应段落摘取，附件只放
-`dist/video-acquire-ts.zip`（42.58 MB）——不放解压后的 exe（体积翻倍且容易混版本）。
+`dist/video-acquire-ts.zip`（52.2 MB）——不放解压后的 exe（体积翻倍且容易混版本）。
 
 ## 5. 仍未做（不要假装已通过）
 

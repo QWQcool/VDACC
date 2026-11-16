@@ -1,8 +1,11 @@
 {
   "name": "vdacc-ts",
-  "version": "3.5.0",
+  "version": "3.6.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "bun": ">=1.4.4"
+  },
   "scripts": {
     "serve": "bun src/server.ts",
     "probe": "bun src/cli.ts probe",

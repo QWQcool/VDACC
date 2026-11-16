@@ -5,6 +5,7 @@ import { join } from 'node:path';
 
 import type { AlbumInfo, AlbumTrack } from '../core/album';
 import { throwIfCancelled } from '../core/cancel';
+import { bareNumericId, detailsByIds, emptyCollection } from '../core/collection';
 import { releaseDest, reserveDest } from '../core/dest';
 import { VdlError } from '../core/errors';
 import { runFfmpeg } from '../core/ffmpeg';
@@ -206,10 +207,10 @@ export async function albumTracks(input: string): Promise<AlbumInfo> {
  * 与 `parseAlbumId` 一样只认自己的路径：把专辑或歌曲的 id 当歌单会列出完全不相干的东西。
  */
 export function parsePlaylistId(input: string): string {
-  const raw = (input || '').trim();
-  if (/^\d+$/.test(raw)) return raw;
+  const bare = bareNumericId(input);
+  if (bare) return bare;
   try {
-    const u = new URL(raw);
+    const u = new URL((input || '').trim());
     const hay = `${u.pathname}${u.hash}`;
     if (!/\/playlist\b/i.test(hay)) return '';
     const fromQuery = u.searchParams.get('id') || '';
@@ -284,49 +285,44 @@ export async function playlistTracks(input: string, deps: PlaylistDeps = {}): Pr
   }
 
   if (!trackIds.length) {
-    throw new VdlError('not_found', `歌单里没有可下载的曲目（id=${id}）`,
-      declared > 0
-        ? `接口声明 ${declared} 首但没有给出曲目 ID：可能是私密歌单或地区限制，登录后重试`
-        : '确认这个歌单不是空的');
+    emptyCollection({
+      id,
+      declared,
+      blockedHint: `接口声明 ${declared} 首但没有给出曲目 ID：可能是私密歌单或地区限制，登录后重试`,
+    });
   }
   if (declared > trackIds.length) {
     warnings.push(`接口声明 ${declared} 首，只给了 ${trackIds.length} 条曲目 ID，本次按实际拿到的列出`);
   }
 
   const batchSize = Math.max(1, Math.min(500, deps.batchSize || PLAYLIST_SONG_BATCH));
-  const songs: any[] = [];
-  for (let i = 0; i < trackIds.length; i += batchSize) {
-    const batch = trackIds.slice(i, i + batchSize);
-    const data = await getJson(`/api/song/detail/?ids=%5B${batch.join(',')}%5D`, cookie, doFetch);
-    const got: any[] = Array.isArray(data?.songs) ? data.songs : [];
-    if (got.length < batch.length) {
-      // 不在这里抛：下架曲目本来就查不到详情，但同批其它曲目是好的
-      warnings.push(`第 ${i + 1}–${i + batch.length} 首里只拿到 ${got.length} 首详情`);
-    }
-    songs.push(...got);
-  }
+  const details = await detailsByIds<any>({
+    ids: trackIds,
+    batchSize,
+    fetchBatch: async (batch) => {
+      const data = await getJson(`/api/song/detail/?ids=%5B${batch.join(',')}%5D`, cookie, doFetch);
+      return Array.isArray(data?.songs) ? data.songs : [];
+    },
+    keyOf: (song) => String(song?.id ?? ''),
+  });
+  warnings.push(...details.warnings);
 
-  const byId = new Map<string, any>();
-  for (const song of songs) byId.set(String(song?.id ?? ''), song);
-  const tracks: AlbumTrack[] = [];
-  for (const tid of trackIds) {
-    const song = byId.get(tid);
-    if (!song) continue;
-    tracks.push({
-      id: tid,
+  const tracks: AlbumTrack[] = details.ordered
+    .map((song) => ({
+      id: String(song?.id ?? ''),
       title: String(song.name || ''),
       author: (song.ar || song.artists || [])
         .map((a: any) => String(a.name || '')).filter(Boolean).join(' / '),
-      url: `${API}/song?id=${tid}`,
-    });
-  }
-  const missing = trackIds.length - tracks.length;
-  if (missing > 0) {
-    warnings.push(`${missing} 首拿不到详情（多为下架或无版权），本地列表里不会有它们`);
-  }
+      url: `${API}/song?id=${song.id}`,
+    }))
+    .filter((t) => Boolean(t.id));
   if (!tracks.length) {
-    throw new VdlError('not_found', `歌单里的曲目都拿不到详情（id=${id}）`,
-      '可能整单下架或地区限制；换一个歌单或登录后重试');
+    emptyCollection({
+      id,
+      declared,
+      detailPhase: true,
+      emptyHint: '可能整单下架或地区限制；换一个歌单或登录后重试',
+    });
   }
 
   return {
