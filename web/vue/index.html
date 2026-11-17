@@ -649,6 +649,12 @@
             </button>
             <template v-else>
               <span class="an-cost">{{ t('describeCost') }} {{ analysis.frames.length }} × ~2.2k tokens</span>
+              <!-- 运镜是**模型字段**（单帧看不出推拉摇移），所以只能跟着描述一起要，
+                   勾上会多抽一张首尾帧对比图，额度略增。 -->
+              <label class="an-check">
+                <input type="checkbox" v-model="descPairFrames" />
+                {{ t('describePair') }}
+              </label>
               <button class="btn ghost sm" :disabled="analysisBusy" @click="describeShots">{{ t('confirm') }}</button>
               <button class="btn ghost sm" @click="descConfirm = false">{{ t('cancel') }}</button>
             </template>

@@ -338,7 +338,10 @@ parity 稳定后再决定 Python 是否退化为 yt-dlp helper。
   **踩坑**：该模型是推理模型，`max_tokens` 同时覆盖 reasoning 与答案——500 预算会被推理吃光
   （`finish_reason=length`、content 空），半截 JSON 也会解析失败。现在固定 `reasoning_effort: low`、
   默认 1200 预算，并在 `finish_reason=length` 时自动加倍重试一次（上限 4000）。
-  **未做**：UI 里还没有这个开关（CLI/API 先行）；A3 风格卡与 A4/A5 仍等 H3 通道。
+  **已完成（2026-11-17）**：界面「语义描述」的确认区里有「同时判断运镜」勾选框——运镜是模型字段
+  （要抽首尾帧喂给 `deepseek-flash`），所以不能做成独立按钮，只能跟着描述一起要；
+  勾上后 `POST /api/analyze` 带 `pairFrames:true`。实测 58 镜 / 54 pairs / 3 镜描述 → 3 镜 `camera=固定`。
+  A3 风格卡与 A4/A5 仍等 H3 通道。
 
 - **N14 · 语义描述进界面 +「不花额度」的描述来源**：✅ 2026-11-09。分析面板逐镜显示 7 个描述字段，
   并加「语义描述」动作（内联确认 + 预估 token，不用原生弹窗；缺 key 时后端自动跳过）。

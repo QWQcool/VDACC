@@ -958,19 +958,31 @@ createApp({
       if (result) analysis.value = result;
     }
 
+    /** 勾上「同时判断运镜」时才抽首尾帧：camera 是模型字段，单开 pairFrames 换不来运镜。 */
+    const descPairFrames = ref(false);
+
     /** A2：逐帧语义描述。要花 API 额度，所以先让用户确认一遍（面板里内联确认，不用原生弹窗）。 */
     async function describeShots() {
       const current = analysis.value;
       if (!current || analysisBusy.value) return;
       const result = await runAnalyze(current.source.path, {
-        describe: true, maxDescribe: current.frames.length,
+        describe: true,
+        maxDescribe: current.frames.length,
+        // 运镜只能由模型给（`describe.ts` 的 camera 字段）：抽首尾帧并排图它才判得出推拉摇移。
+        // 单开 pairFrames 只会多出一堆 pair-*.jpg、camera 仍然为空，所以绑在这里。
+        pairFrames: descPairFrames.value,
       });
       if (result) {
         analysis.value = result;
         descConfirm.value = false;
       }
     }
-    function closeAnalysis() { analysis.value = null; descConfirm.value = false; }
+
+    function closeAnalysis() {
+      analysis.value = null;
+      descConfirm.value = false;
+      descPairFrames.value = false;
+    }
 
     /** 从分析面板跳到成品的某一刻：复用预览浮层，不用再开一个播放器。 */
     async function seekTo(tMs) {
@@ -1084,7 +1096,7 @@ createApp({
       audioFormat, cancel, retry,
       openSettings, saveSettings, installComponent, previewSelected, previewJob, closePreview,
       analysis, analysisBusy, analysisName, analyzable, analyzeJob, closeAnalysis,
-      descConfirm, describeShots,
+      descConfirm, describeShots, descPairFrames,
       seekToFrame, seekToScene, applySeek, videoEl,
     };
   },

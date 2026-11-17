@@ -547,6 +547,12 @@
 }
 .an-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 10px; }
 .an-cost { font-size: 11px; color: var(--text-light); }
+/* 「同时判断运镜」勾选框：跟额度提示同字号，避免看起来比按钮还重 */
+.an-check {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px; color: var(--text-light); cursor: pointer;
+}
+.an-check input { margin: 0; }
 /* 语义描述独占一行、缩进对齐镜号，避免把时间轴挤散 */
 .an-visual { flex-basis: 100%; padding-left: 3.2em; color: var(--text); }
 .an-v-tag {
