@@ -86,12 +86,37 @@ export const PLAYLIST_PAGE = 100;
 
 const SPECIAL_INFO = 'https://mobiles.kugou.com/api/v3/special/info';
 const SPECIAL_SONG = 'https://mobiles.kugou.com/api/v3/special/song';
+const ALBUM_INFO = 'https://mobiles.kugou.com/api/v3/album/info';
+const ALBUM_SONG = 'https://mobiles.kugou.com/api/v3/album/song';
 
 /** 酷狗把「歌手 - 歌名」放在一个 `filename` 字段里，没有独立的 songname/singername。 */
 function splitFilename(filename: string): { title: string; author: string } {
   const at = filename.lastIndexOf(' - ');
   if (at <= 0) return { title: filename.trim(), author: '' };
   return { title: filename.slice(at + 3).trim(), author: filename.slice(0, at).trim() };
+}
+
+/**
+ * 歌单与专辑的曲目项形状完全一致（`hash` / `filename` / `duration` 秒），
+ * 所以映射只写一份——两边各自抄一遍迟早会在「时长单位」或「hash 大小写」上分叉。
+ */
+function toTracks(raws: unknown[]): AlbumTrack[] {
+  return (raws as any[]).map((song) => {
+    const hash = String(song?.hash || '').toLowerCase();
+    const { title, author } = splitFilename(String(song?.filename || ''));
+    return {
+      id: hash,
+      title,
+      author,
+      url: SONG_PAGE + hash,
+      duration_ms: Number(song?.duration || 0) ? Number(song.duration) * 1000 : null,
+    };
+  }).filter((t: AlbumTrack) => t.id);
+}
+
+/** 封面统一：`{size}` 占位换成 240，`http:` 提成 `https:`（酷狗仍在下发 http 图）。 */
+function coverUrl(imgurl: string): string {
+  return String(imgurl || '').replace('{size}', '240').replace(/^http:/i, 'https:');
 }
 
 /**
@@ -123,17 +148,7 @@ export async function playlistTracks(
     },
   });
 
-  const tracks: AlbumTrack[] = (collected.raws as any[]).map((song) => {
-    const hash = String(song?.hash || '').toLowerCase();
-    const { title, author } = splitFilename(String(song?.filename || ''));
-    return {
-      id: hash,
-      title,
-      author,
-      url: SONG_PAGE + hash,
-      duration_ms: Number(song?.duration || 0) ? Number(song.duration) * 1000 : null,
-    };
-  }).filter((t: AlbumTrack) => t.id);
+  const tracks = toTracks(collected.raws);
 
   if (!tracks.length) {
     const declared = Number(info.songcount || 0);
@@ -149,7 +164,83 @@ export async function playlistTracks(
     id,
     kind: 'playlist',
     title: String(info.specialname || `酷狗歌单 ${id}`),
-    cover: String(info.imgurl || '').replace('{size}', '240').replace(/^http:/i, 'https:'),
+    cover: coverUrl(info.imgurl),
+    tracks,
+    warnings: collected.warnings,
+  };
+}
+
+/**
+ * 专辑链接：`www.kugou.com/yy/album/single/<id>.html`、`?albumid=`，或裸数字。
+ *
+ * 与歌单 id 是**两个命名空间**（都是纯数字），所以裸数字只在显式 `--album` 时才有意义；
+ * 链接里带 `/special/` 或 `/plist/` 的一律不当专辑，否则会把整张歌单当成一张专辑。
+ */
+export function parseAlbumId(input: string): string {
+  const bare = bareNumericId(input);
+  if (bare) return bare;
+  let u: URL;
+  try {
+    u = new URL((input || '').trim());
+  } catch {
+    return '';
+  }
+  if (!/(^|\.)kugou\.com$/i.test(u.hostname)) return '';
+  if (/\/(?:special|plist)\//i.test(u.pathname)) return '';
+  const fromQuery = u.searchParams.get('albumid') || '';
+  if (/^\d+$/.test(fromQuery)) return fromQuery;
+  const m = /\/(?:yy\/)?album\/(?:single\/)?(\d+)(?:\.html)?/i.exec(u.pathname);
+  return m ? m[1] : '';
+}
+
+/**
+ * 专辑曲目（2026-11-16 实测，匿名可用）：
+ *   `album/info?albumid=` → `albumname` / `singername` / `imgurl`（带 `{size}` 占位）
+ *   `album/song?albumid=&page=&pagesize=` → `data.total` + `data.info[]`（字段与歌单项完全一致）
+ *
+ * **不要拿 `album/info` 的 `songcount` 当总数**：实测专辑 958909（十一月的萧邦）回 `songcount: 0`，
+ * 而 `album/song` 的 `total` 是 12。总数一律以曲目接口为准（`collectPages` 的 `declared`）。
+ */
+export async function albumTracks(
+  input: string, deps: { fetch?: typeof fetch } = {},
+): Promise<AlbumInfo> {
+  const id = parseAlbumId(input);
+  if (!id) throw new VdlError('bad_input', `识别不出酷狗专辑 ID（歌单请用 --playlist）: ${input}`);
+  const doFetch = deps.fetch || fetch;
+
+  const meta = await json(`${ALBUM_INFO}?albumid=${id}&format=json`, doFetch);
+  const info = meta?.data || {};
+
+  const collected = await collectPages({
+    pageSize: PLAYLIST_PAGE,
+    keyOf: (song: any) => String(song?.hash || '').toLowerCase(),
+    fetchPage: async (cursor, size) => {
+      const page = await json(
+        `${ALBUM_SONG}?albumid=${id}&page=${Math.floor(cursor / size) + 1}&pagesize=${size}&format=json`,
+        doFetch,
+      );
+      return { raws: Array.isArray(page?.data?.info) ? page.data.info : [], total: page?.data?.total };
+    },
+  });
+
+  const tracks = toTracks(collected.raws);
+  if (!tracks.length) {
+    emptyCollection({
+      id,
+      label: '专辑',
+      declared: collected.declared,
+      blockedHint: `接口声明 ${collected.declared} 首但没有给出曲目：可能整张下架或地区限制`,
+    });
+  }
+
+  const title = String(info.albumname || '') || `酷狗专辑 ${id}`;
+  const singer = String(info.singername || '').trim();
+  return {
+    id,
+    kind: 'album',
+    // 专辑名里常带「歌手 + 专辑」两层信息，标题只放专辑名，歌手留给曲目的 author
+    title: singer ? `${title}（${singer}）` : title,
+    cover: coverUrl(info.imgurl),
     tracks,
     warnings: collected.warnings,
   };
@@ -286,6 +377,10 @@ async function probeKugouImpl(input: string): Promise<ProbeResult> {
       id: 'kg-128', url: plain, ext: String(info.extName || 'mp3').toLowerCase(),
       bitrate: Number(info.bitRate || 0) * 1000, size: Number(info.fileSize || 0), source: 'getSongInfo',
     });
+  } else if (String(info.error || '').trim()) {
+    // 平台自己说了原因就照原话带出来（2026-11-16 实测付费曲回 `需要付费`，且 url 为空、timeLength=0）。
+    // 不推断「会员/地区」，只转述接口，避免把猜测写成结论。
+    warnings.push(`平台没给公开档地址，原话：${String(info.error).trim()}`);
   }
 
   const formats: Format[] = [];
@@ -308,8 +403,11 @@ async function probeKugouImpl(input: string): Promise<ProbeResult> {
   }
 
   if (!formats.length) {
-    // 本引擎没有登录能力，不该把用户指向「登录」；也不断言是会员/付费/地区
-    throw new VdlError('filtered', `「${title || hash.slice(0, 8)}」没有可下载的音频地址`,
+    // 本引擎没有登录能力，不该把用户指向「登录」；也不断言是会员/付费/地区，
+    // 但平台回了原话就带上（否则用户只看到「没有地址」，无从判断是接口坏了还是这曲子受限）
+    const platReason = String(info.error || '').trim();
+    throw new VdlError('filtered',
+      `「${title || hash.slice(0, 8)}」没有可下载的音频地址${platReason ? `（平台原话：${platReason}）` : ''}`,
       '酷狗公开通道对受限曲目只给封面与信息；本引擎不做 .kgm 解密、不伪造会员，也不支持登录');
   }
   formats[0].recommended = true;

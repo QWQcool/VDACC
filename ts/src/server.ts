@@ -24,7 +24,7 @@ import {
 } from './engines/netease';
 import { albumTracks as qqAlbum, playlistTracks as qqPlaylist, getQQ, previewQQ, probeQQ } from './engines/qq';
 import { getKuwo, probeKuwo } from './engines/kuwo';
-import { playlistTracks as kugouPlaylist, getKugou, probeKugou } from './engines/kugou';
+import { albumTracks as kugouAlbum, playlistTracks as kugouPlaylist, getKugou, probeKugou } from './engines/kugou';
 import { canHandle as canSniff, getSniff, probeSniff } from './engines/sniff';
 import {
   getBilibiliApi, previewBilibili, previewBilibiliAudio, probeBilibiliApi, refetchSidecars,
@@ -449,19 +449,10 @@ const server = Bun.serve({
           || (platform === 'netease' && /\/playlist\b/i.test(resolved))
           || (platform === 'qq' && (/\/playlist\//i.test(resolved) || /taoge\.html/i.test(resolved)))
           || (platform === 'kugou' && (/\/special\/single\//i.test(resolved) || /\/plist\/list\//i.test(resolved)));
-        if (platform === 'kugou' && !wantsPlaylist) {
-          return json({
-            ok: false,
-            error: {
-              code: 'unsupported',
-              message: '酷狗目前只支持歌单（/special/single/<id>）；专辑批量还没做',
-            },
-          }, 400);
-        }
         const info = platform === 'netease'
           ? (wantsPlaylist ? await neteasePlaylist(resolved) : await neteaseAlbum(resolved))
           : platform === 'kugou'
-            ? await kugouPlaylist(resolved)
+            ? (wantsPlaylist ? await kugouPlaylist(resolved) : await kugouAlbum(resolved))
             : (wantsPlaylist ? await qqPlaylist(resolved) : await qqAlbum(resolved));
         const plan = planAlbum(info.tracks, offset);
         return json({

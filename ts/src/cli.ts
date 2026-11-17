@@ -11,7 +11,7 @@ import { probeBilibili } from './engines/bilibili';
 import { AUDIO_FORMAT_ID, getBilibiliApi, probeBilibiliApi } from './engines/bilibili_api';
 import { albumTracks as qqAlbum, playlistTracks as qqPlaylist, getQQ, probeQQ } from './engines/qq';
 import { getKuwo, probeKuwo } from './engines/kuwo';
-import { playlistTracks as kugouPlaylist, getKugou, probeKugou } from './engines/kugou';
+import { albumTracks as kugouAlbum, playlistTracks as kugouPlaylist, getKugou, probeKugou } from './engines/kugou';
 import { canHandle as canSniff, getSniff, probeSniff } from './engines/sniff';
 import { loadConfig } from './core/config';
 import { exitCodeFor, runDoctor } from './core/doctor';
@@ -322,19 +322,15 @@ if (cmd === 'auth') {
       // 短链要先跟跳转才知道是专辑还是歌单（其它输入原样返回，不发请求）
       const resolved = platform === 'netease' ? await expandShortLink(url) : url;
       // 各家歌单链接形状不同：网易云 `/playlist`、QQ `/playlist/<数字>` 或 `taoge.html`、
-      // 酷狗 `/special/single/<id>.html` 或 `/plist/list/<id>`
+      // 酷狗 `/special/single/<id>.html` 或 `/plist/list/<id>`；酷狗专辑是 `/yy/album/single/<id>.html`
       const wantsPlaylist = has('--playlist')
         || (platform === 'netease' && /\/playlist\b/i.test(resolved))
         || (platform === 'qq' && (/\/playlist\//i.test(resolved) || /taoge\.html/i.test(resolved)))
         || (platform === 'kugou' && (/\/special\/single\//i.test(resolved) || /\/plist\/list\//i.test(resolved)));
-      if (platform === 'kugou' && !wantsPlaylist) {
-        console.error('酷狗目前只支持歌单（/special/single/<id>）；专辑批量还没做');
-        process.exit(2);
-      }
       const album = platform === 'netease'
         ? (wantsPlaylist ? await neteasePlaylist(resolved) : await neteaseAlbum(resolved))
         : platform === 'kugou'
-          ? await kugouPlaylist(resolved)
+          ? (wantsPlaylist ? await kugouPlaylist(resolved) : await kugouAlbum(resolved))
           : (wantsPlaylist ? await qqPlaylist(resolved) : await qqAlbum(resolved));
       const offset = Number(flag('--offset', '0')) || 0;
       const plan = planAlbum(album.tracks, offset);
@@ -357,9 +353,13 @@ if (cmd === 'auth') {
         const track = take[i];
         console.log(`[${i + 1}/${take.length}] ${track.title}`);
         try {
+          // 批量里的每条也走各自引擎：酷狗曲目地址是 kugou.com/song/#hash=…，
+          // 交给 QQ 引擎会直接报「识别不出 QQ 音乐 songmid」（2026-11-16 实测踩到）
           const out = platform === 'netease'
             ? await getNetease(track.url, formatId, outDir)
-            : await getQQ(track.url, formatId, outDir);
+            : platform === 'kugou'
+              ? await getKugou(track.url, formatId, outDir)
+              : await getQQ(track.url, formatId, outDir);
           ok += 1;
           console.log(`  ${out.skipped ? '已存在' : '完成'} ${out.path} ` +
             `(${(out.bytes / 1048576).toFixed(2)} MB)`);

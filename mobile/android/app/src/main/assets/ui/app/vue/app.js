@@ -285,7 +285,9 @@ createApp({
       // QQ 歌单：`/n/ryqq/playlist/<数字>` 与分享页 `taoge.html?id=<数字>`
       || /y\.qq\.com\/.*\/(?:playlist\/\d+|taoge\.html)/i.test(value)
       // 酷狗歌单：`/yy/special/single/<id>.html`、`/plist/list/<id>`
-      || /kugou\.com\/.*\/(?:special\/single|plist\/list)\/\d+/i.test(value);
+      // 酷狗歌单 `/special/single/<id>`、`/plist/list/<id>`；专辑 `/yy/album/single/<id>.html`
+    || /kugou\.com\/.*\/(?:special\/single|plist\/list)\/\d+/i.test(value)
+    || /kugou\.com\/(?:.*\/)?album\/(?:single\/)?\d+/i.test(value);
 
     async function probeUrl(target) {
       const value = (target || url.value).trim();
