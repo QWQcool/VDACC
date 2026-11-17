@@ -104,6 +104,66 @@ describe('收藏夹列表拉取', () => {
     expect(page.items[0].author).toBe('');
   });
 
+  test('合集：接口忽略 pn/ps，本地切片保证「每批 20 + 加载下一页」', async () => {
+    // 真实形状（2026-11-17 实测 season_id=4137556「甜点小剧场」共 163 条）：
+    // data = { info: {title, media_count, upper}, medias: [...163] }，**没有 has_more**
+    const all = Array.from({ length: 163 }, (_, i) => ({
+      bvid: `BV${String(i + 1).padStart(6, '0')}`,
+      title: `第 ${i + 1} 个`,
+      cover: `http://i0/${i + 1}.jpg`,
+      duration: 60,
+      upper: { name: '破米库' },
+    }));
+    let seen = '';
+    const deps = {
+      cookie: '',
+      pageSize: 20,
+      fetch: (async (url: string) => {
+        seen = String(url);
+        // 无论 pn 是多少，服务端都回全量——这就是要本地切片的原因
+        return json({
+          code: 0,
+          data: { info: { season_type: 1, title: '甜点小剧场', media_count: 163, upper: { name: '破米库' } }, medias: all },
+        });
+      }) as unknown as typeof fetch,
+    };
+
+    const first = await fetchCollection({ kind: 'season', id: '4137556' }, 1, deps);
+    expect(seen).toContain('season_id=4137556');
+    expect(first.kind).toBe('season');
+    expect(first.title).toBe('甜点小剧场');
+    expect(first.owner).toBe('破米库');
+    expect(first.total).toBe(163);
+    expect(first.items.length).toBe(20);
+    expect(first.items[0].title).toBe('第 1 个');
+    expect(first.hasMore).toBe(true);
+
+    const ninth = await fetchCollection({ kind: 'season', id: '4137556' }, 9, deps);
+    expect(ninth.items.length).toBe(3);
+    expect(ninth.items[0].title).toBe('第 161 个');
+    expect(ninth.hasMore).toBe(false);
+
+    // 翻过末页：空页，不报形状错误
+    const tenth = await fetchCollection({ kind: 'season', id: '4137556' }, 10, deps);
+    expect(tenth.items).toEqual([]);
+    expect(tenth.hasMore).toBe(false);
+    expect(tenth.total).toBe(163);
+  });
+
+  test('合集条目少于一批时不切片，hasMore 为 false', async () => {
+    const page = await fetchCollection({ kind: 'season', id: '42' }, 1, {
+      cookie: '',
+      pageSize: 20,
+      fetch: (async () => json({
+        code: 0,
+        data: { info: { title: '小合集', media_count: 2 }, medias: [{ bvid: 'BV1aa' }, { bvid: 'BV1bb' }] },
+      })) as unknown as typeof fetch,
+    });
+    expect(page.items.map((x) => x.bvid)).toEqual(['BV1aa', 'BV1bb']);
+    expect(page.hasMore).toBe(false);
+    expect(page.total).toBe(2);
+  });
+
   test('data 为 null（不存在的收藏夹）不能被当成空列表', async () => {
     await expect(fetchCollection(target, 1, {
       cookie: '',

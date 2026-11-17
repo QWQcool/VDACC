@@ -12,6 +12,7 @@ import { AUDIO_FORMAT_ID, getBilibiliApi, probeBilibiliApi } from './engines/bil
 import { albumTracks as qqAlbum, playlistTracks as qqPlaylist, getQQ, probeQQ } from './engines/qq';
 import { getKuwo, probeKuwo } from './engines/kuwo';
 import { albumTracks as kugouAlbum, playlistTracks as kugouPlaylist, getKugou, probeKugou } from './engines/kugou';
+import { downloaderFor, musicDownloadPlatforms } from './engines/downloaders';
 import { canHandle as canSniff, getSniff, probeSniff } from './engines/sniff';
 import { loadConfig } from './core/config';
 import { exitCodeFor, runDoctor } from './core/doctor';
@@ -315,8 +316,11 @@ if (cmd === 'auth') {
     // 歌单链接（路径里带 playlist）粘给 --album 也认——用户不需要先分清两者。
     if (cmd === 'get' && (has('--album') || has('--playlist'))) {
       const platform = platformOf(url);
-      if (platform !== 'netease' && platform !== 'qq' && platform !== 'kugou') {
-        console.error('--album / --playlist 目前只支持 网易云 / QQ 音乐 / 酷狗');
+      // 支持范围与「用哪个引擎下」都取自同一张表（engines/downloaders.ts），
+      // 免得又出现「列表支持酷狗、批量下载却交给 QQ」这种分叉
+      const downloader = downloaderFor(platform);
+      if (!downloader) {
+        console.error(`--album / --playlist 目前只支持 ${musicDownloadPlatforms().join(' / ')}`);
         process.exit(2);
       }
       // 短链要先跟跳转才知道是专辑还是歌单（其它输入原样返回，不发请求）
@@ -353,13 +357,9 @@ if (cmd === 'auth') {
         const track = take[i];
         console.log(`[${i + 1}/${take.length}] ${track.title}`);
         try {
-          // 批量里的每条也走各自引擎：酷狗曲目地址是 kugou.com/song/#hash=…，
-          // 交给 QQ 引擎会直接报「识别不出 QQ 音乐 songmid」（2026-11-16 实测踩到）
-          const out = platform === 'netease'
-            ? await getNetease(track.url, formatId, outDir)
-            : platform === 'kugou'
-              ? await getKugou(track.url, formatId, outDir)
-              : await getQQ(track.url, formatId, outDir);
+          // 批量里的每条也走**各自平台**的引擎（表见 engines/downloaders.ts）。
+          // 2026-11-16 这里曾经写死「不是网易云就是 QQ」，酷狗歌单 20 首全失败。
+          const out = await downloader(track.url, formatId, outDir);
           ok += 1;
           console.log(`  ${out.skipped ? '已存在' : '完成'} ${out.path} ` +
             `(${(out.bytes / 1048576).toFixed(2)} MB)`);

@@ -5,11 +5,17 @@
  * 唧唧Down 也是这个形态——它的 IPC 里只有 `get_favorite_detail` 与单条 `start_video_download`，
  * 列表接口自带 `pn/ps` 分页与 `has_more`（见 docs/design/reference-jijidown-notes.md §5.1）。
  *
- * 接口（2026-11-10 记录）：
+ * 接口（2026-11-10 记录，2026-11-17 补实测）：
  *   收藏夹  https://api.bilibili.com/x/v3/fav/resource/list?media_id=<id>&pn=&ps=20&order=mtime&type=0&tid=0&platform=web
  *   合集    https://api.bilibili.com/x/space/fav/season/list?season_id=<id>&pn=&ps=20
- * **未验证**：真实收藏夹/合集的完整响应体（需要用户自己的收藏夹 ID）。所以这里对结构做硬校验：
- * 结构不符就抛错，绝不把"解析不出来"当成"空收藏夹"。
+ *
+ * **两种入口的分页语义不同，别写成一个假设**：
+ * - 收藏夹是**服务端分页**：pn/ps 生效，data 里有 `has_more`，末页回 `medias: null`；
+ * - 合集**忽略 pn/ps**：实测 season_id=4137556（163 条）在 pn=1/2 × ps=5/20 下都回全量，
+ *   没有 `has_more` —— 所以合集的分页由本地切片完成，否则界面会一次列出几百条。
+ *
+ * 两者都已用真实数据验过（收藏夹 media_id=3473916881；合集 season_id=4137556），
+ * 但结构仍做硬校验：不符就抛错，绝不把"解析不出来"当成"空收藏夹"。
  */
 import { VdlError } from '../core/errors';
 import type { CollectionItem, CollectionKind, CollectionPage } from '../core/types';
@@ -174,6 +180,17 @@ export async function fetchCollection(
     throw shapeError(target.kind);
   }
   const medias: RawItem[] = rawList;
+  const total = Number(info.media_count || info.count || medias.length);
+
+  // 合集接口**忽略 pn/ps**：实测（2026-11-17，season_id=4137556 共 163 条）在
+  // pn=1/2 × ps=5/20 四种组合下都原样返回全部 163 条，且没有 `has_more` 字段。
+  // 所以合集的分页只能在本地切：否则界面会一次列出几百条，和「每批 20 / 加载下一页」
+  // 的口径不符（实测一次全量响应 55 KB / 163 条，成本可以接受）。
+  // 收藏夹是服务端分页（pn/ps 生效、带 has_more），保持原样。
+  const isSeason = target.kind === 'season';
+  const start = (Math.max(1, page) - 1) * pageSize;
+  const pageItems = isSeason ? medias.slice(start, start + pageSize) : medias;
+  const hasMore = isSeason ? start + pageItems.length < medias.length : Boolean(data.has_more);
 
   return {
     source: 'bilibili-fav',
@@ -181,11 +198,11 @@ export async function fetchCollection(
     id: target.id,
     title: String(info.title || (target.kind === 'fav' ? '收藏夹' : '合集')),
     owner: String(info.upper?.name || ''),
-    total: Number(info.media_count || info.count || medias.length),
+    total,
     page: Math.max(1, page),
     pageSize,
-    hasMore: Boolean(data.has_more),
-    items: medias.map(toItem),
+    hasMore,
+    items: pageItems.map(toItem),
   };
 }
 
