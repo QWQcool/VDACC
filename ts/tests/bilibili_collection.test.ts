@@ -20,6 +20,12 @@ describe('收藏夹/合集链接解析', () => {
       .toEqual({ kind: 'season', id: '42' });
   });
 
+  test('「系列」链接不认（系列与合集是两套 id，硬查可能返回另一个合集）', () => {
+    expect(parseCollectionTarget('https://space.bilibili.com/123/channel/seriesdetail?sid=42')).toBeNull();
+    // 纯数字 + season 提示仍按合集（显式指定时由用户承担语义）
+    expect(parseCollectionTarget('42', 'season')).toEqual({ kind: 'season', id: '42' });
+  });
+
   test('纯数字默认收藏夹，带 season 提示则按合集', () => {
     expect(parseCollectionTarget('100')).toEqual({ kind: 'fav', id: '100' });
     expect(parseCollectionTarget('100', 'season')).toEqual({ kind: 'season', id: '100' });

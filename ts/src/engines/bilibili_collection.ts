@@ -42,11 +42,18 @@ export interface CollectionTarget {
 /**
  * 从用户粘的东西里认出收藏夹/合集。
  * 支持：`space.bilibili.com/<mid>/favlist?fid=123`、`?media_id=123`、
- *       `.../channel/collectiondetail?sid=123`、`seriesdetail?sid=123`、纯数字 + kind 提示。
+ *       `.../channel/collectiondetail?sid=123`、纯数字 + kind 提示。
+ *
+ * **不认 `seriesdetail?sid=`（「系列」）**：B站 的「系列」与「合集」是两套接口
+ * （系列走 `x/series/series`），两边的 id 都是纯数字、会撞车——把系列 id 当 season_id
+ * 查 `x/space/fav/season/list` 有可能返回**另一个合集**，那比报错更糟。
+ * 调用方（`/api/collection`）会据此给「系列暂不支持」的明确提示。
  */
 export function parseCollectionTarget(input: string, hint?: string): CollectionTarget | null {
   const raw = String(input || '').trim();
   if (!raw) return null;
+  // 「系列」明确不支持，也不能落进下面的纯数字分支被当成 season
+  if (/seriesdetail/i.test(raw)) return null;
 
   if (/^\d+$/.test(raw)) {
     const kind: CollectionKind = hint === 'season' ? 'season' : 'fav';
@@ -62,7 +69,7 @@ export function parseCollectionTarget(input: string, hint?: string): CollectionT
 
   const fid = params.get('fid') || params.get('media_id');
   const sid = params.get('sid') || params.get('season_id');
-  const looksSeason = /collectiondetail|seriesdetail|channel\/collection/i.test(raw);
+  const looksSeason = /collectiondetail|channel\/collection/i.test(raw);
 
   if (looksSeason) {
     const id = sid || fid;

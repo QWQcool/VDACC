@@ -395,6 +395,18 @@ const server = Bun.serve({
       const input = String(body.url || body.id || '').trim();
       const target = parseCollectionTarget(input, body.kind);
       if (!target) {
+        // 「系列」与「合集」是两套 id（都会撞数字），把系列 id 当 season_id 查有可能
+        // 返回**另一个合集**，所以这里明确说「不支持」，而不是硬查一次
+        if (/seriesdetail/i.test(input)) {
+          return json({
+            ok: false,
+            error: {
+              code: 'unsupported',
+              message: 'B站「系列」暂不支持（系列与合集的接口不同）',
+              next_action: '用合集页地址 space.bilibili.com/<uid>/channel/collectiondetail?sid=… 或收藏夹 favlist?fid=…',
+            },
+          }, 400);
+        }
         return json({
           ok: false,
           error: {

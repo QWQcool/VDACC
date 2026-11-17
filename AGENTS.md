@@ -93,7 +93,7 @@
 | B站 长传输健壮性 | **416** 会在「`.part` 已到文件末尾、最后一块响应被掐断」时出现，且 B站 的 416 **不带 content-range** —— 只能用探测到的总字节判断「其实已下完」，否则删 part 重下。**ECONNRESET/terminated** 在几百兆的传输里常见，续传（`.part` + Range）能接上，重试 2 次即可 |
 | B站 预览 / 代理端口 | DASH 双轨：`<video>` 只有画面，音轨要单独挂一个 `<audio>` 跟随（`/api/preview` 回 `audioUrl`）。**B站 mcdn 节点是 `xxx.mcdn.bilivideo.cn:8082`**，`streamUrlAllowed` 原先拒绝所有非默认端口 → 这类地址预览恒 403；现在只额外放行 8082，其它端口仍拒。双轨**并行下载**只在未设限速时启用（限速按每条流算，并行 = 2 倍总带宽） |
 | 抖音图文 | 判据是「有 `images` **且** `video.play_addr.url_list` 为空」——只看 `images` 会把带背景视频的图文误杀。命中的作品跑不出视频流，应报 `unsupported` 而不是「没有解析到档位」 |
-| B站 收藏夹 / 合集 | **两种入口的分页语义不同，不能用一个假设**：收藏夹（`x/v3/fav/resource/list`，`media_id=`）是服务端分页，`pn/ps` 生效、带 `has_more`、翻过末页回 `medias: null`；合集（`x/space/fav/season/list`，`season_id=`）**忽略 pn/ps**——实测 `season_id=4137556`（163 条）在 pn=1/2 × ps=5/20 下都回全量、**没有 `has_more`**，所以合集改由本地切片保证「每批 20 / 加载下一页」（一次全量响应 55 KB，可接受）。标题/UP主名在 `data.info`（`title` / `upper.name` / `media_count`）。实测：收藏夹 `3473916881`=6 条、合集 `4137556`=163 条、p9 回 3 条、p10 回空页 |
+| B站 收藏夹 / 合集 | **两种入口的分页语义不同，不能用一个假设**：收藏夹（`x/v3/fav/resource/list`，`media_id=`）是服务端分页，`pn/ps` 生效、带 `has_more`、翻过末页回 `medias: null`；合集（`x/space/fav/season/list`，`season_id=`）**忽略 pn/ps**——实测 `season_id=4137556`（163 条）在 pn=1/2 × ps=5/20 下都回全量、**没有 `has_more`**，所以合集改由本地切片保证「每批 20 / 加载下一页」（一次全量响应 55 KB，可接受）。标题/UP主名在 `data.info`（`title` / `upper.name` / `media_count`）。实测：收藏夹 `3473916881`=6 条、合集 `4137556`=163 条、p9 回 3 条、p10 回空页。**「系列」(`seriesdetail?sid=`) 一律不认**——系列与合集是两套 id（都是纯数字、会撞车），把系列 id 当 `season_id` 查可能返回**另一个合集**，所以 `/api/collection` 直接回 `unsupported` |
 | 酷我歌单 | **不可用**（2026-11-11 实测）：`api/www/playlist/playListInfo` 要 `csrf` 头 + `kw_token` cookie，而首页/搜索页/H5 页都**不下发 kw_token**（只有 `Hm_Iuvt_…`）；桌面 `/playlist_detail/<id>` 直接 **430**；移动 UA 的 `/h5app/playlist/<id>` 是压缩成单字母变量的 NUXT 表达式（**不 eval**）。`search.kuwo.cn/r.s?ft=playlist` 能给 `playlistid`/`name`/`songnum`（单引号 dict），但**没有曲目** |
 | B站清晰度归档 | 必须按**宽度**（3840/2560/1920/1280/854）；宽银幕（1920×816、4096×1740）按高度会整体下移一档 |
 | B站格式结构 | 全部是 video-only + audio-only，必须成对合并；带 cookie 才看得到 4K/1080P |
@@ -187,7 +187,7 @@ venv\Scripts\python.exe -m pip install playwright yt-dlp   # 仅 legacy 需要
 ```bash
 bun --version                              # 1.4.x
 ffmpeg -version                            # 9.x；缺了 B站/音乐/m3u8 全废
-bun test ts/tests                          # 342 pass（缺 ffmpeg 时 2 条端到端 skip，capabilities.test.ts 会写明）
+bun test ts/tests                          # 343 pass（缺 ffmpeg 时 2 条端到端 skip，capabilities.test.ts 会写明）
 bun ts/src/cli.ts probe "<抖音或B站链接>" --json
 ```
 
