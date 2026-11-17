@@ -28,17 +28,28 @@ describe('scripts/setup.ps1', () => {
     expect([buf[0], buf[1], buf[2]]).toEqual([0xef, 0xbb, 0xbf]);
   });
 
-  test('不调用 winget，自己从官方地址取 Bun 与 ffmpeg', () => {
+  test('不调用 winget，自己从官方地址取 Bun / ffmpeg / Python', () => {
     const text = readText(scriptPath);
     expect(/winget\s+install/i.test(text)).toBe(false);
     expect(text).toContain('github.com/oven-sh/bun/releases');
     expect(text).toContain('gyan.dev/ffmpeg/builds');
+    // 构建 Skill 与刷新发布基线都需要 Python；它也不在库里
+    expect(text).toContain('python.org/ftp/python');
   });
 
-  test('有可复用的开关：只检查（-SkipInstall）与跳过依赖（-SkipDeps）', () => {
+  test('Python 要真跑一次 --version（Store 别名能解析到路径但一执行就让你去商店）', () => {
+    const text = readText(scriptPath);
+    expect(text).toContain('function Test-Python');
+    expect(text).toMatch(/Test-Python -Exe \$cmd\.Source/);
+  });
+
+  test('有可复用的开关：只检查（-SkipInstall）/ 跳过依赖（-SkipDeps）/ legacy（-WithLegacy）', () => {
     const text = readText(scriptPath);
     expect(text).toContain('[switch]$SkipInstall');
     expect(text).toContain('[switch]$SkipDeps');
+    expect(text).toContain('[switch]$WithLegacy');
+    // legacy 是可选步骤：不能变成默认就跑 46MB 的 pip
+    expect(text).toMatch(/if \(\$WithLegacy\) \{/);
   });
 
   test('两个 package.json 都声明 engines.bun >= 1.4.4', () => {

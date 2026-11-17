@@ -87,7 +87,7 @@
 | QQ 歌单 | `POST https://u.y.qq.com/cgi-bin/musicu.fcg`，`req.module='music.srfDissInfo.aiDissInfo'`、`method='uniform_get_Dissinfo'`、`param={disstid,song_begin,song_num}`，匿名可用：`req.data.dirinfo.songnum` 是总数、`title/picurl` 是标题封面，`songlist[]` 每项 `mid`（**不是 `songmid`**）/`name`/`singer[].name`。`song_num=100` 一次给整单。**旧 `fcg_ucc_getcdinfo_byids_cp` 回 `{"code":0,"subcode":4000,"msg":"check privacy error!"}`，不能用**；`getSongListDetail` 回 `500003` |
 | 抖音合集 / 主页 | `aweme/v1/web/mix/aweme` 与 `aweme/post` 无签名一律 403 `Blocked by ArgusSecurityPlugin`；带现有 `x-secsdk-web-signature` 后 200，但对不存在的 `mix_id` 回 `status_code=4` + `aweme_list:null`，而 `aweme/detail` 对不存在的视频是 `status_code=0` + 无 detail —— **无法区分「合集不存在」与「还缺 a_bogus」**。`www.douyin.com/collection/<id>` 返回 JS 挑战页（`jsvmprt`），无 SSR 数据。没有真实 mix_id 前不做列表功能 |
 | B站 音频单独下 | `dash.audio` 本来就是独立轨（`playurl` 同一次返回），只下音频 = 只请求 audio 轨 + `ffmpeg -c copy` 转封装 m4a。没有 ffmpeg 也能落盘（改名保留），但必须说明「未转封装」。实测 228s 视频：4,981,362 字节 / aac 48kHz 立体声 / 173kbps |
-| 酷狗歌单 | `mobiles.kugou.com/api/v3/special/info?specialid=<id>&format=json` 给 `specialname`/`nickname`/`songcount`/`imgurl`（`{size}` 占位）；`…/special/song?specialid=&page=&pagesize=` 给 `data.total` + `data.info[]`。曲目字段 `hash`（32 hex）/`filename`（「歌手 - 歌名」，**没有** songname/singername）/`duration`（**秒**）。`pagesize=100` 一次给整单；不存在的 id 是 `total:0 + info:[]`（不是报错）。酷狗**专辑**批量未做 |
+| 酷狗歌单 | `mobiles.kugou.com/api/v3/special/info?specialid=<id>&format=json` 给 `specialname`/`nickname`/`songcount`/`imgurl`（`{size}` 占位）；`…/special/song?specialid=&page=&pagesize=` 给 `data.total` + `data.info[]`。曲目字段 `hash`（32 hex）/`filename`（「歌手 - 歌名」，**没有** songname/singername）/`duration`（**秒**）。`pagesize=100` 一次给整单；不存在的 id 是 `total:0 + info:[]`（不是报错）。**专辑批量已做（2026-11-16 实测 `albumid=958909` 12 首 / 124ms）**：`album/info?albumid=` 给 `albumname`/`singername`/`imgurl`，但**它的 `songcount` 恒为 0，总数只能取 `album/song` 的 `total`**；曲目项字段与歌单项完全一致。**匿名只放行 `privilege=8 / pay_type=0` 的曲子**，付费曲 `getSongInfo` 回 `error:"需要付费"` + `url` 空 + `timeLength:0`（错误文案要带这句原话）。**CLI 批量的每条必须按平台分派引擎**——2026-11-16 修过一个 bug：酷狗批量全被交给 QQ 引擎，逐条报「识别不出 QQ 音乐 songmid」 |
 | B站 Hi-Res / 杜比音轨 | `dash.flac = {display:true, audio:{id:30251, codecs:'fLaC', bandwidth}}` —— **audio 是对象**；`dash.dolby = {type:2, audio:[{id:30250, codecs:'ec-3'}]}` —— **audio 是数组**。匿名态 `flac.display` 仍为 true 但 `audio` 为空、`dolby.type=0`，**必须看有没有 audio**。取舍 FLAC > 杜比 > AAC；容器 flac/eac3 → mkv（flac-in-mp4 播放器支持差）。实测 `BV1nutz6mEgY` 415s：flac 1,434,259bps（约 71MB）、dolby 1,665,173bps |
 | B站 弹幕 → ASS | `--danmaku` 同时落 `.danmaku.xml`（原文）与 `.danmaku.ass`（可直接挂播放器）。解析 `<d p="时间,模式,字号,颜色,...">文本</d>`；模式 1/2/3 滚动（`\an7\move`）、5 顶部（`\an8\pos`）、4 底部（`\an2\pos`）；**7 高级 / 8 代码弹幕跳过并计入 `danmakuSkipped`**（要执行脚本才能定位）。颜色是十进制 RGB，ASS 要写 `&HBBGGRR&`（红 0xFF0000 → `&H0000FF&`）。文本里的 `{` `}` 必须转义，换行必须压平（否则一条事件被拆成多条）。实测 1200 条 → 1190 进 ASS / 10 跳过 |
 | B站 长传输健壮性 | **416** 会在「`.part` 已到文件末尾、最后一块响应被掐断」时出现，且 B站 的 416 **不带 content-range** —— 只能用探测到的总字节判断「其实已下完」，否则删 part 重下。**ECONNRESET/terminated** 在几百兆的传输里常见，续传（`.part` + Range）能接上，重试 2 次即可 |
@@ -102,10 +102,10 @@
 | Bun | 本机 **1.4.4**。2026-11-16 复原后 winget（App Installer）整机缺失，现由 `scripts/setup.ps1` 从官方 zip 装到 **`%USERPROFILE%\.bun\bin\bun.exe`** 并写入用户 PATH（不再依赖 `%LOCALAPPDATA%\Microsoft\WinGet\Links`）。**已开着的终端不会刷新**，装完 `where bun` 报找不到属正常，新开窗口或直接探上述绝对路径即可 |
 | ffmpeg（2026-11-16） | 同样由 `scripts/setup.ps1` 装到 **`%LOCALAPPDATA%\Programs\ffmpeg\bin`**（gyan.dev essentials，实测 **9.0.2**）。PATH 里没有时 `doctor` 会 fail；脚本会把它补进当前进程 PATH 再跑 doctor |
 | Playwright | `playwright-core`（`package.json` 写 `^1.64.1`，`bun.lock` 实装 **1.64.1**）。**绝对不能用 Bun 跑**：它的 WebSocket 在 Bun 下握手永远不返回（同机同版本 Edge，node 正常、bun 30s 超时），而 Playwright 官方只支持 Node。所以 Edge 登录路径由 `ts/src/auth-node.mjs` 用 **node 子进程**执行（`auth.ts` 只负责 spawn + 收 JSON）。该脚本自己拉系统 Edge：`--remote-debugging-port=0` + **`--remote-allow-origins=*`**（Chromium 111+ 硬要求），读 `DevToolsActivePort`（**每次先删旧文件**，否则连到死端口 ECONNREFUSED）再 `connectOverCDP`；profile 必须用**一次性目录**（复用 `%LOCALAPPDATA%\vdl\profile` 会 `browser has been closed`）。不下载 chromium |
-| venv | `venv\Scripts\python.exe` = **3.13.4**（系统 `python` = 3.13.14），已装 playwright 1.64.0 + yt-dlp 2026.8.19，legacy 可直接跑 |
+| venv | 2026-11-17 复原后重建：`venv\Scripts\python.exe` = **3.12.10**（`scripts/setup.ps1 -WithLegacy` 建的），已装 **playwright 1.65.2 + yt-dlp 2026.10.26**，legacy `vdl doctor` 全绿（8/8）。旧记录是 3.13.4 + 1.64.0 + 2026.8.19，版本差异由 `requirements.txt` 的 `>=` 决定 |
 | Android 端 M0 | 引擎 bundle 8.5KB（gzip 4.6KB）、APK 846KB、minSdk 26；桥（paths / md5 / fs 分块+publish）在 realme RMX5200 / Android 16 真机跑通，落盘 md5 与 `md5sum` 一致。JS 侧 md5 必须纯 JS（`node:crypto` 是同步 API，桥是异步），已与原生 `MessageDigest` 交叉校验 |
 | MiniMax H3 | 提示词是**三字段结构**：`integrated_multimodal_description` / `overall_soundscape` / `non_diegetic_music`（官方 guide）；纯文本生成直接从三字段开始，用首/尾帧才加 instruction 行。时长 **4–15s**；原生 32kHz 立体声，声音必须写进提示词；**2K 不是超分**，是 768P 的 in-context regeneration。详见 `docs/style-transfer-plan.md` §3 |
-| Android 端二期（2026-11-06 真机） | 专辑批量可用（20 首/批 + `nextOffset`，界面本来就有「加载下一批」）；QQ 登录通道已通（`auth.uin` **只给账号数字**，`qm_keyst` 不出原生），**档位未用真实账号验证**；打开/预览走 `content://`（`ui.reveal` = 用系统默认应用打开，手机没有「在文件夹中显示」），`<video>` 实测 `readyState=4` |
+| Android 端二期（2026-11-06 真机） | **端上 `albumAny` 只接 网易云 / QQ（2026-11-16 核对）：酷狗的歌单与专辑在端上仍报 `unsupported`**，桌面已支持——补之前先上真机验，别只改代码；专辑批量可用（20 首/批 + `nextOffset`，界面本来就有「加载下一批」）；QQ 登录通道已通（`auth.uin` **只给账号数字**，`qm_keyst` 不出原生），**档位未用真实账号验证**；打开/预览走 `content://`（`ui.reveal` = 用系统默认应用打开，手机没有「在文件夹中显示」），`<video>` 实测 `readyState=4` |
 | B站 番剧 4K | API（含 wbi 签名、fnval/qn 共 20+ 组合实测）最高只给 `id=120`（4K 5978k）；`id=122`（8554k）**只在页面 SSR `playurlSSRData` 里**，yt-dlp 也是先读 SSR。我们从页面补这一档后 4K = 1.52 GB / 8731k（地址 `…-100198.m4s`） |
 | B站 字幕 | 必须走 **wbi 签名的 `/x/player/wbi/v2`**（`aid`+`cid`，番剧 `ep_id`）。未签名的 `/x/player/v2` 会**概率性返回别的稿件的字幕**（实测 207s 的 MV 拿到跨度 746/1606/1337s 的无关内容；3018 行跨 10109s 也见过），这就是「下载下来的字幕全是错的」。落盘前必须校验时间轴跨度 ≈ 片长（容许 max(8s, 2%)、且不能只盖前一半），并**人工轨优先于 `ai-*`** |
 | yt-dlp 的真实职责 | TS 主线里 **只服务「其它站点」**：`platformOf` 返回 `unsupported` 且开了 `allowGeneric` 才走 `engines/generic`。B站 走原生 `bilibili_api`（只有 `VDL_BILI_ENGINE=ytdlp` 才回退到 yt-dlp 版）、抖音/网易云/QQ/酷我/酷狗全部原生、直链与 m3u8 走 `sniff`。因此删组件只影响「其它站点」与 legacy Python（它的 B站/YouTube 仍靠 yt-dlp）；`doctor` 会从 ok 变 warn，不是 fail |
@@ -129,7 +129,7 @@ ffmpeg 为什么是硬前提：B站/YouTube 全是 DASH 音视频分离，yt-dlp
 │  ├─ core/          契约层：types / platform / config / http / progress / cancel / rate / naming / errors
 │  ├─ engines/       douyin / netease / qq / kuwo / kugou / bilibili(_api) / sniff(L2) / generic(yt-dlp)
 │  └─ analyze/       A1：分镜(scdet) / 抽帧 / 台词 / 客观指标（不依赖任何模型）
-├─ ts/tests/         bun test（当前 330 个）；env.ts 是能力探测（非测试文件），
+├─ ts/tests/         bun test（当前 336 个）；env.ts 是能力探测（非测试文件），
 │                    capabilities.test.ts 把 ffmpeg/Bun 版本打进输出，缺什么一眼能看到
 ├─ web/              Vue 3 界面（默认入口 /）+ vendor / assets（无 PWA：sw/manifest 已删）
 ├─ ts/skill/         TS Skill 源（SKILL.md + references），由 tools/build_skill_ts.py 组装
@@ -156,12 +156,18 @@ bun test ts/tests
 **环境准备（新机器 / 重装 / 从快照复原后）**
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\setup.ps1   # 装 Bun 1.4.4 + ffmpeg → bun install → doctor
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\setup.ps1              # 主线：Bun + ffmpeg + Python → bun install → doctor
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\setup.ps1 -WithLegacy  # 再加 venv + playwright/yt-dlp → legacy doctor
 ```
 
-脚本**不依赖 winget**（本机实测 App Installer 缺失）：直接从官方发布地址下载 zip 解到用户目录
-（Bun → `%USERPROFILE%\.bun\bin`、ffmpeg → `%LOCALAPPDATA%\Programs\ffmpeg\bin`），并把目录写进用户 PATH。
+脚本**不依赖 winget**（本机实测 App Installer 缺失）：直接从官方发布地址下载、装到用户目录
+（Bun → `%USERPROFILE%\.bun\bin`、ffmpeg → `%LOCALAPPDATA%\Programs\ffmpeg\bin`、
+Python → `%LOCALAPPDATA%\Programs\Python\Python312`），并把目录写进用户 PATH。
 装完必须**新开终端**，旧窗口不会刷新。只检查不安装加 `-SkipInstall`。
+
+两个容易踩的点（脚本已处理，别改回去）：① Windows 的 `python.exe` 可能是 Store 占位别名，
+必须真跑一次 `--version` 才算认到；② 子进程 Python 要 `PYTHONUTF8=1` / `PYTHONIOENCODING=utf-8`，
+否则 legacy doctor 在中文 Windows 上按 GBK 输出，控制台一片乱码。
 
 手工等价（有 winget 时更省事）：
 
@@ -180,7 +186,7 @@ venv\Scripts\python.exe -m pip install playwright yt-dlp   # 仅 legacy 需要
 ```bash
 bun --version                              # 1.4.x
 ffmpeg -version                            # 9.x；缺了 B站/音乐/m3u8 全废
-bun test ts/tests                          # 330 pass（缺 ffmpeg 时 2 条端到端 skip，capabilities.test.ts 会写明）
+bun test ts/tests                          # 336 pass（缺 ffmpeg 时 2 条端到端 skip，capabilities.test.ts 会写明）
 bun ts/src/cli.ts probe "<抖音或B站链接>" --json
 ```
 

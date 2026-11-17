@@ -23,7 +23,7 @@
 >
 > 迁移状态：引擎 ✅（抖音 / 网易云 / QQ 音乐 / 酷我 / 酷狗 / B站 分P·番剧 / L2 直链·m3u8）、
 > 服务 ✅（probe / jobs / SSE / files / settings / cancel / retry / 持久化）、`auth` ✅（在线校验）、
-> **Skill ✅**、**TS 测试 310 个 ✅**、**yt-dlp 可选组件 ✅（SHA256 校验）**、**设置面板 ✅**、**限速 ✅**（`--limit 2M`）、**并发 1–4 ✅**、
+> **Skill ✅**、**TS 测试 336 个 ✅**、**yt-dlp 可选组件 ✅（SHA256 校验）**、**设置面板 ✅**、**限速 ✅**（`--limit 2M`）、**并发 1–4 ✅**、
 > **B站字幕 `--subs` / 弹幕 `--danmaku` ✅**（CLI 与 Web UI 都能开）、
 > **专辑 `--album` ✅**（CLI `--offset` + `--dry-run`；Web UI 分批加载，每批 20 首）、
 > **QQ 音乐 ✅**（`auth qq` 扫码；档位由账号会员权限决定）。
@@ -45,10 +45,17 @@
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\setup.ps1
 ```
 
-它会：检查并安装 **Bun 1.4.4** → 检查并安装 **ffmpeg** → `cd ts && bun install` → 跑 `doctor` 汇总，
-缺什么装什么，装到用户目录（不需要管理员）。只检查不安装用 `-SkipInstall`。
+它会：检查并安装 **Bun 1.4.4** → **ffmpeg** → **Python 3.12**（构建 Skill 与刷新发布基线要用）
+→ `cd ts && bun install` → 跑 `doctor` 汇总，缺什么装什么，装到用户目录（不需要管理员）。
+只检查不安装用 `-SkipInstall`。
 
-脚本刻意**不依赖 winget**（Windows 上 App Installer 本身经常缺失），改为从官方发布地址下载 zip 解压。
+需要跑 **legacy 归档版**（Python + yt-dlp）时加一个开关，它会建 `venv/`、装依赖、再跑一次 legacy 的 `doctor`：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\setup.ps1 -WithLegacy
+```
+
+脚本刻意**不依赖 winget**（Windows 上 App Installer 本身经常缺失），改为从官方发布地址下载、装到用户目录。
 装完必须**新开终端**——已经开着的窗口不会刷新 PATH。
 
 装完还缺的是凭据（游客档也能下，会员档位才需要登录）：
