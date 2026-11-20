@@ -644,6 +644,10 @@
             <span v-if="analysis.frames.length"> · {{ t('seekHint') }}</span>
           </p>
           <div class="an-actions" v-if="analysis.frames.length">
+            <!-- 风格卡是纯本地汇总：不花额度，所以不需要二次确认 -->
+            <button class="btn ghost sm" :disabled="analysisBusy" @click="makeStyleCard">
+              {{ t('styleCard') }}
+            </button>
             <button class="btn ghost sm" v-if="!descConfirm" :disabled="analysisBusy" @click="descConfirm = true">
               {{ t('describeShots') }}
             </button>
@@ -663,6 +667,17 @@
               <template v-if="analysis.describe.failed"> · {{ analysis.describe.failed }} 镜失败</template>
               <template v-if="analysis.describe.tokens"> · {{ analysis.describe.tokens }} tokens</template>
             </span>
+          </div>
+          <!-- A3 风格卡：只展示量得出来的东西，不做「风格命名」 -->
+          <div class="an-card" v-if="analysis.styleCard">
+            <span>{{ analysis.styleCard.pacing.shots }} 镜 · 平均 {{ (analysis.styleCard.pacing.mean_ms / 1000).toFixed(1) }}s
+              · 每分钟 {{ analysis.styleCard.pacing.cuts_per_minute }} 次剪切</span>
+            <span>景别：{{ pairText(analysis.styleCard.shotSizes) }}</span>
+            <span>运镜：{{ pairText(analysis.styleCard.cameras) }}</span>
+            <span v-if="analysis.styleCard.audio.integrated_lufs !== null">响度：{{ analysis.styleCard.audio.integrated_lufs }} LUFS</span>
+            <span>覆盖：{{ analysis.styleCard.coverage.with_visual }}/{{ analysis.styleCard.coverage.scenes }} 镜有描述
+              · {{ analysis.styleCard.coverage.with_camera }} 镜有运镜</span>
+            <span class="mono">文件：{{ analysis.outDir }}\style-card.md</span>
           </div>
           <div class="an-frames" v-if="analysis.frames.length">
             <figure v-for="f in analysis.frames" :key="f.path">

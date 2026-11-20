@@ -207,7 +207,7 @@ describe('QQ 音乐 probe：档位呈现', () => {
     expect(missing?.reason || '').not.toContain('会员');
   });
 
-  test('T2 已登录且全档被拒：不报 need_login', async () => {
+  test('T2 已登录且全档被拒：不报 need_login，并把 104003 翻成可读原因', async () => {
     writeCredential();
     stubDetail();
     stubVkey(vkeyBody([
@@ -218,6 +218,28 @@ describe('QQ 音乐 probe：档位呈现', () => {
     ]));
 
     expect(await codeOf(() => probeQQ(MID))).toBe('filtered');
+
+    // 2026-11-20 实测：同一账号在别的曲目上能拿 128K/96K，320K/FLAC 一律 104003
+    // → 是权益问题，不是「没登录」。错误文案必须说清楚，别让人去重登。
+    try {
+      await probeQQ(MID);
+      throw new Error('应当抛错');
+    } catch (error: any) {
+      expect(error.message).toContain('104003');
+      expect(error.message).toContain('权益');
+      expect(String(error.nextAction || '')).toContain('绿钻');
+    }
+  });
+
+  test('T1b 单个档位被拒时，reason 里同时给出码与解释', async () => {
+    stubDetail();
+    stubVkey(vkeyBody([{ quality: 'M500' }, { quality: 'M800', result: 104003, purl: null }]));
+    stubHead({ M500: 3_840_000 });
+
+    const probe = await probeQQ(MID);
+    const denied = probe.formats.find((f) => f.id === 'm800');
+    expect(denied?.reason || '').toContain('104003');
+    expect(denied?.reason || '').toContain('权益');
   });
 
   test('T3 未登录且全档被拒：need_login，并给出下一步', async () => {

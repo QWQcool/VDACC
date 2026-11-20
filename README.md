@@ -23,7 +23,7 @@
 >
 > 迁移状态：引擎 ✅（抖音 / 网易云 / QQ 音乐 / 酷我 / 酷狗 / B站 分P·番剧 / L2 直链·m3u8）、
 > 服务 ✅（probe / jobs / SSE / files / settings / cancel / retry / 持久化）、`auth` ✅（在线校验）、
-> **Skill ✅**、**TS 测试 343 个 ✅**、**yt-dlp 可选组件 ✅（SHA256 校验）**、**设置面板 ✅**、**限速 ✅**（`--limit 2M`）、**并发 1–4 ✅**、
+> **Skill ✅**、**TS 测试 344 个 ✅**、**yt-dlp 可选组件 ✅（SHA256 校验）**、**设置面板 ✅**、**限速 ✅**（`--limit 2M`）、**并发 1–4 ✅**、
 > **B站字幕 `--subs` / 弹幕 `--danmaku` ✅**（CLI 与 Web UI 都能开）、
 > **专辑 `--album` ✅**（CLI `--offset` + `--dry-run`；Web UI 分批加载，每批 20 首）、
 > **QQ 音乐 ✅**（`auth qq` 扫码；档位由账号会员权限决定）。
@@ -31,7 +31,7 @@
 > 首次运行 `auth` 前需要装依赖：`cd ts && bun install`（只装 `playwright-core`，复用系统 Edge）。
 >
 > TS 版 Skill：`python tools/build_skill_ts.py --zip` → `dist/video-acquire-ts.zip`
-> （3.6.0 实测 zip 52.2MB，内含 110.0MB 的 `vdl.exe`，不需要 Python/Node；包内有 `manifest.json` 与 `SHA256SUMS`）。
+> （3.7.0 实测 zip 52.2MB，内含 110.0MB 的 `vdl.exe`，不需要 Python/Node；包内有 `manifest.json` 与 `SHA256SUMS`）。
 >
 > 前端：`/` 是 **Vue 3** 界面，已按 **infOS 风格 V2** 重做（侧栏 + 双栏、浅槽画质、开关、Slide-over 设置）；
 > 解析/多选/分P批量/专辑/下载/SSE/主题/中英切换/下载前预览都在。旧版原生界面已删除，Vue 是唯一入口。
@@ -66,10 +66,12 @@ bun ts/src/cli.ts auth netease     # 网易云：黑胶无损
 bun ts/src/cli.ts auth qq          # QQ 音乐：会员档位
 ```
 
-## 当前修复与验收（3.6.0，2026-11-16）
+## 当前修复与验收（3.7.0，2026-11-20）
 
-3.6.0 这一轮只做发布收口与环境可复现：补 `scripts/setup.ps1`、把版本号四处对齐、
-刷新发布体积基线，并把 3.5.0 之后累积的功能统一写进 `docs/CHANGELOG.md`。
+3.7.0 这一轮做的是「登录之后真实能拿到什么」：三站会员能力重核（B站 4K/Hi-Res、网易云无损、
+QQ 128K 与 `104003` 语义）、B站合集分页修复、风格卡进界面、CLI 参数告警、酷狗批量文件名、
+Android 端补酷狗列表并恢复构建链（APK 1.05MB，已在雷电模拟器装上并启动）。
+上一版 3.6.0 是发布收口与环境可复现（`scripts/setup.ps1`、版本四处对齐、体积基线）。
 上一轮（2026-10-26）修的是同源与文件访问边界、设置/历史假保存、Skill 未支持平台误路由、
 解析与下载串状态、封面开关和断线恢复。
 后续开发见 [Plan.md §2.6](Plan.md) 与 [交互详情图](docs/design/development-roadmap-2026-10-25.html)。

@@ -341,7 +341,7 @@ const server = Bun.serve({
     if (path === '/api/health') {
       return json({
         // 与根 package.json / ts/package.json 保持一致（server 要能单独编译成 exe，不读文件）
-        ok: true, version: '3.6.0', schema: 2, outDir: OUT,
+        ok: true, version: '3.7.0', schema: 2, outDir: OUT,
         jobs: order.length, engine: 'ts',
         theme: (loadConfig().theme || 'light'),
         limitRate: currentLimitBytesPerSec(),
@@ -736,6 +736,8 @@ const server = Bun.serve({
           // A2 要花 API 额度：必须显式传 describe:true，且最多 100 镜
           describe: body.describe === true,
           pairFrames: body.pairFrames === true,
+          // A3 风格卡：纯本地汇总，不花额度，但要显式要（会多算一遍并落两个文件）
+          styleCard: body.styleCard === true,
           audio: body.audio !== false,
           ...(Number(body.maxDescribe) > 0 ? { maxDescribe: Math.min(100, Math.round(Number(body.maxDescribe))) } : {}),
         });

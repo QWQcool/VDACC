@@ -1,6 +1,3 @@
-import { writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-
 import { getDouyin, probeDouyin } from './engines/douyin';
 import { MAX_ALBUM_TRACKS, planAlbum } from './core/album';
 import {
@@ -30,6 +27,30 @@ const flag = (name: string, def: string | null = null) => {
   return i >= 0 && argv[i + 1] && !argv[i + 1].startsWith('-') ? argv[i + 1] : def;
 };
 const has = (name: string) => argv.includes(name);
+
+/**
+ * 已知参数清单。**新增参数必须加到这里**，否则会被当成拼错告警——这正是目的：
+ * 2026-11-17 实测 `analyze x --out dir`（正确写法是 `-o`）被静默忽略，产物跑去了默认目录，
+ * 用户以为写对了，白等一场。
+ */
+const KNOWN_FLAGS = new Set([
+  '--json', '--limit', '--album', '--playlist', '--offset', '--dry-run', '--format', '--cover',
+  '--subs', '--danmaku', '--scenes-only', '--max-frames', '--threshold', '--describe',
+  '--max-describe', '--visuals', '--pair-frames', '--style-card', '--no-audio',
+  '--status', '--offline', '--clear', '--renew', '--qr', '--timeout',
+  '--help', '-h', '-o',
+]);
+/** 常见手误 → 正确写法。只放**确定**的映射，不猜。 */
+const FLAG_TYPOS: Record<string, string> = {
+  '--out': '-o', '--output': '-o', '--dir': '-o',
+  '--max-frame': '--max-frames', '--subtitle': '--subs', '--describe-shots': '--describe',
+};
+
+for (const arg of argv) {
+  if (!arg.startsWith('-') || arg === '-' || KNOWN_FLAGS.has(arg)) continue;
+  const fix = FLAG_TYPOS[arg];
+  console.error(`警告：未识别的参数 ${arg}${fix ? `（是不是 ${fix}？）` : ''}——它不会生效`);
+}
 
 async function probe(url: string): Promise<ProbeResult> {
   const platform = platformOf(url);
@@ -212,15 +233,9 @@ if (cmd === 'auth') {
         maxDescribe: flag('--max-describe') ? Number(flag('--max-describe')) : undefined,
         visuals: flag('--visuals') || undefined,
         pairFrames: has('--pair-frames'),
+        styleCard: has('--style-card'),
         audio: !has('--no-audio'),
       });
-
-      if (has('--style-card')) {
-        const { buildStyleCard, renderStyleCardMarkdown } = await import('./analyze/stylecard');
-        const card = buildStyleCard(result);
-        writeFileSync(join(result.outDir, 'style-card.json'), `${JSON.stringify(card, null, 2)}\n`, 'utf8');
-        writeFileSync(join(result.outDir, 'style-card.md'), renderStyleCardMarkdown(card), 'utf8');
-      }
       if (has('--json')) {
         console.log(JSON.stringify(result, null, 2));
         process.exit(0);

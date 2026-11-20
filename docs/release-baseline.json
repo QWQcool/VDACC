@@ -1,9 +1,9 @@
 {
   "note": "体积基线；完整性由 dist/video-acquire-ts/manifest.json + SHA256SUMS 负责",
-  "version": "3.6.0",
+  "version": "3.7.0",
   "fileCount": 3,
   "totalBytes": 115328011,
-  "zipBytes": 54746914,
+  "zipBytes": 54746932,
   "files": {
     "references/engines.md": 1221,
     "SKILL.md": 3398,

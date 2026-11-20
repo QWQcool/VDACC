@@ -227,6 +227,24 @@ async function headBytes(url: string): Promise<number> {
   }
 }
 
+/**
+ * 已知 vkey `result` 码的**实测**含义（不猜平台没公开的东西）。
+ *
+ * `104003`：2026-11-20 用真实登录账号（无绿钻）实测——
+ * - 同一账号在部分曲目上能拿到 128K/96K（`m500`/`c400`），说明 cookie 确实生效了；
+ * - 而 320K/FLAC 一律回 `104003`；
+ * - VIP-only 曲目则四个档位全回 `104003`。
+ * 所以它读作「当前账号对该曲没有该档位权益」，既不是网络错误，也不是「没登录」。
+ */
+const RESULT_HINTS: Record<number, string> = {
+  104003: '当前账号无此档位权益（320K/FLAC 需绿钻，或该曲仅对付费用户开放）',
+};
+
+function resultHint(code: number): string {
+  const hint = RESULT_HINTS[code];
+  return hint ? `：${hint}` : '';
+}
+
 async function probeQQImpl(input: string): Promise<ProbeResult> {
   const mid = parseSongmid(input);
   if (!mid) throw new VdlError('bad_input', `识别不出 QQ 音乐 songmid: ${input}`);
@@ -255,7 +273,7 @@ async function probeQQImpl(input: string): Promise<ProbeResult> {
       const reason = !item
         ? '接口没有返回这个档位'
         : item.result !== 0
-          ? `接口未放行（result=${item.result}）`
+          ? `接口未放行（result=${item.result}${resultHint(Number(item.result))}）`
           : '接口没有给出播放地址（purl 为空）';
       formats.push(format({
         id, label: quality.label, ext: quality.ext, acodec: quality.ext,
@@ -290,8 +308,11 @@ async function probeQQImpl(input: string): Promise<ProbeResult> {
     const codes = [...new Set(items.map((x) => Number(x.result || 0)).filter((x) => x !== 0))];
     const suffix = codes.length ? `（result=${codes.join('/')}）` : '';
     if (cred) {
-      throw new VdlError('filtered', `所有档位都被接口拒绝${suffix}`,
-        '确认账号是否具备该曲权益；若已开通仍失败，请把上面的代码记下来反馈');
+      // 有凭据仍全档被拒 = 权益问题（104003）或该曲整曲不可取，不是「没登录」
+      const hints = [...new Set(codes.map((c) => resultHint(c)).filter(Boolean))].join('');
+      throw new VdlError('filtered', `所有档位都被接口拒绝${suffix}${hints}`,
+        '这条曲目在当前账号权益下整曲不可取；换一首或确认账号是否开通绿钻。'
+        + '这不是 cookie 没带上——同一账号在其它曲目上能拿到 128K/96K');
     }
     throw new VdlError('need_login', `没有匿名可用的播放地址${suffix}`,
       '登录后重试：bun ts/src/cli.ts auth qq；若登录后仍失败，请记录上面的代码反馈');

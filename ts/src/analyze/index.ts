@@ -45,6 +45,11 @@ export interface AnalyzeOptions {
    */
   pairFrames?: boolean;
   /**
+   * A3 风格卡：把「量得出来的东西」汇总成卡（节奏/景别/运镜/亮度/响度/词频/覆盖度）。
+   * 纯本地计算，不花额度；产物是 `style-card.json` + `style-card.md`，同时挂到返回值的 `styleCard`。
+   */
+  styleCard?: boolean;
+  /**
    * 外部提供的语义描述（JSON 文件）。格式三选一：
    *   `{ "1": {shotSize…}, "2": … }` / `[{ "index": 1, … }]` / `{ "scenes": [{ "index": 1, "visual": {…} }] }`
    * 用途：让 Agent（或人）逐帧看完再写进来，不花 API 额度，也不破坏 `result.json` 的契约。
@@ -90,6 +95,8 @@ export interface AnalysisResult {
   describe?: DescribeInfo;
   /** 声音客观量；`audio:false` 或分析失败时不存在 */
   audio?: AudioSummary;
+  /** A3 风格卡；只有显式要（`--style-card` / `styleCard:true`）才有，同时落盘 style-card.{json,md} */
+  styleCard?: import('./stylecard').StyleCard;
   warnings: string[];
 }
 
@@ -444,6 +451,15 @@ export async function analyzeFile(file: string, options: AnalyzeOptions = {}): P
     ...(describeInfo ? { describe: describeInfo } : {}),
     warnings,
   };
+
+  // A3 风格卡：纯本地汇总（不花额度），但**必须显式要**——它会把整份结果再算一遍，
+  // 默认不该出现在每次分析里。产物与 result.json 同级，方便用户直接拖走。
+  if (options.styleCard) {
+    const { buildStyleCard, renderStyleCardMarkdown } = await import('./stylecard');
+    result.styleCard = buildStyleCard(result);
+    writeFileSync(join(outDir, 'style-card.json'), `${JSON.stringify(result.styleCard, null, 2)}\n`, 'utf8');
+    writeFileSync(join(outDir, 'style-card.md'), renderStyleCardMarkdown(result.styleCard), 'utf8');
+  }
 
   writeFileSync(join(outDir, 'result.json'), `${JSON.stringify(result, null, 2)}\n`, 'utf8');
   return result;

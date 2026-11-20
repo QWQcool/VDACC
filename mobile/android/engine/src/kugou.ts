@@ -12,6 +12,9 @@ import { request } from '../../../../ts/src/core/http';
 import { VdlError } from '../../../../ts/src/core/errors';
 import { safeName } from '../../../../ts/src/core/naming';
 import { format, type Format, type ProbeResult } from '../../../../ts/src/core/types';
+import type { AlbumInfo, AlbumTrack } from '../../../../ts/src/core/album';
+import { bareNumericId, emptyCollection } from '../../../../ts/src/core/collection';
+import { collectPages } from '../../../../ts/src/core/paging';
 import { md5Hex } from '../shims/md5';
 import {
   assertNotTruncated, downloadToStaging, type MusicHooks, probeAudioUrl, publishStaged,
@@ -266,5 +269,146 @@ export async function downloadKugou(
     resumeFrom,
     ms: Date.now() - started,
     warnings,
+  };
+}
+
+// —— 列表入口（歌单 / 专辑）——
+// 桌面端 2026-11-11 / 11-16 已实测；端上同一批公开接口，无需登录。
+// 端上之前只接 网易云/QQ，酷狗会报 unsupported，这是补齐的那一块。
+
+const PLAYLIST_PAGE = 100;
+const SPECIAL_INFO = 'https://mobiles.kugou.com/api/v3/special/info';
+const SPECIAL_SONG = 'https://mobiles.kugou.com/api/v3/special/song';
+const ALBUM_INFO = 'https://mobiles.kugou.com/api/v3/album/info';
+const ALBUM_SONG = 'https://mobiles.kugou.com/api/v3/album/song';
+
+/** 酷狗把「歌手 - 歌名」塞在 `filename` 里（没有独立字段）。 */
+function splitFilename(filename: string): { title: string; author: string } {
+  const at = filename.lastIndexOf(' - ');
+  if (at <= 0) return { title: filename.trim(), author: '' };
+  return { title: filename.slice(at + 3).trim(), author: filename.slice(0, at).trim() };
+}
+
+function toTracks(raws: unknown[]): AlbumTrack[] {
+  return (raws as any[]).map((song) => {
+    const hash = String(song?.hash || '').toLowerCase();
+    const { title, author } = splitFilename(String(song?.filename || ''));
+    return {
+      id: hash,
+      title,
+      author,
+      url: SONG_PAGE + hash,
+      duration_ms: Number(song?.duration || 0) ? Number(song.duration) * 1000 : null,
+    };
+  }).filter((t: AlbumTrack) => t.id);
+}
+
+function coverUrl(imgurl: string): string {
+  return String(imgurl || '').replace('{size}', '240').replace(/^http:/i, 'https:');
+}
+
+/** 歌单：`/special/single/<id>.html`、`/plist/list/<id>`、`?specialid=`、裸数字。 */
+export function parsePlaylistId(input: string): string {
+  const bare = bareNumericId(input);
+  if (bare) return bare;
+  let u: URL;
+  try {
+    u = new URL((input || '').trim());
+  } catch {
+    return '';
+  }
+  if (!/(^|\.)kugou\.com$/i.test(u.hostname)) return '';
+  if (/\/album\//i.test(u.pathname)) return '';
+  const fromQuery = u.searchParams.get('specialid') || u.searchParams.get('plistid') || '';
+  if (/^\d+$/.test(fromQuery)) return fromQuery;
+  const m = /\/(?:special\/single|plist\/list)\/(\d+)/i.exec(u.pathname);
+  return m ? m[1] : '';
+}
+
+export async function playlistTracks(input: string): Promise<AlbumInfo> {
+  const id = parsePlaylistId(input);
+  if (!id) throw new VdlError('bad_input', `识别不出酷狗歌单 ID: ${input}`);
+
+  const meta = await json(`${SPECIAL_INFO}?specialid=${id}&format=json`);
+  const info = meta?.data || {};
+  const collected = await collectPages({
+    pageSize: PLAYLIST_PAGE,
+    keyOf: (song: any) => String(song?.hash || '').toLowerCase(),
+    fetchPage: async (cursor, size) => {
+      const page = await json(
+        `${SPECIAL_SONG}?specialid=${id}&page=${Math.floor(cursor / size) + 1}&pagesize=${size}&format=json`,
+      );
+      return { raws: Array.isArray(page?.data?.info) ? page.data.info : [], total: page?.data?.total };
+    },
+  });
+
+  const tracks = toTracks(collected.raws);
+  if (!tracks.length) {
+    const declared = Number(info.songcount || 0);
+    emptyCollection({
+      id,
+      declared,
+      blockedHint: `接口声明 ${declared} 首但没有给出曲目：可能整单下架或地区限制`,
+    });
+  }
+  return {
+    id, kind: 'playlist',
+    title: String(info.specialname || `酷狗歌单 ${id}`),
+    cover: coverUrl(info.imgurl),
+    tracks,
+    warnings: collected.warnings,
+  };
+}
+
+/** 专辑：`/yy/album/single/<id>.html`、`?albumid=`、裸数字（与歌单 id 不在一命名空间）。 */
+export function parseAlbumId(input: string): string {
+  const bare = bareNumericId(input);
+  if (bare) return bare;
+  let u: URL;
+  try {
+    u = new URL((input || '').trim());
+  } catch {
+    return '';
+  }
+  if (!/(^|\.)kugou\.com$/i.test(u.hostname)) return '';
+  if (/\/(?:special|plist)\//i.test(u.pathname)) return '';
+  const fromQuery = u.searchParams.get('albumid') || '';
+  if (/^\d+$/.test(fromQuery)) return fromQuery;
+  const m = /\/(?:yy\/)?album\/(?:single\/)?(\d+)(?:\.html)?/i.exec(u.pathname);
+  return m ? m[1] : '';
+}
+
+export async function albumTracks(input: string): Promise<AlbumInfo> {
+  const id = parseAlbumId(input);
+  if (!id) throw new VdlError('bad_input', `识别不出酷狗专辑 ID（歌单请用歌单入口）: ${input}`);
+
+  const meta = await json(`${ALBUM_INFO}?albumid=${id}&format=json`);
+  const info = meta?.data || {};
+  const collected = await collectPages({
+    pageSize: PLAYLIST_PAGE,
+    keyOf: (song: any) => String(song?.hash || '').toLowerCase(),
+    fetchPage: async (cursor, size) => {
+      const page = await json(
+        `${ALBUM_SONG}?albumid=${id}&page=${Math.floor(cursor / size) + 1}&pagesize=${size}&format=json`,
+      );
+      return { raws: Array.isArray(page?.data?.info) ? page.data.info : [], total: page?.data?.total };
+    },
+  });
+
+  const tracks = toTracks(collected.raws);
+  if (!tracks.length) {
+    emptyCollection({
+      id, label: '专辑', declared: collected.declared,
+      blockedHint: `接口声明 ${collected.declared} 首但没有给出曲目：可能整张下架或地区限制`,
+    });
+  }
+  const title = String(info.albumname || '') || `酷狗专辑 ${id}`;
+  const singer = String(info.singername || '').trim();
+  return {
+    id, kind: 'album',
+    title: singer ? `${title}（${singer}）` : title,
+    cover: coverUrl(info.imgurl),
+    tracks,
+    warnings: collected.warnings,
   };
 }

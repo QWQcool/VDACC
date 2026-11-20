@@ -553,6 +553,13 @@
   font-size: 11px; color: var(--text-light); cursor: pointer;
 }
 .an-check input { margin: 0; }
+/* 风格卡摘要：独立一行、与时间轴对齐，纯文字不抢视觉 */
+.an-card {
+  display: flex; flex-wrap: wrap; gap: 6px 14px;
+  margin: 0 0 10px; padding: 8px 10px;
+  border-radius: 8px; background: var(--hover, rgba(127, 127, 127, .08));
+  font-size: 11px; color: var(--text-light);
+}
 /* 语义描述独占一行、缩进对齐镜号，避免把时间轴挤散 */
 .an-visual { flex-basis: 100%; padding-left: 3.2em; color: var(--text); }
 .an-v-tag {

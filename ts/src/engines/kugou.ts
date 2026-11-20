@@ -448,8 +448,14 @@ async function getKugouImpl(input: string, formatId: string | null, outDir: stri
   const info = infoState().lastInfo!;
 
   mkdirSync(outDir, { recursive: true });
-  const dest = reserveDest(outDir,
-    `${probe.media!.id.slice(0, 8)}_${safeName(info.title || probe.media!.id)}_${safeName(fmt.label, 16, fmt.id)}.${cached.ext}`);
+  // 文件名：有歌名就用「歌手 - 歌名」，没有才退回 hash 前 8 位。
+  // 旧实现无条件加 hash 前缀，批量落成 `05b4429f_你把我灌醉_码率未标注.mp3`——
+  // 歌名歌手其实都拿得到，前缀只是噪音；码率未知时也不该写「码率未标注」，用档位 id 更短。
+  const nameBase = info.title
+    ? (info.artist ? `${info.artist} - ${info.title}` : info.title)
+    : probe.media!.id.slice(0, 8);
+  const qualityTag = fmt.label === '码率未标注' ? fmt.id : fmt.label;
+  const dest = reserveDest(outDir, `${safeName(nameBase)}_${safeName(qualityTag, 16, fmt.id)}.${cached.ext}`);
   try {
   if (existsSync(dest)) {
     return { path: dest, bytes: statSync(dest).size, skipped: true, warnings: [] };

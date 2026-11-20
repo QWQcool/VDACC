@@ -978,6 +978,20 @@ createApp({
       }
     }
 
+    /** 风格卡的 `[名称, 次数]` 数组 → 一行文字；空数组给「—」，别留空白让人猜。 */
+    function pairText(pairs) {
+      const list = Array.isArray(pairs) ? pairs : [];
+      return list.length ? list.map(([name, n]) => `${name}×${n}`).join(' / ') : '—';
+    }
+
+    /** A3：风格卡（节奏/景别/运镜/亮度/响度/覆盖度）。纯本地汇总，不花额度。 */
+    async function makeStyleCard() {
+      const current = analysis.value;
+      if (!current || analysisBusy.value) return;
+      const result = await runAnalyze(current.source.path, { styleCard: true });
+      if (result) analysis.value = result;
+    }
+
     function closeAnalysis() {
       analysis.value = null;
       descConfirm.value = false;
@@ -1096,7 +1110,7 @@ createApp({
       audioFormat, cancel, retry,
       openSettings, saveSettings, installComponent, previewSelected, previewJob, closePreview,
       analysis, analysisBusy, analysisName, analyzable, analyzeJob, closeAnalysis,
-      descConfirm, describeShots, descPairFrames,
+      descConfirm, describeShots, descPairFrames, makeStyleCard, pairText,
       seekToFrame, seekToScene, applySeek, videoEl,
     };
   },

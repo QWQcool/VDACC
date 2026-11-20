@@ -418,6 +418,15 @@ describe('端到端：真跑 ffmpeg（没装就跳过）', () => {
       expect(result.audio!.points.length).toBeGreaterThan(0);
       expect(result.scenes[0].db).toBeTypeOf('number');
 
+      // A3 风格卡：显式要才生成，两个文件都要落在 outDir，卡片数字要与分镜对得上
+      const cardOut = join(dir, 'card');
+      const withCard = await analyzeFile(clip, { outDir: cardOut, styleCard: true });
+      expect(withCard.styleCard?.pacing.shots).toBe(withCard.scenes.length);
+      expect(existsSync(join(cardOut, 'style-card.json'))).toBe(true);
+      expect(existsSync(join(cardOut, 'style-card.md'))).toBe(true);
+      // 没要的时候不能凭空出现（否则 result.json 会带一份没人要的卡）
+      expect(result.styleCard).toBeUndefined();
+
       // 同一个成品分析第二次：帧文件已存在，ffmpeg 必须覆盖而不是卡在「要覆盖吗」，
       // 否则亮度全变 null、图片还是上一次的（2026-11-09 浏览器验收踩到的真 bug）
       const again = await analyzeFile(clip, { outDir: out });

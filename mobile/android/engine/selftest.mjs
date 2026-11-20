@@ -149,6 +149,39 @@ function fakeBridge(method, payload) {
             ar: [{ name: id % 2 ? '歌手B' : '歌手A' }],
           })),
         };
+      } else if (/\/special\/info/.test(url)) {
+        body = {
+          data: {
+            specialname: '酷狗自检歌单', songcount: 25,
+            imgurl: 'http://imge.kugou.com/soft/collection/{size}/cover.jpg',
+          },
+        };
+      } else if (/\/special\/song/.test(url)) {
+        const page = Number(/[?&]page=(\d+)/.exec(url)?.[1] || 1);
+        const size = Number(/[?&]pagesize=(\d+)/.exec(url)?.[1] || 100);
+        const all = Array.from({ length: 25 }, (_, i) => ({
+          hash: String(i + 1).padStart(32, 'a'),
+          filename: `歌手${i + 1} - 酷狗歌 ${i + 1}`,
+          duration: 200 + i,
+        }));
+        body = { data: { total: 25, info: all.slice((page - 1) * size, page * size) } };
+      } else if (/\/album\/info/.test(url)) {
+        // 真实接口的 songcount 恒为 0（2026-11-16 实测），端上也必须按曲目接口的总数为准
+        body = {
+          data: {
+            albumname: '酷狗自检专辑', singername: '某歌手', songcount: 0,
+            imgurl: 'http://imge.kugou.com/stdmusic/{size}/album.jpg',
+          },
+        };
+      } else if (/\/album\/song/.test(url)) {
+        const page = Number(/[?&]page=(\d+)/.exec(url)?.[1] || 1);
+        const size = Number(/[?&]pagesize=(\d+)/.exec(url)?.[1] || 100);
+        const all = Array.from({ length: 12 }, (_, i) => ({
+          hash: String(i + 1).padStart(32, 'b'),
+          filename: `某歌手 - 专辑曲 ${i + 1}`,
+          duration: 180 + i,
+        }));
+        body = { data: { total: 12, info: all.slice((page - 1) * size, page * size) } };
       } else if (/musicu\.fcg/.test(url)) {
         // QQ 歌单：按 body 里的 song_begin 分页（与真实请求同一个字段）
         const rawBody = Buffer.from(payload.bodyBase64 || '', 'base64').toString('utf8');
@@ -317,6 +350,10 @@ const plNetease = await engine.albumAny('https://music.163.com/playlist?id=7777'
 const plNeteaseSecond = await engine.albumAny('https://music.163.com/playlist?id=7777', plNetease.nextOffset);
 const plQQ = await engine.albumAny('https://y.qq.com/n/ryqq/playlist/8888');
 const plByKind = await engine.albumAny('9999', 0, 'playlist');
+// 酷狗：2026-11-20 补齐（端上以前只接 网易云/QQ）。歌单与专辑是两套 id，靠路径分派。
+const plKugou = await engine.albumAny('https://www.kugou.com/yy/special/single/7280926.html');
+const plKugouSecond = await engine.albumAny('https://www.kugou.com/yy/special/single/7280926.html', plKugou.nextOffset);
+const alKugou = await engine.albumAny('https://www.kugou.com/yy/album/single/958909.html');
 
 const playlistChecks = [
   ['网易云歌单 kind=playlist', plNetease.album.kind, 'playlist'],
@@ -331,6 +368,15 @@ const playlistChecks = [
   ['QQ 歌单曲目 url 指向 songDetail 页', plQQ.tracks[0].url,
     'https://y.qq.com/n/ryqq/songDetail/qqmid000000000'],
   ['裸数字 + kind=playlist 走歌单', plByKind.album.kind, 'playlist'],
+  ['酷狗歌单 kind=playlist', plKugou.album.kind, 'playlist'],
+  ['酷狗歌单标题正确', plKugou.album.title, '酷狗自检歌单'],
+  ['酷狗歌单首批 20 首', plKugou.tracks.length, 20],
+  // filename「歌手 - 歌名」要被拆开，且 hash 统一小写、url 用 song 页
+  ['酷狗歌单拆分歌手与歌名', [plKugou.tracks[0].author, plKugou.tracks[0].title], ['歌手1', '酷狗歌 1']],
+  ['酷狗歌单余 5 首', plKugouSecond.tracks.length, 5],
+  ['酷狗专辑 kind=album', alKugou.album.kind, 'album'],
+  ['酷狗专辑标题带歌手', alKugou.album.title, '酷狗自检专辑（某歌手）'],
+  ['酷狗专辑曲目数（songcount=0 时以曲目接口为准）', alKugou.album.total, 12],
 ];
 
 console.log('[selftest] 歌单（假 http）');

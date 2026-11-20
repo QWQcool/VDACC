@@ -35,7 +35,10 @@ import {
   downloadBilibili, foldDash, parseContentRangeTotal, parseTarget, probeBilibili, srtTime, toSrt,
 } from './bilibili';
 import { downloadKuwo, probeKuwo, parseRid, toLrc } from './kuwo';
-import { downloadKugou, probeKugou, parseHash } from './kugou';
+import {
+  albumTracks as kugouAlbumTracks, downloadKugou, parseHash, parsePlaylistId as parseKugouPlaylistId,
+  playlistTracks as kugouPlaylistTracks, probeKugou,
+} from './kugou';
 import {
   albumTracks as qqAlbumTracks, playlistTracks as qqPlaylistTracks,
   downloadQQ, probeQQ, parseSongmid,
@@ -650,16 +653,25 @@ export async function probeAny(text: string) {
 export async function albumAny(text: string, offset = 0, kind?: string) {
   const target = firstUrl(text) || (text || '').trim();
   const platform = platformOf(target);
-  if (platform !== 'netease' && platform !== 'qq') {
-    throw codedError('unsupported', `专辑 / 歌单只支持 网易云 / QQ 音乐（识别为 ${platform}）`);
+  if (platform !== 'netease' && platform !== 'qq' && platform !== 'kugou') {
+    throw codedError('unsupported', `专辑 / 歌单只支持 网易云 / QQ 音乐 / 酷狗（识别为 ${platform}）`);
   }
-  // 两家的歌单链接形状不同；显式 kind 优先，其次看路径（与桌面 /api/album 同一口径）
+  // 三家的歌单链接形状不同；显式 kind 优先，其次看路径（与桌面 /api/album 同一口径）。
+  // 酷狗还要注意：`/album/single/<id>` 是专辑，`/special/single`、`/plist/list` 才是歌单。
   const wantsPlaylist = kind === 'playlist'
     || (platform === 'netease' && /\/playlist\b/i.test(target))
-    || (platform === 'qq' && (/\/playlist\//i.test(target) || /taoge\.html/i.test(target)));
+    || (platform === 'qq' && (/\/playlist\//i.test(target) || /taoge\.html/i.test(target)))
+    || (platform === 'kugou' && (
+      /\/special\/single\//i.test(target)
+      || /\/plist\/list\//i.test(target)
+      // 裸数字：能当歌单 id 解析就按歌单（kind='album' 时仍然走专辑）
+      || (parseKugouPlaylistId(target) !== '' && !/\/album\//i.test(target))
+    ));
   const info = platform === 'netease'
     ? (wantsPlaylist ? await neteasePlaylistTracks(target) : await neteaseAlbumTracks(target))
-    : (wantsPlaylist ? await qqPlaylistTracks(target) : await qqAlbumTracks(target));
+    : platform === 'kugou'
+      ? (wantsPlaylist ? await kugouPlaylistTracks(target) : await kugouAlbumTracks(target))
+      : (wantsPlaylist ? await qqPlaylistTracks(target) : await qqAlbumTracks(target));
   const plan = planAlbum(info.tracks, offset);
   return {
     album: {

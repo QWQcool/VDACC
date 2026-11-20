@@ -1,13 +1,14 @@
 name: CI
 
 on:
-  # 2026-10-22：暂停自动 CI。原因：账号 Free 计划私有仓库 Actions 配额已用 90%
-  #（1,813/2,000 分钟），且本仓库 10 月全部 49 次运行均失败（卡在 Skill 构建校验），
-  # 自动触发既烧额度又没有可信信号。
-  # 改为按需手动触发：
-  #   网页 → Actions → CI → Run workflow → 选择分支 main
-  #   CLI  → gh workflow run CI --repo QWQcool/VDACC --ref main
-  # 恢复自动需把 push / pull_request 加回来，见文末「恢复自动」。
+  # 2026-11-20：恢复 push / PR 自动触发（用户确认配额可以）。只跑 `bun test` 与 Skill 构建校验，
+  # 不跑发行构建——一次约 2–3 分钟，比 10 月那批卡在构建上的运行便宜得多。
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # 仍保留手动触发（排查用）：
+  #   gh workflow run CI --repo QWQcool/VDACC --ref main
   workflow_dispatch:
 
 jobs:
@@ -30,4 +31,6 @@ jobs:
 
 # 2026-10-25：旧运行 39744319053 的 TS 构建失败已定位为 Windows cp1252
 # 无法输出中文日志。build_skill_ts.py 统一 UTF-8；固定 Bun 以复现本地验收。
-# 继续手动触发以控制配额；自动 CI、Release 与 legacy 构建不在本次变更范围。
+# 2026-11-20：恢复 push / pull_request 自动触发（配额已确认可用）。
+# 故意不在这里构建 exe / zip：发行构建仍走本地 `python tools/build_skill_ts.py --zip` + 体积基线，
+# CI 只做「测试 + Skill 构建校验」这一层，分钟数最小。
