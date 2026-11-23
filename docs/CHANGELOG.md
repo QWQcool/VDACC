@@ -3,7 +3,18 @@
 > 只记「用户可感知的变化」与「验证结论」。设计与取舍见 `Plan.md`。
 > 每个版本的 GitHub Release 从这里摘取。
 
-## 未发布（2026-11-23）
+## 3.7.1（2026-11-23）
+
+- **给 Agent 的入口换成 MCP，SKILL.md 删了**：`ts/src/mcp.ts` 是 stdio MCP server，四个工具
+  `probe` / `get` / `album` / `jobs`；Claude / Codex 配 `mcpServers` 即可，DSH 走**官方**
+  `dsh-mcp-client`（不默认启用，需在 `cordis.patch.yml` 加一条；装插件时别用默认 dist-tag，
+  会拿到旧版 `0.0.1-rc.1`）。它默认自己拉起本地后端，也可用 `VDACC_BASE_URL` / `VDACC_TOKEN`
+  复用已开实例。
+
+- **为什么删 Skill**：那份 3.4 KB 的 SKILL.md 把 QQ / 酷我 / 酷狗 全写成「不支持」，还写着
+  「不含 yt-dlp 兜底」（实际有）——外部 Agent 照它办事会主动拒绝一半平台。
+  文档没有 schema、没人验证，错一次就长期错；MCP 的工具描述与 inputSchema 是代码的一部分。
+  独立包因此只剩 `vdl.exe` + 脚本生成的 `README.txt`。
 
 - **给 Agent 的入口换成 MCP，SKILL.md 删了**：`ts/src/mcp.ts` 是一个 stdio MCP server，
   四个工具 `probe` / `get` / `album` / `jobs`，Claude / Codex 直接配 `mcpServers` 就能用；

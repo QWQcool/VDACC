@@ -1,6 +1,6 @@
 # Plan.md —— 计划、架构与决策（唯一计划来源）
 
-> 状态：**3.6.0 已定版**（2026-11-16；3.5.0 之后 32 个提交统一收口）。后端主线为 TypeScript（Bun），
+> 状态：**3.7.1 已定版**（2026-11-23；Agent 入口改为 MCP、独立包去掉 SKILL.md）。后端主线为 TypeScript（Bun），
 > Python 冻结并归档在 `legacy/python/`。硬性约束见 `AGENTS.md`，使用说明见 `README.md`，
 > 逐版本历史见 `docs/CHANGELOG.md`，完成盘点见 §2.2，后续执行计划见 §2.6。
 > 已收口的长章节按 `docs/archive/` 归档（见 §1 文档地图），主计划只留未完成项与决策。

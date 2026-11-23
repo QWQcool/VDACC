@@ -31,7 +31,7 @@
 > 首次运行 `auth` 前需要装依赖：`cd ts && bun install`（只装 `playwright-core`，复用系统 Edge）。
 >
 > TS 版独立包：`python tools/build_skill_ts.py --zip` → `dist/video-acquire-ts.zip`
-> （3.7.0 实测 zip 52.2MB，内含 110.0MB 的 `vdl.exe`，不需要 Python/Node；包内有 `manifest.json` 与 `SHA256SUMS`）。
+> （3.7.1 实测 zip 52.2MB，内含 110.0MB 的 `vdl.exe` + `README.txt`，不需要 Python/Node；包内有 `manifest.json` 与 `SHA256SUMS`）。
 >
 > 前端：`/` 是 **Vue 3** 界面，已按 **infOS 风格 V2** 重做（侧栏 + 双栏、浅槽画质、开关、Slide-over 设置）；
 > 解析/多选/分P批量/专辑/下载/SSE/主题/中英切换/下载前预览都在。旧版原生界面已删除，Vue 是唯一入口。
@@ -66,12 +66,13 @@ bun ts/src/cli.ts auth netease     # 网易云：黑胶无损
 bun ts/src/cli.ts auth qq          # QQ 音乐：会员档位
 ```
 
-## 当前修复与验收（3.7.0，2026-11-20）
+## 当前修复与验收（3.7.1，2026-11-23）
 
-3.7.0 这一轮做的是「登录之后真实能拿到什么」：三站会员能力重核（B站 4K/Hi-Res、网易云无损、
-QQ 128K 与 `104003` 语义）、B站合集分页修复、风格卡进界面、CLI 参数告警、酷狗批量文件名、
-Android 端补酷狗列表并恢复构建链（APK 1.05MB，已在雷电模拟器装上并启动）。
-上一版 3.6.0 是发布收口与环境可复现（`scripts/setup.ps1`、版本四处对齐、体积基线）。
+3.7.1 做的是「给 Agent 的入口」：新增 stdio MCP server（`ts/src/mcp.ts`，四个工具），
+同时**删掉 SKILL.md**——那份文档已把 QQ/酷我/酷狗 写成不支持，属于会主动误导外部 Agent 的过期材料；
+独立包只留 `vdl.exe` + `README.txt`。同批还有 Android release 签名（缺密钥即失败）与错误码集中表
+（`core/hints.ts`）。3.7.0 是「登录之后真实能拿到什么」（三站会员矩阵、B站合集分页、风格卡进界面）；
+3.6.0 是发布收口与环境可复现（`scripts/setup.ps1`）。
 上一轮（2026-10-26）修的是同源与文件访问边界、设置/历史假保存、Skill 未支持平台误路由、
 解析与下载串状态、封面开关和断线恢复。
 后续开发见 [Plan.md §2.6](Plan.md) 与 [交互详情图](docs/design/development-roadmap-2026-10-25.html)。
