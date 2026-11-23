@@ -1,7 +1,10 @@
 # AGENTS.md —— 给后续 AI / 协作者的上下文
 
 这个仓库是一个**多平台视频/音频下载工具**（抖音 / B站 / 网易云 + yt-dlp 通用兜底），
-定位是「桌面可编程下载内核 + 可选 Web GUI + Agent Skill」。
+定位是「桌面可编程下载内核 + 可选 Web GUI + MCP（给 Agent 用）」。
+> 2026-11-23 起**没有 Skill 了**：SKILL.md 那种「给 Agent 看的说明」会随发版腐化
+> （删之前它把 QQ / 酷我 / 酷狗 都写成不支持），Agent 入口统一走 `ts/src/mcp.ts`（stdio MCP，
+> 四个工具 probe / get / album / jobs），Claude / Codex 原生可用，DSH 装 MCP 桥插件即可。
 动手前先读 `Plan.md`（路线图与待决策）。本文只写**不能违反的红线**和**已验证的事实**。
 
 > **内容分析与生成侧：解冻后当天又冻结（2026-11-02）**。计划见
@@ -104,10 +107,11 @@
 │  ├─ core/          契约层：types / platform / config / http / progress / cancel / rate / naming / errors
 │  ├─ engines/       douyin / netease / qq / kuwo / kugou / bilibili(_api) / sniff(L2) / generic(yt-dlp)
 │  └─ analyze/       A1：分镜(scdet) / 抽帧 / 台词 / 客观指标（不依赖任何模型）
-├─ ts/tests/         bun test（当前 353 个）；env.ts 是能力探测（非测试文件），
+├─ ts/tests/         bun test（当前 370 个）；env.ts 是能力探测（非测试文件），
 │                    capabilities.test.ts 把 ffmpeg/Bun 版本打进输出，缺什么一眼能看到
 ├─ web/              Vue 3 界面（默认入口 /）+ vendor / assets（无 PWA：sw/manifest 已删）
-├─ ts/skill/         TS Skill 源（SKILL.md + references），由 tools/build_skill_ts.py 组装
+├─ ts/src/mcp.ts     MCP server（stdio + 行分隔 JSON-RPC）；默认自己拉起 server.ts，
+│                    也可用 VDACC_BASE_URL / VDACC_TOKEN 复用已开实例
 ├─ legacy/python/    Python 归档：vdl / skill / tests / tools / dy_* / VDACC.bat（冻结，仅参考）
 ├─ docs/             CHANGELOG.md、verified-facts.md（平台事实表）、music-channels.md、
 │                    design/（UI 与能力基线）、archive/（已收口章节）
@@ -212,10 +216,13 @@ ffmpeg 已改异步可取消。**限速仍是「每条流」**，总带宽 ≈ �
   `%LOCALAPPDATA%\vdl\profile`。两者永不入库、永不打印值——日志只报 cookie 名与数量。
   **测试/冒烟必须设 `VDL_AUTH_DIR` 指到临时目录**：`POST /api/auth/bilibili/logout` 会真删
   `auth/bilibili.json`（2026-11-10 误删过一次，靠同目录 `bilibili.cookies.txt` 还原）。
-- **Skill 只能由构建脚本组装。** TS 版：`python tools/build_skill_ts.py --zip`（单文件 `vdl.exe`
-  + `ts/skill/SKILL.md`）；legacy 版：`legacy/python/tools/build_skill.py`。别手工往 `dist/` 拷代码。
-  legacy 包刻意排除 `legacy/python/vdl/web` 与 `server.py`（Agent 不需要，且含授权受限的插画）；
-  TS 包只含 `skill_cli.ts`。
+- **独立包只能由构建脚本组装。** TS 版：`python tools/build_skill_ts.py --zip`（单文件 `vdl.exe`
+  + 脚本内生成的 `README.txt`；**不再产 SKILL.md**）。别手工往 `dist/` 拷代码。
+  面向 Agent 的入口是 `ts/src/mcp.ts`（MCP），不是包里的文档——文档会腐化，schema 不会。
+  legacy 包（`legacy/python/tools/build_skill.py`）保持原样，只作历史参考。
+- **MCP 的 stdout 只许写协议。** `ts/src/mcp.ts` 里任何日志必须走 stderr；stdio 传输是
+  **行分隔 JSON-RPC**，写错一行整条连接就废。工具级失败放 `result.isError`，
+  不要用 JSON-RPC error（宿主会当成协议故障）。
 - **legacy 已冻结。** `legacy/python/`（`dy_dl.py` / `dy_gui.pyw` / `vdl/` / `skill/` / `tests/`）
   只保留抖音浏览器兜底与历史参考，不再加新能力、不接新站点；新功能一律加在 `ts/`。
   **不要**把 tkinter 迁到 TS——浏览器引擎在 legacy 里，迁过去会丢能力。

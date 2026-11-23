@@ -1,8 +1,12 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""组装 TS 版 Skill：Bun 编译出单文件 vdl.exe + SKILL.md。
+"""组装 TS 版独立包：Bun 编译出单文件 vdl.exe + README.txt。
 
     python tools/build_skill_ts.py --zip
+
+2026-11-23：**不再产出「Skill」**。SKILL.md 那类给 Agent 的文档已经证明会随发版腐化，
+面向 Agent 的入口改为 MCP（`bun ts/src/mcp.ts`，见 README「给 Agent 用」）；
+这个包只剩「人双击就能用」的 exe + 一页纯文本说明。
 
 需要 Bun：优先环境变量 BUN，其次 PATH、WinGet shim，最后临时下载副本。
 产物在 dist/video-acquire-ts/，不入库。
@@ -26,8 +30,30 @@ for stream in (sys.stdout, sys.stderr):
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 DIST = ROOT / 'dist' / 'video-acquire-ts'
-SKILL = ROOT / 'ts' / 'skill'
 ENTRY = ROOT / 'ts' / 'src' / 'skill_cli.ts'
+
+README_TXT = """video-acquire（独立版）
+
+单文件程序，不需要 Python / Node / yt-dlp；B站 的音视频合并需要 ffmpeg 在 PATH 里。
+
+用法
+  vdl.exe probe "<链接>"                 只解析，输出 JSON（含可选档位 id）
+  vdl.exe get   "<链接>" -o "<目录>"      下载推荐档
+  vdl.exe get   "<链接>" --format <id>    指定档位
+  vdl.exe get   "<链接>" --subs --danmaku B站：同时下字幕与弹幕
+
+支持：抖音、B站（分P / 番剧）、网易云、QQ音乐、酷我、酷狗、m3u8 与直链。
+搜索、批量收藏夹、DRM、直播均不支持。
+
+登录（会员档位 / 4K / 无损才需要，凭据只存在本机）
+  vdl.exe auth bilibili | netease | qq
+
+给 Agent 用（MCP，stdio）
+  bun ts/src/mcp.ts    # 或编译成 exe；四个工具：probe / get / album / jobs
+  配置片段与宿主说明见仓库 README「给 Agent 用（MCP）」。
+
+出错时先看 error.code 与 next_action：那两句就是下一步该做什么。
+"""
 
 
 def find_bun():
@@ -125,8 +151,8 @@ def build():
     print('编译:', ' '.join(cmd))
     subprocess.run(cmd, check=True, cwd=str(ROOT))
 
-    shutil.copy2(SKILL / 'SKILL.md', DIST / 'SKILL.md')
-    shutil.copytree(SKILL / 'references', DIST / 'references')
+    # 说明书写成 .txt 而不是 Agent 用的 SKILL.md：这里是给人看的最后一页
+    (DIST / 'README.txt').write_text(README_TXT, encoding='utf-8', newline='\n')
 
     size = exe.stat().st_size
     print(f'产物: {DIST}')
@@ -146,7 +172,7 @@ def zip_up(path):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description='构建 TS 版 Skill')
+    ap = argparse.ArgumentParser(description='构建 TS 版独立包（exe + README.txt）')
     ap.add_argument('--zip', action='store_true')
     args = ap.parse_args(argv)
     out = build()

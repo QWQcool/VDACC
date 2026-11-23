@@ -5,6 +5,22 @@
 
 ## 未发布（2026-11-23）
 
+- **给 Agent 的入口换成 MCP，SKILL.md 删了**：`ts/src/mcp.ts` 是一个 stdio MCP server，
+  四个工具 `probe` / `get` / `album` / `jobs`，Claude / Codex 直接配 `mcpServers` 就能用；
+  DSH 装 MCP 桥插件（`dsh-mcp-servers`）后同样能接，所以**不再自己写 DSH 插件**。
+  它默认自己拉起本地后端（`--port 0` + 随机 token，退出时一并关掉），也可以用
+  `VDACC_BASE_URL` / `VDACC_TOKEN` 复用一个已开着的实例。
+  实测：`printf '…' | bun ts/src/mcp.ts` → 握手 / `tools/list` / `tools/call probe`（真实 B站 稿件）
+  全部通过；`get` 支持 `wait_ms`，超时就回 `job_id`，**不假装成功**。
+
+- **为什么删 Skill**：它不是「多余」，而是**会腐化**——删之前那份 3.4 KB 的 SKILL.md 把
+  QQ / 酷我 / 酷狗 全写成「不支持」，还写着「TS Skill 不含 yt-dlp 兜底」（实际有）。
+  外部 Agent 照它办事会主动拒绝一半平台。文档没有 schema、没人验证，错一次就长期错；
+  MCP 的工具描述与输入 schema 是**代码的一部分**，改错会被用例或调用直接发现。
+  现在独立包（`dist/video-acquire-ts.zip`）里只剩 `vdl.exe` + 脚本生成的 `README.txt`。
+
+### 同日稍早：真机回归 / 签名 / 错误码 / 文档拆档
+
 - **Android 有正式签名包了**：以前只会出 `assembleDebug`（未签名、带调试信息）。现在
   `mobile/android/keystore.properties`（**不入库**）里配好密钥就出
   `app-release.apk`（**822 KB**，minSdk 26 / target 34，`apksigner` 校验通过：`CN=VDACC`）；
@@ -68,7 +84,7 @@
   注：该模拟器的 adb 通道连不上（`adb devices` 为空、`ldconsole adb` 报 device not found），
   所以**端上的解析/下载流程本轮没有真机验收**，只验到「能装、能起、界面正常」。
 
-- **CI 恢复自动触发**：`push` / `pull_request` 到 `main` 会自动跑 `bun test` 与 Skill 构建校验
+- **CI 恢复自动触发**：`push` / `pull_request` 到 `main` 会自动跑 `bun test` 与独立包构建校验
   （仍不在 CI 里构建 exe/zip，控制分钟数）。
 
 ### 2026-11-16 ~ 11-17（同一版 3.7.0）

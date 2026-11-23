@@ -14,7 +14,7 @@
 | 不能违反的红线、已验证事实 | `AGENTS.md` |
 | 怎么用（安装、命令、界面） | `README.md` |
 | 怎么发版（检查清单、体积基线） | `docs/RELEASE.md`（基线数字在 `docs/release-baseline.json`） |
-| 给其它 Agent 的契约 | `ts/skill/SKILL.md`（legacy：`legacy/python/skill/SKILL.md`） |
+| 给其它 Agent 的契约 | **`ts/src/mcp.ts`（MCP，stdio；工具 probe / get / album / jobs）**；2026-11-23 起不再维护 SKILL.md（legacy 归档里仍有一份） |
 | UI 参考、视觉基线、概念图 | `docs/design/` |
 | 已收口的长章节（不再维护，只作结论来源） | `docs/archive/`：`plan-2026-11-bilibili-experience.md` = §2.7–2.8；`plan-version-history-2026-10.md` = §2.1–2.3；`plan-design-2026-10.md` = §3 |
 | 第三方来源与授权 | `NOTICE` / `THIRD_PARTY.md` |
@@ -561,3 +561,13 @@ Android 壳复用同一批 HTTP 接口，不再单独实现。
   专辑/歌单/分P/收藏夹入口都带上，桌面与端上同口径。⑥ **DSH 插件方案**：
   `docs/design/dsh-plugin-plan.md`——不迁移只加壳，与 infOS 共用中立工具描述。
   测试 **353 pass / 0 fail**。
+- 2026-11-23（下午）：**Agent 入口改 MCP，删掉 Skill**。① **结论先行**：DSH 市场已有 MCP 桥插件
+  （`dsh-mcp-servers`，把 stdio/HTTP/SSE 的 MCP server 暴露成原生工具），所以「DSH 插件」不必自研——
+  一个 MCP server 同时喂 Claude / Codex / DSH。② **`ts/src/mcp.ts`**：stdio + 行分隔 JSON-RPC，
+  四个工具 `probe`/`get`/`album`/`jobs`；默认自拉起 `server.ts`（`--port 0` + 随机 token，退出即关），
+  也可用 `VDACC_BASE_URL`/`VDACC_TOKEN` 复用已开实例；`get` 支持 `wait_ms`，超时回 `job_id` 不假装成功。
+  实测握手 / `tools/list` / `tools/call probe`（真实 B站 稿件）全通，`mcp.test.ts` 17 条离线用例。
+  ③ **删 `ts/skill/`**：那份 SKILL.md 已把 QQ/酷我/酷狗 写成不支持、还写着「不含 yt-dlp 兜底」，
+  属于**会主动误导外部 Agent** 的过期文档；`build_skill_ts.py` 改为生成 `README.txt`，
+  独立包只剩 `vdl.exe` + 一页纯文本，基线相应刷新（2 个文件 / 110.0 MB / zip 52.2 MB）。
+  ④ infOS 上架暂停（市场尚未上线）。测试 **370 pass / 0 fail**。

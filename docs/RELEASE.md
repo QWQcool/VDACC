@@ -20,7 +20,7 @@
 # 1) 单测 + 服务端安全用例
 cd ts && bun test tests          # 当前基线：154 pass / 0 fail
 
-# 2) Skill 包：构建 + 逐文件校验
+# 2) 独立包（exe + README.txt）：构建 + 逐文件校验
 cd .. && python tools/build_skill_ts.py --zip
 python tools/verify_skill_ts.py dist/video-acquire-ts
 
@@ -82,4 +82,4 @@ Release 说明从 `docs/CHANGELOG.md` 的对应段落摘取，附件只放
 ## 6. 回滚
 
 - 已发布的 tag 不删除、不移动：发现问题是发 `X.Y.(Z+1)`；
-- Release 说明里写清「修了什么、影响范围、是否需要重新下载 Skill 包」。
+- Release 说明里写清「修了什么、影响范围、是否需要重新下载独立包」。

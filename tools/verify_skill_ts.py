@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""校验 Skill 产物：读 SHA256SUMS，逐个比对文件。
+"""校验独立包产物：读 SHA256SUMS，逐个比对文件。
 
     python tools/verify_skill_ts.py dist/video-acquire-ts
 """

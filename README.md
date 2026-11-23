@@ -23,14 +23,14 @@
 >
 > 迁移状态：引擎 ✅（抖音 / 网易云 / QQ 音乐 / 酷我 / 酷狗 / B站 分P·番剧 / L2 直链·m3u8）、
 > 服务 ✅（probe / jobs / SSE / files / settings / cancel / retry / 持久化）、`auth` ✅（在线校验）、
-> **Skill ✅**、**TS 测试 353 个 ✅**、**yt-dlp 可选组件 ✅（SHA256 校验）**、**设置面板 ✅**、**限速 ✅**（`--limit 2M`）、**并发 1–4 ✅**、
+> **MCP（给 Agent 用）✅**、**TS 测试 370 个 ✅**、**yt-dlp 可选组件 ✅（SHA256 校验）**、**设置面板 ✅**、**限速 ✅**（`--limit 2M`）、**并发 1–4 ✅**、
 > **B站字幕 `--subs` / 弹幕 `--danmaku` ✅**（CLI 与 Web UI 都能开）、
 > **专辑 `--album` ✅**（CLI `--offset` + `--dry-run`；Web UI 分批加载，每批 20 首）、
 > **QQ 音乐 ✅**（`auth qq` 扫码；档位由账号会员权限决定）。
 >
 > 首次运行 `auth` 前需要装依赖：`cd ts && bun install`（只装 `playwright-core`，复用系统 Edge）。
 >
-> TS 版 Skill：`python tools/build_skill_ts.py --zip` → `dist/video-acquire-ts.zip`
+> TS 版独立包：`python tools/build_skill_ts.py --zip` → `dist/video-acquire-ts.zip`
 > （3.7.0 实测 zip 52.2MB，内含 110.0MB 的 `vdl.exe`，不需要 Python/Node；包内有 `manifest.json` 与 `SHA256SUMS`）。
 >
 > 前端：`/` 是 **Vue 3** 界面，已按 **infOS 风格 V2** 重做（侧栏 + 双栏、浅槽画质、开关、Slide-over 设置）；
@@ -45,7 +45,7 @@
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\setup.ps1
 ```
 
-它会：检查并安装 **Bun 1.4.4** → **ffmpeg** → **Python 3.12**（构建 Skill 与刷新发布基线要用）
+它会：检查并安装 **Bun 1.4.4** → **ffmpeg** → **Python 3.12**（构建独立包与刷新发布基线要用）
 → `cd ts && bun install` → 跑 `doctor` 汇总，缺什么装什么，装到用户目录（不需要管理员）。
 只检查不安装用 `-SkipInstall`。
 
@@ -79,7 +79,7 @@ Android 端补酷狗列表并恢复构建链（APK 1.05MB，已在雷电模拟�
 ```bash
 bun test ts/tests                          # 310 项离线回归
 node tools/accept_regression_ui.cjs         # Edge + 临时用户目录 + 本地媒体
-python tools/build_skill_ts.py --zip        # Skill 编译与组装（含 manifest.json / SHA256SUMS）
+python tools/build_skill_ts.py --zip        # 独立包编译与组装（exe + README.txt + manifest.json / SHA256SUMS）
 python tools/verify_skill_ts.py dist/video-acquire-ts   # 解压后核对每个文件的 SHA256
 ```
 
@@ -222,22 +222,57 @@ vdl serve --allow-origin http://localhost:5173   # 允许 infOS 开发源调用
   （2026-11-09 复核：子应用仍是宿主编译期内置、第三方拿不到；可走的是 Package 的 tool/skill 贡献，
   Application Adapter 要等 `@infos/application-sdk` 发布）。
 
-## 做成 Skill（给其它 Agent 用）
+## 给 Agent 用（MCP）
 
-```bash
-python tools/build_skill.py --zip     # 产物 dist/video-acquire.zip（约 42 KB）
+`ts/src/mcp.ts` 是一个 stdio MCP server，暴露四个工具：
+
+| 工具 | 作用 |
+|---|---|
+| `probe` | 解析链接，列出档位（只读，不下载） |
+| `get` | 下载；`wait_ms` 内完成就直接回路径，否则回 `job_id` |
+| `album` | 专辑/歌单/收藏夹/合集的一批条目（含 `hasMore`） |
+| `jobs` | 查任务进度与产物 |
+
+它默认**自己拉起**本地后端（随机端口 + 随机 token，进程退出时一并关闭），所以配一行就能用；
+如果你已经开着 VDACC，设 `VDACC_BASE_URL` 与 `VDACC_TOKEN` 就会复用那个实例（两个进程同时写
+同一个输出目录虽然安全，但没必要）。
+
+Claude Desktop / Claude Code 的 `mcpServers` 配置（路径换成你的仓库位置）：
+
+```json
+{
+  "mcpServers": {
+    "vdacc": { "command": "bun", "args": ["C:/path/to/VDACC/ts/src/mcp.ts"] }
+  }
+}
 ```
 
-安装：解压到 Agent 的 skills 目录（例如 `~/.codebuddy/skills/video-acquire/`）。
-Skill 只带 CLI，不含 Web 界面；入口是 `scripts/vdl_run.py`，用法与错误码见包内 `SKILL.md`。
+**DSH（DeepSeek Harness）**：官方发行版自带 MCP 客户端插件 `@deepseek-ai/dsh-mcp-client`，
+不需要任何第三方桥；但它**不默认启用**，要在当前 profile 的 `cordis.patch.yml` 里加一条：
 
-```bash
-python scripts/vdl_run.py doctor --json
-python scripts/vdl_run.py probe "<url>" --json
-python scripts/vdl_run.py get "<url>" --json -o 下载
+```yaml
+# $DSH_HOME/profiles/<profile>/cordis.patch.yml
+- id: vdacc
+  plugin: '@deepseek-ai/dsh-mcp-client'
+  config:
+    transport: stdio
+    command: bun
+    args: ['C:/path/to/VDACC/ts/src/mcp.ts']
 ```
 
-仓库是唯一事实来源：改代码只改仓库，重新 build 即可；`dist/` 不入库。
+模型看到的工具名是 `mcp__vdacc__probe` 这种形式。
+
+> 装这个插件时有个坑：`dsh plugin add @deepseek-ai/dsh-mcp-client` 默认会拿到旧版
+> `0.0.1-rc.1`（dist-tag `latest` 停在旧版），要么用 `@next`，要么装成与宿主 `dsh` 同版本。
+
+> **关于单文件**：`bun build --compile` 出来的 `vdacc-mcp.exe` 目前**跑不起来**——它内部
+> `spawn(bun, server.ts)` 拉起后端，编成 exe 后既没有 `server.ts` 也不保证有 bun。
+> 要真正单文件得先把 `server.ts` 的 `Bun.serve` 抽成可导入的 `createServer()`（未做）。
+> 现阶段请用 `bun` 运行。
+
+> 2026-11-23 起**不再维护 SKILL.md**：那种「给 Agent 看的说明文档」会随发版腐化
+> （删之前它把 QQ/酷我/酷狗 都写成不支持了）。Agent 入口统一走 MCP——
+> 有 schema、有返回值，错在哪一眼能看见。
 
 ## 目录说明
 
@@ -248,8 +283,8 @@ VDACC\
 │  ├─ src\            主线：cli / server / auth / skill_cli
 │  │  ├─ core\        契约层：types / platform / config / http / progress / cancel / rate
 │  │  └─ engines\     douyin / netease / qq / kuwo / kugou / bilibili(_api) / generic(yt-dlp)
-│  ├─ tests\          bun test（75 个）
-│  └─ skill\          TS Skill 源（SKILL.md + references）
+│  ├─ tests\          bun test（370 个）
+│  └─ src\mcp.ts      MCP server（stdio，四个工具）
 ├─ web\               Vue 3 界面（默认入口 /）
 ├─ legacy\python\     Python 归档：vdl / skill / tests / tools / dy_* / VDACC.bat（冻结）
 ├─ docs\              CHANGELOG.md / music-channels.md / design\
