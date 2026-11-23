@@ -3,6 +3,27 @@
 > 只记「用户可感知的变化」与「验证结论」。设计与取舍见 `Plan.md`。
 > 每个版本的 GitHub Release 从这里摘取。
 
+## 3.8.0（2026-11-23）
+
+- **MCP 真的能编成单文件了**：以前 `mcp.ts` 靠 `spawn(bun, server.ts)` 拉后端，编成 exe
+  既没有源码也不保证有 bun——所谓「单文件」是假的。现在把 `server.ts` 的
+  `Bun.serve` 抽成可导入的 `startServer({port, token})`（直接跑本文件的行为不变，
+  末尾用 `import.meta.main` 兜住），MCP 在**本进程内**起后端：
+  `bun build --compile --minify --outfile dist/vdacc-mcp.exe ts/src/mcp.ts` → 115 MB 单文件，
+  实测握手 / `tools/list` / 真实 `probe` / `jobs` 全通，stdout 只有协议消息
+  （服务器日志被引到 stderr）。
+
+- **本地语音识别（可选）**：没有 `.srt/.lrc` 时加 `--asr` 会调本机 whisper.cpp
+  抽 16k 单声道 wav 转写，结果并进同一条台词链路（`transcript.source = 'asr'`）。
+  **不内建模型**：几十到几百 MB 不该塞进 exe；没装就如实记 warning「没有找到 whisper.cpp」，
+  不静默降级。配置：`VDACC_WHISPER_BIN` / `VDACC_WHISPER_MODEL`（默认在 PATH 找
+  `whisper-cli`/`whisper`/`main`，模型取同目录或 `models/` 下的 `ggml-*.bin`）。
+
+- **覆盖率盲区补上**：整体 78.3% → **79.8%**。`sniff.ts`（L2 直链 / m3u8，未知站点的唯一退路）
+  46% → **78.6%**：补了接管范围、master playlist 解析（CODECS 里带逗号也不会切坏）、
+  变体排序与相对地址、单层列表、HEAD/Range 探长度、类型不明拒绝；`mcp.ts` 71% → **86.2%**
+  （token 头、复用已开实例、日志改道 stderr、任务轮询超时不假装完成）。
+
 ## 未发布（2026-11-23 晚）
 
 - **分析结果能直接拿去剪片了：粗剪清单（CSV + EDL）**。分镜表回答「这段有哪几个镜头」，

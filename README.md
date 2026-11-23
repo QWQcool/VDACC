@@ -23,7 +23,7 @@
 >
 > 迁移状态：引擎 ✅（抖音 / 网易云 / QQ 音乐 / 酷我 / 酷狗 / B站 分P·番剧 / L2 直链·m3u8）、
 > 服务 ✅（probe / jobs / SSE / files / settings / cancel / retry / 持久化）、`auth` ✅（在线校验）、
-> **MCP（给 Agent 用）✅**、**TS 测试 383 个 ✅**、**yt-dlp 可选组件 ✅（SHA256 校验）**、**设置面板 ✅**、**限速 ✅**（`--limit 2M`）、**并发 1–4 ✅**、
+> **MCP（给 Agent 用）✅**、**TS 测试 400 个 ✅**、**yt-dlp 可选组件 ✅（SHA256 校验）**、**设置面板 ✅**、**限速 ✅**（`--limit 2M`）、**并发 1–4 ✅**、
 > **B站字幕 `--subs` / 弹幕 `--danmaku` ✅**（CLI 与 Web UI 都能开）、
 > **专辑 `--album` ✅**（CLI `--offset` + `--dry-run`；Web UI 分批加载，每批 20 首）、
 > **QQ 音乐 ✅**（`auth qq` 扫码；档位由账号会员权限决定）。
@@ -162,6 +162,9 @@ Playwright 起一个独立 Edge（独立 profile，不碰你正在用的）
   也可以用 `analyze --visuals <json>` 把 Agent 或人写好的描述并进同一份结果，不花额度；
 - 声音是默认测的客观量：整片 LUFS、响度范围、真峰值、静音占比与**每镜响度**（面板显示「音量 -20.2」）；
   它不判断「对白还是音乐」——那需要频谱或语音识别，工具只把能测准的数字给你。
+- 没有字幕的视频可以加 `--asr`（或 API `asr:true`）走**本机** whisper.cpp 转写：
+  要先装好可执行文件与 ggml 模型，用 `VDACC_WHISPER_BIN` / `VDACC_WHISPER_MODEL` 指过去；
+  没装会如实提示「没有找到 whisper.cpp」，不会假装跑过。
 - 面板里点「生成粗剪清单」会产出两份能直接用的文件：`cutlist.csv`（切点 + 每段可删静音，
   带理由与时间码）与 `cutlist.edl`（CMX3600，Premiere / 达芬奇导入后就是一条删掉长静音的粗剪时间线）。
   只删「够长的静音」（默认 ≥1s，`--cut-min-silence` 可调）——黑场、口头语、闪白都需要模型判断，
@@ -270,10 +273,11 @@ Claude Desktop / Claude Code 的 `mcpServers` 配置（路径换成你的仓库�
 > 装这个插件时有个坑：`dsh plugin add @deepseek-ai/dsh-mcp-client` 默认会拿到旧版
 > `0.0.1-rc.1`（dist-tag `latest` 停在旧版），要么用 `@next`，要么装成与宿主 `dsh` 同版本。
 
-> **关于单文件**：`bun build --compile` 出来的 `vdacc-mcp.exe` 目前**跑不起来**——它内部
-> `spawn(bun, server.ts)` 拉起后端，编成 exe 后既没有 `server.ts` 也不保证有 bun。
-> 要真正单文件得先把 `server.ts` 的 `Bun.serve` 抽成可导入的 `createServer()`（未做）。
-> 现阶段请用 `bun` 运行。
+也可以编成单文件，省掉 bun（3.8.0 起可用：MCP 在**本进程内**起后端，不再 spawn 自己）：
+
+```bash
+bun build --compile --minify --outfile dist/vdacc-mcp.exe ts/src/mcp.ts
+```
 
 > 2026-11-23 起**不再维护 SKILL.md**：那种「给 Agent 看的说明文档」会随发版腐化
 > （删之前它把 QQ/酷我/酷狗 都写成不支持了）。Agent 入口统一走 MCP——
@@ -288,7 +292,7 @@ VDACC\
 │  ├─ src\            主线：cli / server / auth / skill_cli
 │  │  ├─ core\        契约层：types / platform / config / http / progress / cancel / rate
 │  │  └─ engines\     douyin / netease / qq / kuwo / kugou / bilibili(_api) / generic(yt-dlp)
-│  ├─ tests\          bun test（383 个）
+│  ├─ tests\          bun test（400 个）
 │  └─ src\mcp.ts      MCP server（stdio，四个工具）
 ├─ web\               Vue 3 界面（默认入口 /）
 ├─ legacy\python\     Python 归档：vdl / skill / tests / tools / dy_* / VDACC.bat（冻结）

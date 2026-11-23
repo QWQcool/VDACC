@@ -8,7 +8,8 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
-  SERVER_NAME, TOOLS, handleLine, handleRpc, parseServerUrl, summarizeAlbum, summarizeJob, summarizeProbe,
+  SERVER_NAME, TOOLS, ensureBackend, handleLine, handleRpc, httpCaller, makeWaiter,
+  silenceStdout, summarizeAlbum, summarizeJob, summarizeProbe,
 } from '../src/mcp';
 
 const okCall = (data: any) => async () => ({ status: 200, data });
@@ -191,15 +192,77 @@ describe('摘要函数', () => {
   });
 });
 
-describe('从后端启动行解析地址', () => {
-  test('认真实的启动行', () => {
-    expect(parseServerUrl('  地址: http://127.0.0.1:51234/?token=deadbeefdeadbeef'))
-      .toEqual({ base: 'http://127.0.0.1:51234', token: 'deadbeefdeadbeef' });
+describe('HTTP 客户端与后端复用', () => {
+  test('httpCaller 带 token 头、序列化 body、解析 JSON', async () => {
+    const original = globalThis.fetch;
+    const seen: any = {};
+    globalThis.fetch = (async (url: any, init: any) => {
+      seen.url = String(url);
+      seen.init = init;
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+    try {
+      const call = httpCaller('http://127.0.0.1:1', 'tok');
+      const res = await call('/api/probe', { method: 'POST', body: { url: 'u' } });
+      expect(res.status).toBe(200);
+      expect(res.data.ok).toBe(true);
+      expect(seen.url).toBe('http://127.0.0.1:1/api/probe');
+      expect(seen.init.headers['x-vdl-token']).toBe('tok');
+      expect(seen.init.body).toBe('{"url":"u"}');
+    } finally { globalThis.fetch = original; }
   });
 
-  test('别的行一律不认（避免把日志当地址）', () => {
-    expect(parseServerUrl('  token: 123')).toBeNull();
-    expect(parseServerUrl('http://192.168.1.2:8780/?token=aa')).toBeNull();
-    expect(parseServerUrl('')).toBeNull();
+  test('设了 VDACC_TOKEN 就复用已开实例，不再内嵌一个', async () => {
+    const saved = { base: process.env.VDACC_BASE_URL, token: process.env.VDACC_TOKEN };
+    process.env.VDACC_TOKEN = 't1';
+    process.env.VDACC_BASE_URL = 'http://127.0.0.1:9999/';
+    try {
+      const backend = await ensureBackend();
+      expect(backend.base).toBe('http://127.0.0.1:9999');   // 末尾斜杠被去掉
+      expect(backend.token).toBe('t1');
+      backend.stop();   // 不拥有进程，stop 应当是空操作
+    } finally {
+      if (saved.token === undefined) delete process.env.VDACC_TOKEN;
+      else process.env.VDACC_TOKEN = saved.token;
+      if (saved.base === undefined) delete process.env.VDACC_BASE_URL;
+      else process.env.VDACC_BASE_URL = saved.base;
+    }
+  });
+
+  test('silenceStdout 把日志改道到 stderr，且能还原', () => {
+    const original = console.log;
+    const writes: string[] = [];
+    const realWrite = process.stderr.write.bind(process.stderr);
+    (process.stderr as any).write = (chunk: any) => { writes.push(String(chunk)); return true; };
+    const restore = silenceStdout();
+    try {
+      console.log('不该进 stdout');
+      expect(console.log).not.toBe(original);
+      expect(writes.join('')).toContain('不该进 stdout');
+    } finally {
+      restore();
+      (process.stderr as any).write = realWrite;
+    }
+    expect(console.log).toBe(original);
+  });
+
+  test('makeWaiter 轮询到终态就返回，超时则把当前快照交回去', async () => {
+    let polled = 0;
+    const done = makeWaiter({
+      call: async () => {
+        polled += 1;
+        return { status: 200, data: { ok: true, job: { id: 'j', status: polled >= 2 ? 'done' : 'running' } } };
+      },
+    });
+    expect((await done('j', 5000)).status).toBe('done');
+    expect(polled).toBe(2);
+
+    const timeout = makeWaiter({
+      call: async () => ({ status: 200, data: { ok: true, job: { id: 'k', status: 'running' } } }),
+    });
+    const partial = await timeout('k', 0);
+    expect(partial.status).toBe('running');   // 不假装完成
   });
 });

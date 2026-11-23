@@ -1,6 +1,6 @@
 # Plan.md —— 计划、架构与决策（唯一计划来源）
 
-> 状态：**3.7.1 已定版**（2026-11-23；Agent 入口改为 MCP、独立包去掉 SKILL.md）。后端主线为 TypeScript（Bun），
+> 状态：**3.8.0 已定版**（2026-11-23；MCP 可编单文件、粗剪清单、可选本地 ASR）。后端主线为 TypeScript（Bun），
 > Python 冻结并归档在 `legacy/python/`。硬性约束见 `AGENTS.md`，使用说明见 `README.md`，
 > 逐版本历史见 `docs/CHANGELOG.md`，完成盘点见 §2.2，后续执行计划见 §2.6。
 > 已收口的长章节按 `docs/archive/` 归档（见 §1 文档地图），主计划只留未完成项与决策。
@@ -578,3 +578,12 @@ Android 壳复用同一批 HTTP 接口，不再单独实现。
   `analyzeFile({cutlist:true})`、CLI `--cutlist`、`/api/analyze` 的 `cutlist` 字段、面板「生成粗剪清单」
   （纯本地不花额度，产物可直接「打开 EDL」定位）。④ 验证：纯函数 12 条用例 + 真 ffmpeg 端到端
   （自造 2–5s 静音片，删 2.36s、保留 2 段、记录时间连续）+ 服务端路由断言。测试 **383 pass / 0 fail**。
+- 2026-11-23（发版 3.8.0）：**MCP 单文件化 + 覆盖率补盲 + 可选本地 ASR**。
+  ① `server.ts` 的 `Bun.serve` 抽成导出的 `startServer({port,token,lan,open})`，末尾用
+  `import.meta.main` 保持「直接跑」的行为不变；`mcp.ts` 改为**本进程内**起后端（不再 spawn），
+  于是 `bun build --compile` 出的 `vdacc-mcp.exe`（115 MB）真的能跑：握手 / tools/list /
+  probe / jobs 全通，服务器日志被引到 stderr（stdout 只有协议）。
+  ② **覆盖率** 78.3% → 79.8%：`sniff.ts` 46% → 78.6%（接管范围 / master playlist / CODECS 逗号 /
+  变体排序 / HEAD·Range 探长 / 类型拒绝），`mcp.ts` 71% → 86.2%（token 头、复用实例、日志改道、轮询超时）。
+  ③ **ASR**（`analyze/asr.ts`）：`--asr` 时若没有字幕则调本机 whisper.cpp（抽 16k wav → `-osrt` →
+  读回 srt），`transcript.source='asr'`；**不内建模型**，没装只记 warning。测试 **400 pass / 0 fail**。

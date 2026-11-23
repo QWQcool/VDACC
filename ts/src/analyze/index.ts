@@ -57,6 +57,13 @@ export interface AnalyzeOptions {
   /** 粗剪时判「够长静音」的阈值，默认 1000ms */
   cutMinSilenceMs?: number;
   /**
+   * 没有 .srt/.lrc 时，调**本地** whisper.cpp 转写（要显式开：它要模型，且慢）。
+   * 找不到工具只记 warning，不影响其它结果。
+   */
+  asr?: boolean;
+  /** 语言代码，默认 auto */
+  asrLanguage?: string;
+  /**
    * 外部提供的语义描述（JSON 文件）。格式三选一：
    *   `{ "1": {shotSize…}, "2": … }` / `[{ "index": 1, … }]` / `{ "scenes": [{ "index": 1, "visual": {…} }] }`
    * 用途：让 Agent（或人）逐帧看完再写进来，不花 API 额度，也不破坏 `result.json` 的契约。
@@ -314,17 +321,34 @@ export async function analyzeFile(file: string, options: AnalyzeOptions = {}): P
     warnings.push('没有检测到镜头切换（可能是单镜头视频，或阈值偏高）');
   }
 
-  // 3) 台词：优先用下载时同名的 .srt/.lrc，没有就如实说没有
-  const transcript = loadTranscript(target);
+  // 3) 台词：优先用下载时同名的 .srt/.lrc；显式要了 `--asr` 才调本地语音识别
+  //    outDir 提到这里算：ASR 要把中间 wav 写进去，后面抽帧仍用同一个目录
+  const outDir = resolve(options.outDir
+    || join('下载', '_analysis', basename(target).replace(/\.[^.]+$/, '')));
+  mkdirSync(outDir, { recursive: true });
+
+  let transcript = loadTranscript(target);
   if (transcript.source === 'none') {
-    warnings.push('没有找到同名 .srt/.lrc：本次不提供台词（不猜、不调语音识别）');
+    if (!options.asr) {
+      warnings.push('没有找到同名 .srt/.lrc：本次不提供台词（要语音识别请加 --asr）');
+    } else {
+      const { findAsr, transcribe } = await import('./asr');
+      if (!findAsr()) {
+        warnings.push('没有找到 whisper.cpp（VDACC_WHISPER_BIN / VDACC_WHISPER_MODEL），本次不转写');
+      } else {
+        try {
+          const asr = await transcribe(target, outDir, { language: options.asrLanguage });
+          transcript = { source: 'asr', cues: asr.cues, file: asr.srt };
+        } catch (err) {
+          // 转写失败不能拖垮整次分析：其余结果仍然有效
+          warnings.push(`语音识别失败：${(err as Error).message}`);
+        }
+      }
+    }
   }
   const texts = cuesForScenes(scenes, transcript.cues);
 
   // 4) 抽帧（可选）
-  const outDir = resolve(options.outDir
-    || join('下载', '_analysis', basename(target).replace(/\.[^.]+$/, '')));
-  mkdirSync(outDir, { recursive: true });
 
   const frames: AnalysisResult['frames'] = [];
   if (!options.scenesOnly) {

@@ -37,7 +37,7 @@ const KNOWN_FLAGS = new Set([
   '--json', '--limit', '--album', '--playlist', '--offset', '--dry-run', '--format', '--cover',
   '--subs', '--danmaku', '--scenes-only', '--max-frames', '--threshold', '--describe',
   '--max-describe', '--visuals', '--pair-frames', '--style-card', '--no-audio',
-  '--cutlist', '--cut-min-silence',
+  '--cutlist', '--cut-min-silence', '--asr', '--asr-lang',
   '--status', '--offline', '--clear', '--renew', '--qr', '--timeout',
   '--help', '-h', '-o',
 ]);
@@ -238,6 +238,8 @@ if (cmd === 'auth') {
         styleCard: has('--style-card'),
         cutlist: has('--cutlist'),
         cutMinSilenceMs: flag('--cut-min-silence') ? Number(flag('--cut-min-silence')) : undefined,
+        asr: has('--asr'),
+        asrLanguage: flag('--asr-lang') || undefined,
         audio: !has('--no-audio'),
       });
       if (has('--json')) {

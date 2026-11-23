@@ -10,13 +10,15 @@
  *
  * 后端从哪来：
  * 1. 设了 `VDACC_TOKEN` → 连 `VDACC_BASE_URL`（默认 http://127.0.0.1:8780）上的实例；
- * 2. 没设 → 自己拉起一个（`--port 0 --token <random>`），从它的启动行解析真实端口，
- *    退出时一并杀掉。这样用户配一行 MCP 就能用，不必先开 VDACC。
+ * 2. 没设 → **在本进程内** `startServer({port:0})`（导入 `server.ts` 的导出函数）。
+ *    早先是 spawn 一个 `server.ts`：开发时能跑，但 `bun build --compile` 之后既没有源码
+ *    也不保证有 bun，等于「单文件」是假的。内嵌后一个 exe 就是一个进程。
+ *    代价：服务器的 console.log 会写 stdout，而 stdout 是协议通道——所以先把 console.log
+ *    改道到 stderr（见 `ensureBackend`）。
  *
  * 测试：`import.meta.main` 之外全部可注入（`call` 由调用方给），所以用例不需要网络。
  */
 import { randomBytes } from 'node:crypto';
-import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 
 export const SERVER_NAME = 'vdacc';
@@ -94,10 +96,11 @@ export const TOOLS: ToolDef[] = [
   },
 ];
 
-/** 从服务端启动行里抠出真实地址与 token（`--port 0` 时端口由系统分配）。 */
-export function parseServerUrl(line: string): { base: string; token: string } | null {
-  const m = /(http:\/\/127\.0\.0\.1:\d+)\/\?token=([0-9a-f]+)/i.exec(String(line || ''));
-  return m ? { base: m[1], token: m[2] } : null;
+/** 把日志引到 stderr：stdout 只许跑协议（写错一句整条连接就废）。返回还原函数。 */
+export function silenceStdout(): () => void {
+  const original = console.log;
+  console.log = (...args: unknown[]) => process.stderr.write(`${args.map(String).join(' ')}\n`);
+  return () => { console.log = original; };
 }
 
 /** 只留对模型有用的字段：整份 ProbeResult 有几 KB，塞进上下文就是浪费。 */
@@ -319,8 +322,10 @@ export function httpCaller(base: string, token: string) {
 }
 
 /**
- * 拿一个可用后端。优先复用（`VDACC_TOKEN` 存在时），否则自己拉起。
- * 拉起的进程挂着 stdout 管道：**只解析启动行**，其它输出直接丢掉（别混进协议）。
+ * 拿一个可用后端。优先复用（`VDACC_TOKEN` 存在时），否则**在本进程内**起一个。
+ *
+ * 内嵌而不是 spawn：spawn 的写法编成 exe 就跑不了（既没有 `server.ts` 也不保证有 bun）。
+ * 内嵌的代价是服务器的日志会写 stdout，所以这里先把 `console.log` 改道到 stderr。
  */
 export async function ensureBackend(): Promise<Backend> {
   const envBase = (process.env.VDACC_BASE_URL || '').trim().replace(/\/$/, '');
@@ -331,52 +336,22 @@ export async function ensureBackend(): Promise<Backend> {
   }
 
   const token = randomBytes(8).toString('hex');
-  const serverPath = join(import.meta.dir, 'server.ts');
-  const child = Bun.spawn([process.execPath, serverPath, '--port', '0', '--token', token], {
-    cwd: join(import.meta.dir, '..', '..'),
-    stdin: 'ignore',
-    stdout: 'pipe',
-    stderr: 'inherit',
-    env: { ...process.env },
-  });
+  const restoreStdout = silenceStdout();
+  let server: { port: number; stop: (force?: boolean) => void } | null = null;
+  try {
+    const { startServer } = await import('./server');
+    // port 0：让系统分配，避免和用户已经开着的 8780 撞车
+    server = startServer({ port: 0, token, lan: false, open: false }) as unknown as typeof server;
+  } catch (err) {
+    restoreStdout();
+    throw new Error(`内嵌后端启动失败：${(err as Error).message}`);
+  }
 
-  // Bun 的 stdout 是 Web ReadableStream，不能直接喂 readline：自己按行切。
-  const base = await new Promise<string>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('后端 15s 内没有启动（看 stderr 里的原因）')), 15_000);
-    const reader = (child.stdout as ReadableStream<Uint8Array>).getReader();
-    const decoder = new TextDecoder();
-    let buf = '';
-    let settled = false;
-    const finish = (base: string) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve(base);
-    };
-    void (async () => {
-      try {
-        for (;;) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buf += decoder.decode(value, { stream: true });
-          for (let idx = buf.indexOf('\n'); idx >= 0; idx = buf.indexOf('\n')) {
-            const line = buf.slice(0, idx);
-            buf = buf.slice(idx + 1);
-            const hit = parseServerUrl(line);
-            if (hit) { finish(hit.base); return; }
-          }
-        }
-      } catch { /* 管道关了：交给下面的 exited 判定 */ }
-    })();
-    child.exited.then((code) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      reject(new Error(`后端提前退出（code ${code}）`));
-    }).catch(() => undefined);
-  });
-
-  const stop = () => { try { child.kill(); } catch { /* 已经退了 */ } };
+  const base = `http://127.0.0.1:${server!.port}`;
+  const stop = () => {
+    try { server?.stop(true); } catch { /* 已经停了 */ }
+    restoreStdout();
+  };
   process.on('exit', stop);
   return { base, token, call: httpCaller(base, token), stop };
 }

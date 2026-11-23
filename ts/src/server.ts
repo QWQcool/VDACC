@@ -45,10 +45,12 @@ const flag = (name: string, def: string) => {
   return i >= 0 && argv[i + 1] ? argv[i + 1] : def;
 };
 
-const PORT = Number(flag('--port', '8780'));
-const TOKEN = flag('--token', randomBytes(8).toString('hex'));
+// 这三个不是 const：`startServer({...})` 要在**导入方进程内**覆盖它们（MCP 就是这么用的），
+// 否则「编成单文件」只能靠 spawn 自己，而 spawn 出去又拿不到源码路径。
+let PORT = Number(flag('--port', '8780'));
+let TOKEN = flag('--token', randomBytes(8).toString('hex'));
 // 双击启动器时用：服务起来后把带 token 的地址交给默认浏览器，省掉手动复制
-const OPEN = argv.includes('--open');
+let OPEN = argv.includes('--open');
 const CONFIG = loadConfig();
 // --concurrency N：启动时一次性覆盖设置里的并发（仍夹在 1–4），落盘后设置面板也能看到
 const CONCURRENCY_FLAG = Number(flag('--concurrency', ''));
@@ -316,8 +318,31 @@ function authorized(req: Request, url: URL): boolean {
   return token === TOKEN;
 }
 
-const LAN = argv.includes('--lan');
-const server = Bun.serve({
+let LAN = argv.includes('--lan');
+
+export interface ServeOptions {
+  /** 0 = 让系统分配（MCP 内嵌时用） */
+  port?: number;
+  token?: string;
+  lan?: boolean;
+  /** 默认 false：导入方（MCP）不需要弹浏览器 */
+  open?: boolean;
+}
+
+/**
+ * 起 HTTP 服务并返回 Bun 的 server 句柄。
+ *
+ * 抽成函数是为了**在别的进程里直接用**：`mcp.ts` 导入它、`--port 0` 内嵌一个后端，
+ * 这样 `bun build --compile` 出来的单文件才真的能跑（以前它 spawn 一个 `server.ts`，
+ * 编成 exe 后既没有源码也没有 bun）。直接跑本文件时行为不变（见文件末尾的 `import.meta.main`）。
+ */
+export function startServer(opts: ServeOptions = {}) {
+  if (opts.port !== undefined) PORT = opts.port;
+  if (opts.token !== undefined) TOKEN = opts.token;
+  if (opts.lan !== undefined) LAN = opts.lan;
+  if (opts.open !== undefined) OPEN = opts.open;
+
+  const server = Bun.serve({
   hostname: LAN ? '0.0.0.0' : '127.0.0.1',
   port: PORT,
   // SSE 每 15s 才发一次 ping，而 Bun 默认 idleTimeout 是 10s：
@@ -348,7 +373,7 @@ const server = Bun.serve({
     if (path === '/api/health') {
       return json({
         // 与根 package.json / ts/package.json 保持一致（server 要能单独编译成 exe，不读文件）
-        ok: true, version: '3.7.1', schema: 2, outDir: OUT,
+        ok: true, version: '3.8.0', schema: 2, outDir: OUT,
         jobs: order.length, engine: 'ts',
         theme: (loadConfig().theme || 'light'),
         limitRate: currentLimitBytesPerSec(),
@@ -745,6 +770,10 @@ const server = Bun.serve({
           pairFrames: body.pairFrames === true,
           // 粗剪清单：纯本地，不花额度；产物与 result.json 同级
           cutlist: body.cutlist === true,
+          // 本地语音识别：要装了 whisper.cpp 才有用，没装只记 warning
+          asr: body.asr === true,
+          ...(typeof body.asrLanguage === 'string' && body.asrLanguage.trim()
+            ? { asrLanguage: String(body.asrLanguage).trim().slice(0, 12) } : {}),
           ...(Number(body.cutMinSilenceMs) > 0 ? { cutMinSilenceMs: Math.round(Number(body.cutMinSilenceMs)) } : {}),
           // A3 风格卡：纯本地汇总，不花额度，但要显式要（会多算一遍并落两个文件）
           styleCard: body.styleCard === true,
@@ -1005,4 +1034,9 @@ function openBrowser(url: string) {
   }
 }
 
-if (OPEN) openBrowser(`http://127.0.0.1:${server.port}/?token=${TOKEN}`);
+  if (OPEN) openBrowser(`http://127.0.0.1:${server.port}/?token=${TOKEN}`);
+  return server;
+}
+
+// 直接跑本文件（`bun ts/src/server.ts` / 双击启动）时行为与以前一致
+if (import.meta.main) startServer();

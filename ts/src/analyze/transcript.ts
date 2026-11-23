@@ -15,7 +15,8 @@ export interface Cue {
 }
 
 export interface Transcript {
-  source: 'srt' | 'lrc' | 'none';
+  /** `asr` = 本地语音识别（没有字幕文件时的兜底） */
+  source: 'srt' | 'lrc' | 'asr' | 'none';
   cues: Cue[];
   /** 字幕文件路径（source !== 'none' 时才有） */
   file?: string;

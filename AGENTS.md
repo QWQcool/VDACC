@@ -109,11 +109,13 @@
 │  └─ analyze/       A1：分镜(scdet) / 抽帧 / 台词 / 客观指标（不依赖任何模型）
 │                    cutlist.ts 把「分镜 + 静音」翻成 cutlist.csv（切点）与 cutlist.edl（保留段）
 │                    只删 ≥1s 的静音；黑场/口头语/闪白要靠模型判断，猜错就是删正片，不做
-├─ ts/tests/         bun test（当前 383 个）；env.ts 是能力探测（非测试文件），
+│                    asr.ts 是可选适配器：找本机 whisper.cpp（VDACC_WHISPER_BIN/MODEL）→
+│                    抽 16k wav → 读回 .srt；**不内建模型**，没装只记 warning，不静默降级
+├─ ts/tests/         bun test（当前 400 个）；env.ts 是能力探测（非测试文件），
 │                    capabilities.test.ts 把 ffmpeg/Bun 版本打进输出，缺什么一眼能看到
 ├─ web/              Vue 3 界面（默认入口 /）+ vendor / assets（无 PWA：sw/manifest 已删）
-├─ ts/src/mcp.ts     MCP server（stdio + 行分隔 JSON-RPC）；默认自己拉起 server.ts，
-│                    也可用 VDACC_BASE_URL / VDACC_TOKEN 复用已开实例
+├─ ts/src/mcp.ts     MCP server（stdio + 行分隔 JSON-RPC）；默认**在本进程内** startServer({port:0})，
+│                    也可用 VDACC_BASE_URL / VDACC_TOKEN 复用已开实例；能编译成单文件 exe
 ├─ legacy/python/    Python 归档：vdl / skill / tests / tools / dy_* / VDACC.bat（冻结，仅参考）
 ├─ docs/             CHANGELOG.md、verified-facts.md（平台事实表）、music-channels.md、
 │                    design/（UI 与能力基线）、archive/（已收口章节）
@@ -168,7 +170,7 @@ venv\Scripts\python.exe -m pip install playwright yt-dlp   # 仅 legacy 需要
 ```bash
 bun --version                              # 1.4.x
 ffmpeg -version                            # 9.x；缺了 B站/音乐/m3u8 全废
-bun test ts/tests                          # 383 pass（缺 ffmpeg 时 3 条端到端 skip，capabilities.test.ts 会写明）
+bun test ts/tests                          # 400 pass（缺 ffmpeg 时 3 条端到端 skip，capabilities.test.ts 会写明）
 bun ts/src/cli.ts probe "<抖音或B站链接>" --json
 ```
 
