@@ -571,3 +571,10 @@ Android 壳复用同一批 HTTP 接口，不再单独实现。
   属于**会主动误导外部 Agent** 的过期文档；`build_skill_ts.py` 改为生成 `README.txt`，
   独立包只剩 `vdl.exe` + 一页纯文本，基线相应刷新（2 个文件 / 110.0 MB / zip 52.2 MB）。
   ④ infOS 上架暂停（市场尚未上线）。测试 **370 pass / 0 fail**。
+- 2026-11-23（晚）：**粗剪清单（A1 的可执行产物）**。① `analyze/cutlist.ts`：把分镜边界与静音段翻成
+  `cutlist.csv`（切点/删除段 + 时间码 + 理由）与 `cutlist.edl`（CMX3600 保留段，剪辑软件直接导入）。
+  ② **只删 ≥1s 的静音**——黑场/口头语/闪白要靠模型判断，猜错就是删正片，宁可不做；阈值可用
+  `--cut-min-silence` 调，过短的保留缝（<200ms）会被合并，避免 EDL 全是碎片。③ 接入面：
+  `analyzeFile({cutlist:true})`、CLI `--cutlist`、`/api/analyze` 的 `cutlist` 字段、面板「生成粗剪清单」
+  （纯本地不花额度，产物可直接「打开 EDL」定位）。④ 验证：纯函数 12 条用例 + 真 ffmpeg 端到端
+  （自造 2–5s 静音片，删 2.36s、保留 2 段、记录时间连续）+ 服务端路由断言。测试 **383 pass / 0 fail**。

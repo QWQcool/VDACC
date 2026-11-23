@@ -107,7 +107,9 @@
 │  ├─ core/          契约层：types / platform / config / http / progress / cancel / rate / naming / errors
 │  ├─ engines/       douyin / netease / qq / kuwo / kugou / bilibili(_api) / sniff(L2) / generic(yt-dlp)
 │  └─ analyze/       A1：分镜(scdet) / 抽帧 / 台词 / 客观指标（不依赖任何模型）
-├─ ts/tests/         bun test（当前 370 个）；env.ts 是能力探测（非测试文件），
+│                    cutlist.ts 把「分镜 + 静音」翻成 cutlist.csv（切点）与 cutlist.edl（保留段）
+│                    只删 ≥1s 的静音；黑场/口头语/闪白要靠模型判断，猜错就是删正片，不做
+├─ ts/tests/         bun test（当前 383 个）；env.ts 是能力探测（非测试文件），
 │                    capabilities.test.ts 把 ffmpeg/Bun 版本打进输出，缺什么一眼能看到
 ├─ web/              Vue 3 界面（默认入口 /）+ vendor / assets（无 PWA：sw/manifest 已删）
 ├─ ts/src/mcp.ts     MCP server（stdio + 行分隔 JSON-RPC）；默认自己拉起 server.ts，
@@ -166,7 +168,7 @@ venv\Scripts\python.exe -m pip install playwright yt-dlp   # 仅 legacy 需要
 ```bash
 bun --version                              # 1.4.x
 ffmpeg -version                            # 9.x；缺了 B站/音乐/m3u8 全废
-bun test ts/tests                          # 353 pass（缺 ffmpeg 时 2 条端到端 skip，capabilities.test.ts 会写明）
+bun test ts/tests                          # 383 pass（缺 ffmpeg 时 3 条端到端 skip，capabilities.test.ts 会写明）
 bun ts/src/cli.ts probe "<抖音或B站链接>" --json
 ```
 

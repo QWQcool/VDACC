@@ -648,6 +648,17 @@
             <button class="btn ghost sm" :disabled="analysisBusy" @click="makeStyleCard">
               {{ t('styleCard') }}
             </button>
+            <!-- 粗剪清单也是纯本地计算：产出 cutlist.csv / cutlist.edl -->
+            <button class="btn ghost sm" :disabled="analysisBusy" @click="makeCutlist">
+              {{ t('cutlist') }}
+            </button>
+            <span class="an-cost" v-if="analysis.cutlist">
+              {{ t('cutlistDropped') }} {{ (analysis.cutlist.dropped_ms / 1000).toFixed(1) }}s
+              · {{ analysis.cutlist.cuts }} {{ t('cutlistCuts') }}
+              <button class="btn ghost sm" @click="revealPath(analysis.cutlist.files.edl)">
+                {{ t('cutlistReveal') }}
+              </button>
+            </span>
             <button class="btn ghost sm" v-if="!descConfirm" :disabled="analysisBusy" @click="descConfirm = true">
               {{ t('describeShots') }}
             </button>

@@ -23,7 +23,7 @@
 >
 > 迁移状态：引擎 ✅（抖音 / 网易云 / QQ 音乐 / 酷我 / 酷狗 / B站 分P·番剧 / L2 直链·m3u8）、
 > 服务 ✅（probe / jobs / SSE / files / settings / cancel / retry / 持久化）、`auth` ✅（在线校验）、
-> **MCP（给 Agent 用）✅**、**TS 测试 370 个 ✅**、**yt-dlp 可选组件 ✅（SHA256 校验）**、**设置面板 ✅**、**限速 ✅**（`--limit 2M`）、**并发 1–4 ✅**、
+> **MCP（给 Agent 用）✅**、**TS 测试 383 个 ✅**、**yt-dlp 可选组件 ✅（SHA256 校验）**、**设置面板 ✅**、**限速 ✅**（`--limit 2M`）、**并发 1–4 ✅**、
 > **B站字幕 `--subs` / 弹幕 `--danmaku` ✅**（CLI 与 Web UI 都能开）、
 > **专辑 `--album` ✅**（CLI `--offset` + `--dry-run`；Web UI 分批加载，每批 20 首）、
 > **QQ 音乐 ✅**（`auth qq` 扫码；档位由账号会员权限决定）。
@@ -162,6 +162,10 @@ Playwright 起一个独立 Edge（独立 profile，不碰你正在用的）
   也可以用 `analyze --visuals <json>` 把 Agent 或人写好的描述并进同一份结果，不花额度；
 - 声音是默认测的客观量：整片 LUFS、响度范围、真峰值、静音占比与**每镜响度**（面板显示「音量 -20.2」）；
   它不判断「对白还是音乐」——那需要频谱或语音识别，工具只把能测准的数字给你。
+- 面板里点「生成粗剪清单」会产出两份能直接用的文件：`cutlist.csv`（切点 + 每段可删静音，
+  带理由与时间码）与 `cutlist.edl`（CMX3600，Premiere / 达芬奇导入后就是一条删掉长静音的粗剪时间线）。
+  只删「够长的静音」（默认 ≥1s，`--cut-min-silence` 可调）——黑场、口头语、闪白都需要模型判断，
+  猜错会删掉正片，所以不做。
 
 ![界面](docs/design/screenshots/vdl-web-v2.png)
 
@@ -284,7 +288,7 @@ VDACC\
 │  ├─ src\            主线：cli / server / auth / skill_cli
 │  │  ├─ core\        契约层：types / platform / config / http / progress / cancel / rate
 │  │  └─ engines\     douyin / netease / qq / kuwo / kugou / bilibili(_api) / generic(yt-dlp)
-│  ├─ tests\          bun test（370 个）
+│  ├─ tests\          bun test（383 个）
 │  └─ src\mcp.ts      MCP server（stdio，四个工具）
 ├─ web\               Vue 3 界面（默认入口 /）
 ├─ legacy\python\     Python 归档：vdl / skill / tests / tools / dy_* / VDACC.bat（冻结）

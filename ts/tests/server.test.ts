@@ -293,6 +293,30 @@ describe('A1 分析接口', () => {
     expect((await img.arrayBuffer()).byteLength).toBeGreaterThan(0);
   });
 
+  test.skipIf(!HAS_FFMPEG)('传 cutlist:true 时回粗剪汇总并落盘两份清单', async () => {
+    const clip = join(TMP, 'out', 'cut-clip.mp4');
+    const made = Bun.spawn([
+      FFMPEG_PATH as string, '-hide_banner', '-loglevel', 'error', '-y',
+      '-f', 'lavfi', '-i', 'testsrc=duration=2:size=160x120:rate=10',
+      '-f', 'lavfi', '-i', 'sine=frequency=440:duration=2',
+      '-shortest', '-pix_fmt', 'yuv420p', clip,
+    ], { stdout: 'ignore', stderr: 'ignore', windowsHide: true });
+    expect(await made.exited).toBe(0);
+
+    const res = await authed('/api/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: clip, maxFrames: 2, cutlist: true }),
+    });
+    expect(res.status).toBe(200);
+    const data = await res.json() as any;
+    expect(data.ok).toBe(true);
+    expect(data.cutlist.files.csv).toContain('cutlist.csv');
+    expect(data.cutlist.files.edl).toContain('cutlist.edl');
+    // 没给 cutlist 时不该凭空出现这个键
+    expect(data.styleCard).toBeUndefined();
+  });
+
   test('越界路径 400，非视频文件如实报错', async () => {
     const outside = join(TMP, 'out-neighbor', 'outside.txt');
     const bad = await authed('/api/analyze', {

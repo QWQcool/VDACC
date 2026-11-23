@@ -37,6 +37,7 @@ const KNOWN_FLAGS = new Set([
   '--json', '--limit', '--album', '--playlist', '--offset', '--dry-run', '--format', '--cover',
   '--subs', '--danmaku', '--scenes-only', '--max-frames', '--threshold', '--describe',
   '--max-describe', '--visuals', '--pair-frames', '--style-card', '--no-audio',
+  '--cutlist', '--cut-min-silence',
   '--status', '--offline', '--clear', '--renew', '--qr', '--timeout',
   '--help', '-h', '-o',
 ]);
@@ -219,7 +220,8 @@ if (cmd === 'auth') {
     if (!input) {
       console.error('用法: bun src/cli.ts analyze <本地视频> [--json] [--scenes-only]'
         + ' [--max-frames N] [--threshold N] [--describe [--max-describe N]]'
-        + ' [--visuals 描述.json] [--pair-frames] [-o 输出目录]');
+        + ' [--visuals 描述.json] [--pair-frames] [--style-card]'
+        + ' [--cutlist [--cut-min-silence MS]] [-o 输出目录]');
       process.exit(2);
     }
     const { analyzeFile } = await import('./analyze');
@@ -234,6 +236,8 @@ if (cmd === 'auth') {
         visuals: flag('--visuals') || undefined,
         pairFrames: has('--pair-frames'),
         styleCard: has('--style-card'),
+        cutlist: has('--cutlist'),
+        cutMinSilenceMs: flag('--cut-min-silence') ? Number(flag('--cut-min-silence')) : undefined,
         audio: !has('--no-audio'),
       });
       if (has('--json')) {
@@ -262,6 +266,14 @@ if (cmd === 'auth') {
         console.log(`  语义描述：${d.shots} 镜${source}${d.failed ? `（${d.failed} 镜失败）` : ''}`
           + `${d.model ? ` · ${d.model}` : ''}${d.tokens ? ` · ${d.tokens} tokens` : ''}`
           + `${d.reason ? ` · 未完成：${d.reason}` : ''}`);
+      }
+      if (result.cutlist) {
+        const c = result.cutlist;
+        console.log(`  粗剪清单：${c.cuts} 个切点 / 删 ${(c.dropped_ms / 1000).toFixed(1)}s`
+          + `（${c.drops} 段静音）/ 保留 ${c.keeps} 段 · ${c.fps}fps`);
+        console.log(`    ${c.files.csv}`);
+        console.log(`    ${c.files.edl}`);
+        for (const warning of c.warnings) console.error(`提示：${warning}`);
       }
       for (const scene of result.scenes.slice(0, 20)) {
         const span = `${(scene.start_ms / 1000).toFixed(1)}–${(scene.end_ms / 1000).toFixed(1)}s`;

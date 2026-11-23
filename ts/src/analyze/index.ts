@@ -50,6 +50,13 @@ export interface AnalyzeOptions {
    */
   styleCard?: boolean;
   /**
+   * 粗剪清单：落 `cutlist.csv`（切点 + 删除段，带理由）与 `cutlist.edl`（CMX3600 保留段）。
+   * 默认只删「够长的静音」，不猜黑场或口头语——猜错会删掉正片。
+   */
+  cutlist?: boolean;
+  /** 粗剪时判「够长静音」的阈值，默认 1000ms */
+  cutMinSilenceMs?: number;
+  /**
    * 外部提供的语义描述（JSON 文件）。格式三选一：
    *   `{ "1": {shotSize…}, "2": … }` / `[{ "index": 1, … }]` / `{ "scenes": [{ "index": 1, "visual": {…} }] }`
    * 用途：让 Agent（或人）逐帧看完再写进来，不花 API 额度，也不破坏 `result.json` 的契约。
@@ -97,6 +104,17 @@ export interface AnalysisResult {
   audio?: AudioSummary;
   /** A3 风格卡；只有显式要（`--style-card` / `styleCard:true`）才有，同时落盘 style-card.{json,md} */
   styleCard?: import('./stylecard').StyleCard;
+  /** 粗剪清单汇总；只有显式要（`--cutlist` / `cutlist:true`）才有，同时落盘 cutlist.{csv,edl} */
+  cutlist?: {
+    fps: number;
+    cuts: number;
+    drops: number;
+    keeps: number;
+    dropped_ms: number;
+    total_ms: number;
+    warnings: string[];
+    files: { csv: string; edl: string };
+  };
   warnings: string[];
 }
 
@@ -459,6 +477,27 @@ export async function analyzeFile(file: string, options: AnalyzeOptions = {}): P
     result.styleCard = buildStyleCard(result);
     writeFileSync(join(outDir, 'style-card.json'), `${JSON.stringify(result.styleCard, null, 2)}\n`, 'utf8');
     writeFileSync(join(outDir, 'style-card.md'), renderStyleCardMarkdown(result.styleCard), 'utf8');
+  }
+
+  // 粗剪清单：把分镜与静音翻成能直接拖进剪辑软件的产物（CSV 切点 + EDL 保留段）。
+  // 同样**必须显式要**——它只在「准备动手剪」时才需要。
+  if (options.cutlist) {
+    const { buildCutlist, renderCutlistCsv, renderCutlistEdl } = await import('./cutlist');
+    const list = buildCutlist(result, { minSilenceMs: options.cutMinSilenceMs });
+    // CSV 带 BOM：不带的话 Excel 打开中文是乱码（Windows 的老问题）
+    writeFileSync(join(outDir, 'cutlist.csv'), `\uFEFF${renderCutlistCsv(list)}`, 'utf8');
+    writeFileSync(join(outDir, 'cutlist.edl'),
+      renderCutlistEdl(list, basename(result.source.path)), 'utf8');
+    result.cutlist = {
+      fps: list.fps,
+      cuts: list.cuts.length,
+      drops: list.drops.length,
+      keeps: list.keeps.length,
+      dropped_ms: list.dropped_ms,
+      total_ms: list.total_ms,
+      warnings: list.warnings,
+      files: { csv: join(outDir, 'cutlist.csv'), edl: join(outDir, 'cutlist.edl') },
+    };
   }
 
   writeFileSync(join(outDir, 'result.json'), `${JSON.stringify(result, null, 2)}\n`, 'utf8');

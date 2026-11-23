@@ -506,6 +506,24 @@ createApp({
         : (data.error && data.error.message) || 'failed';
     }
 
+    /** 粗剪清单：纯本地计算，不花额度，所以不需要二次确认。 */
+    async function makeCutlist() {
+      const current = analysis.value;
+      if (!current || analysisBusy.value) return;
+      const result = await runAnalyze(current.source.path, { cutlist: true });
+      if (result) analysis.value = result;
+    }
+
+    /** 在资源管理器里定位产物（复用任务的 reveal 接口，端上会退化成系统分享/打开）。 */
+    async function revealPath(path) {
+      if (!path) return;
+      const data = await api('/api/reveal', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: { path },
+      });
+      if (!data.ok) message.value = (data.error && data.error.message) || 'failed';
+    }
+
     async function revealJob(job) {
       if (!job.path) return;
       const data = await api('/api/reveal', {
@@ -1119,7 +1137,7 @@ createApp({
       audioFormat, cancel, retry,
       openSettings, saveSettings, installComponent, previewSelected, previewJob, closePreview,
       analysis, analysisBusy, analysisName, analyzable, analyzeJob, closeAnalysis,
-      descConfirm, describeShots, descPairFrames, makeStyleCard, pairText,
+      descConfirm, describeShots, descPairFrames, makeCutlist, revealPath, makeStyleCard, pairText,
       seekToFrame, seekToScene, applySeek, videoEl,
     };
   },

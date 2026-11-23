@@ -743,6 +743,9 @@ const server = Bun.serve({
           // A2 要花 API 额度：必须显式传 describe:true，且最多 100 镜
           describe: body.describe === true,
           pairFrames: body.pairFrames === true,
+          // 粗剪清单：纯本地，不花额度；产物与 result.json 同级
+          cutlist: body.cutlist === true,
+          ...(Number(body.cutMinSilenceMs) > 0 ? { cutMinSilenceMs: Math.round(Number(body.cutMinSilenceMs)) } : {}),
           // A3 风格卡：纯本地汇总，不花额度，但要显式要（会多算一遍并落两个文件）
           styleCard: body.styleCard === true,
           audio: body.audio !== false,
