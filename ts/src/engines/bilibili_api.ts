@@ -10,6 +10,7 @@ import { join } from 'node:path';
 
 import { throwIfCancelled } from '../core/cancel';
 import { VdlError } from '../core/errors';
+import { httpHint } from '../core/hints';
 import { UA } from '../core/http';
 import { safeName } from '../core/naming';
 import { report } from '../core/progress';
@@ -116,7 +117,7 @@ async function apiJson(path: string, referer: string): Promise<any> {
   const text = await res.text();
   if (!res.ok) {
     // 接口层的 HTTP 错误不是「下载失败」——那时还没开始下载
-    throw new VdlError(`http_${res.status}`, `B站接口 ${name} HTTP ${res.status}`);
+    throw new VdlError(`http_${res.status}`, `B站接口 ${name} HTTP ${res.status}`, httpHint(res.status));
   }
   let data: any;
   try {

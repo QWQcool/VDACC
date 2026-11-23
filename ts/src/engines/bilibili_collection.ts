@@ -18,6 +18,7 @@
  * 但结构仍做硬校验：不符就抛错，绝不把"解析不出来"当成"空收藏夹"。
  */
 import { VdlError } from '../core/errors';
+import { httpHint } from '../core/hints';
 import type { CollectionItem, CollectionKind, CollectionPage } from '../core/types';
 import { cookieHeader } from './bilibili_api';
 
@@ -147,7 +148,8 @@ export async function fetchCollection(
     throw new VdlError('network', `请求 B站 失败：${(err as Error).message}`, '检查网络后重试');
   }
   if (!res.ok) {
-    throw new VdlError('collection_http', `B站 返回 HTTP ${res.status}`, '稍后重试');
+    throw new VdlError('collection_http', `B站 返回 HTTP ${res.status}`,
+      httpHint(res.status) || '稍后重试');
   }
 
   const body = await res.json().catch(() => null);

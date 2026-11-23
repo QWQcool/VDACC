@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { streamToFile, tagAudio } from '../core/audio';
 import { releaseDest, reserveDest } from '../core/dest';
 import { VdlError } from '../core/errors';
+import { httpHint } from '../core/hints';
 import { UA, request } from '../core/http';
 import { safeName } from '../core/naming';
 import type { AlbumInfo, AlbumTrack } from '../core/album';
@@ -252,7 +253,7 @@ function headers(): Record<string, string> {
 
 async function json(url: string, doFetch?: typeof fetch): Promise<any> {
   const res = await request(url, { headers: headers(), doFetch });
-  if (!res.ok) throw new VdlError(`http_${res.status}`, `酷狗接口 HTTP ${res.status}`);
+  if (!res.ok) throw new VdlError(`http_${res.status}`, `酷狗接口 HTTP ${res.status}`, httpHint(res.status));
   return res.json();
 }
 

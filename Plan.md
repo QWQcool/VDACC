@@ -16,103 +16,18 @@
 | 怎么发版（检查清单、体积基线） | `docs/RELEASE.md`（基线数字在 `docs/release-baseline.json`） |
 | 给其它 Agent 的契约 | `ts/skill/SKILL.md`（legacy：`legacy/python/skill/SKILL.md`） |
 | UI 参考、视觉基线、概念图 | `docs/design/` |
-| 已收口的长章节（不再维护，只作结论来源） | `docs/archive/`（当前：`plan-2026-11-bilibili-experience.md` = §2.7–2.8） |
+| 已收口的长章节（不再维护，只作结论来源） | `docs/archive/`：`plan-2026-11-bilibili-experience.md` = §2.7–2.8；`plan-version-history-2026-10.md` = §2.1–2.3；`plan-design-2026-10.md` = §3 |
 | 第三方来源与授权 | `NOTICE` / `THIRD_PARTY.md` |
 
 ---
 
 ## 2. 版本路线
 
-### 2.1 已完成
+### 2.1–2.3 已归档：历史版本与 TS 可行性验证
 
-| 版本 | 主题 | 提交 |
-|---|---|---|
-| M1 | core 契约层（models / errors / router / engines） | `c061013` |
-| M2 | `vdl serve` + SSE + token + 路径 jail + Web 界面 | `7710bca` |
-| M2.5 | `vdl auth` 扫码登录（B站 / 网易云） | `14bef16` |
-| M3 | 界面按设计稿重做（chips / 多选 / 预览 / 角色） | `cf40734` |
-| M4 | 网易云引擎（免签名 lossless + 标签封面歌词） | `0c6d95b` |
-| M5 | B站引擎（yt-dlp + 合并 + 进度聚合） | `93de338` |
-| M6 | Skill 打包（`video-acquire`） | `0f1a79c` |
-| R1–R5 | 测试、配置/历史、generic 兜底、局域网、1.0 发布 | 见 CHANGELOG |
-| v1.1 | 续传/重试、取消/重试、`doctor --live`、并发 | `ea523b3` |
-| v1.2 | schema=2、B站分P、字幕 | `69c6ea2` |
-| v1.3 | PWA、浏览器扩展、便携包 | `50cf8bb` |
-| v2.0 | 手机首次连接、移动布局、移动路线边界 | `452169e` |
-| v2.1 | 封面 sidecar、字幕落盘验证 | `ac37ca1` |
-
-### 2.2 3.1–3.3 完成盘点（TS 主线）
-
-> 本节保留既有验收记录；新的后续建议以 §2.6 为准。历史版本中的「待补」不自动转为当前待办。
-
-> 原先这里是 Python 时代的 v2.2–v2.9 排期。其中的设置与登录态、Vue 3 + i18n、批量三态全选、
-> 番剧、限速、单文件打包**都已在 3.0/3.1 完成**（见 `docs/CHANGELOG.md`），故整表重写。
-> 批次约束继续有效：**清晰度整批统一**；默认上限 20、硬上限 50；必须 dry-run 预览；
-> 只做「该视频所在的分P/合集」，**不做收藏夹抓取**。
-
-#### 2.2.1 P0 收口（先让项目在本机能跑起来）
-
-| 项 | 现状 | 验收 |
-|---|---|---|
-| 运行时决策 | ✅ 已解决（2026-10-23，winget 实装）：`winget install Oven-sh.Bun` → **Bun 1.4.4**，shim 在 `%LOCALAPPDATA%\Microsoft\WinGet\Links`（该目录已在用户 PATH，但**已开着的终端不会刷新**，需新开窗口——这正是上一轮"记录说装好、实际 `where bun` 找不到"的原因）。`VDACC.bat` 已加 fallback 直接探该路径。实测：`bun --version` / `bun test`（53 绿）/ `bun install`（playwright-core 1.64.1）/ server 起来后 `/` 200 且 `/api/*` 401 / 真实抖音 probe 成功。59 处无 `.ts` 后缀的相对 import 由 Bun 直接解析 | `bun run probe "<url>"` 可用 |
-| 启动器 | ✅ 已解决（2026-10-23）：`抖音下载器.bat` 已删，改为 `VDACC.bat`（起服务 + `--open` 打开浏览器）；实测双击后 `/` 200、无 token 的 `/api/health` 401 | 双击起 Web 界面并自动打开浏览器 |
-| 版本号 | ✅ 已解决（2026-10-23）：两个 `package.json` 与 `/api/health` 均为 3.1.0，`server.test.ts` 断言同步改为 3.1.0，CHANGELOG 补 v3.1.0，tag `v3.1.0` | 3.1.0 + tag + CHANGELOG 对齐 |
-
-#### 2.2.2 P1 功能补齐
-
-| 项 | 现状 | 验收 |
-|---|---|---|
-| QQ 音乐接路由 + 下载 | ✅ 已解决（2026-10-23）：`getQQ` 流式落盘 + 限速/续传 + ffmpeg 写 title/artist/album 与封面，已接 `platformOf`/server/cli。实测《轻轻》128K MP3 3,554,923 字节（3,529,853 原始 + 封面标签）、96K AAC 2.60MB，ffprobe 确认 128000bps / mjpeg 封面 / 三个标签。**该账号仍未放行 320K/FLAC**（104003），取决于会员 | probe 出档位；下载带标签/封面 |
-| 番剧 4K 选流对齐 yt-dlp | ✅ 已定稿（2026-10-22）：avc 兼容优先，接受体积差（TS 1.47GB vs Python 1.89GB，同为 3840×2160）。不再作为待办 | 差异有明确结论，或消除 |
-| SSE 进度分母 | ✅ 已解决（2026-10-23）：原实现已有 base+written 聚合，但分母用的是 playurl 带宽估算（带宽缺失时为 0，退回单流分母 → 视频下完先到 99.9% 再回落）。现改为 Range 探测两条流真实字节作分母，探不到才回退估算 | 视频+音频总字节作分母 |
-| 字幕真实样本验证 | ✅ 已解决（2026-10-23）：TS 实现 `--subs`（`player/v2` → `subtitle_url` → SRT，中文/AI 中文字幕优先，失败不影响视频）；实测 `BV1DSnK6REdy`（52s，7 种 AI 字幕）落 32 条 `.srt`，重复执行走跳过分支仍会补字幕 | 找到有 CC 的视频跑通端到端 |
-
-#### 2.2.3 P2 体验
-
-| 项 | 说明 |
-|---|---|
-| 弹幕 XML | ✅ 已完成（2026-10-23）：`--danmaku` 落同名 `.danmaku.xml`，与 `--subs` 同机制（跳过视频也会补）；实测 K/DA MV 1200 条 / 126,636 字节；番剧明确报「暂不支持」 |
-| 音乐专辑批量 | ✅ 已完成（2026-10-23）：`--album`（网易云 / QQ）+ `--dry-run` 预览，单批 20 首；**2026-10-26 补分批**：`offset` 续取（CLI `--offset`、`/api/album` 与界面「加载下一批」），仍逐首下载、失败继续并汇总。实测 173 首 → 第 1/2/9 批分别为 20/20/13，界面追加后保留勾选 |
-| 网易云歌单 | ✅ 已完成（2026-11-11，含真实接口实测）：`--playlist` / `/api/album` / 界面复用专辑列表卡（标签变 PLAYLIST）。`playlist/detail` 的 `n` 只控制内联曲目、`trackIds` 全量，`playlist/track/all` 匿名已 404，所以走 `trackIds` + 每批 100 条 `song/detail`。热度榜 3778678 实测 200 首 / 419–610ms / 0 warnings，CLI 与浏览器端到端均通。`163cn.tv` 短链同批补上（跟一次跳转，落在 `st.music.163.com` 活动页要明确报错）；Android 引擎已移植 |
-| QQ 音乐歌单 | ✅ 已完成（2026-11-11，含真实接口实测）：`musicu.fcg` 的 `music.srfDissInfo.aiDissInfo / uniform_get_Dissinfo`（匿名可用，`song_num=100` 一次给整单）；`fcg_ucc_getcdinfo_byids_cp` 对同一歌单回 `subcode=4000 check privacy error`，**不可用**。实测 66 首歌单 4 批 / 85–102ms。入口同上（`--playlist` / `kind=playlist` / 界面 PLAYLIST 卡），Android 同步移植 |
-| B站 音频单独下载 | ✅ 已完成（2026-11-11）：probe 多一条 `audio` 档（体积只按音频带宽算、不抢推荐），`get --format audio` 只下 DASH 音频轨并转封装 m4a；界面「音频」chip 从禁用改为可点。实测 `BV1SknF6KE5g`：4,981,362 字节 / aac 48kHz 立体声 173kbps / 228.3s，ffprobe 确认只有一条音轨 |
-| 酷我 / 酷狗 | ✅ 已完成（2026-10-23）：公开接口 probe + 下载 + 标签/封面（酷我还有 `.lrc`），已接路由。实测酷我 128kbps 3,368,054 字节 / 酷狗 128kbps 4,631,150 字节；320K/FLAC 需会员，接口拒绝时如实报试听档 |
-| 酷狗歌单 / 酷我歌单 | ✅ 酷狗已接（2026-11-11，真实实测）：`special/info` + `special/song?page=&pagesize=`，51 首歌单第 1 批 20 首，歌手歌名从 `filename` 拆分。❌ 酷我**不可用**：网页 API 要 `csrf` + `kw_token` 而首页不下发、桌面歌单页 430、移动页是压缩 NUXT 表达式（不 eval）；搜索接口只给歌单名不给曲目。两处都给出明确原因，不说「识别不出 ID」 |
-
-#### 2.2.4 P3 可选 / 长期
-
-| 项 | 前提 |
-|---|---|
-| 移动原生壳 | 🟡 Android 已做（2026-10-23）：`mobile/android/` 极薄 WebView 壳（无第三方依赖，APK 9,637 字节），配合服务端新增的 `--lan`；手机只当屏幕，解析/下载都在电脑上。HarmonyOS NEXT（HAP）待华为开发者账号；端上仍不跑引擎 |
-| L2 通用嗅探（m3u8 / 直链） | ✅ 已完成（2026-10-23）：扩展名接管（mp4/webm/mov/mkv/m4v/flv/m3u8），m3u8 解析 master 变体（时长/体积估算）并用 ffmpeg 合成 mp4（进度/取消）；直链复用 `.part` 续传。实测公开 HLS 184P 20,049,937 字节、直链 mp4 991,017 字节。**不跑页面 JS、不做 blob/MSE**，网页仍交给 yt-dlp |
-
-#### 2.2.5 不做
-
-私密视频 / 直播；站点广度竞赛；收藏夹批量抓取；视频分析与生成侧（§2.4）。付费限制和 DRM 研究的决策已于 2026-10-27 更新，见 §2.6.3。
-
-### 2.3 TS 可行性验证（`spike/ts-core`）
-
-> 历史验证方案，TS 已在 3.0 转为主线；本节不再排期。2026-10-25 复核远端 spike 分支没有领先 main 的提交。
-
-目的：回答「TS 能否等价替代 Python」，不是重写。分支 5 天，不合并，产出 `REPORT.md`。
-
-| # | 问题 | 通过条件 |
-|---|---|---|
-| Q1 | 四个引擎能否等价实现 | 同一 URL 的 probe 字段一致；抖音 1080P 下载字节数相同 |
-| Q2 | yt-dlp 怎么用 | 独立 `yt-dlp.exe`（**无系统 Python**）跑通 B站，进度可解析 |
-| Q3 | 运行时能力 | HTTP/SSE、流式、续传、ffmpeg、重命名 |
-| Q4 | 登录设施 | Playwright Node 的 `storageState` 与现有 `auth/*.json` 兼容 |
-| Q5 | 打包 | `bun build --compile` 的 exe 体积与冷启动 |
-
-失败条件（任一成立即写「不建议迁移」，不硬拗）：
-
-- 抖音签名需要 Node 拿不到的头且无法绕过；
-- `yt-dlp.exe` 在无 Python 环境跑不起来；
-- 进度只能靠轮询文件大小且不稳定；
-- exe 启动 > 3s 或体积 > 100MB。
-
-若通过：**增量迁移**——新引擎（QQ）先用 TS，Python 保留旧引擎，`/api` 按平台路由；
-parity 稳定后再决定 Python 是否退化为 yt-dlp helper。
+> 3.0–3.3 的完成盘点、`spike/ts-core` 的可行性验证已整体下沉到
+> [`docs/archive/plan-version-history-2026-10.md`](docs/archive/plan-version-history-2026-10.md)。
+> 逐版本改了什么看 `docs/CHANGELOG.md`；这里只留「当前还没做什么」。
 
 ### 2.4 解冻状态与明确不做
 
@@ -488,276 +403,11 @@ Android 壳复用同一批 HTTP 接口，不再单独实现。
 | D4 | 单 P 是否也回 `parts[1]` | 是 / 否 | **是**（与唧唧 一致），但要同步 UI 与既有测试 |
 
 ---
-
-## 3. 设计存档（2026-10-19 讨论）
-
-> 以下为当时的架构探讨，部分前提已被 2026-10-21 的实测推翻（见各节批注）。
-> 保留它是为了记录「为什么这么设计」，**不要按它排期**。
-
----
-
-### 3.1 起点：现状盘点
-
-已跑通的部分（抖音）：
-
-```
-Playwright 起独立 Edge（channel=msedge，独立 user_data_dir）
-  → 打开视频页，浏览器自己算 a_bogus 签名、自己请求 aweme/detail
-  → 拦 response 拿 detail JSON（24~30 档清晰度）+ 视频 CDN 地址
-  → 按 bit_rate 排序，逐个试下，实际比字节数取最大
-  → 用浏览器上下文下载（自动带 cookie + Referer）
-```
-
-已验收：能拿 `normal_1080_0` 最高档，无水印，不依赖用户关闭浏览器。
-GUI 侧 worker 在子线程调用，已验证线程安全。
-
-> **2026-10-21 更正（推翻本文件多处前提）**：上面这套截流方案本身可用，但"抖音签名只有浏览器算得出"是错的。
-> 真正的门是 `x-secsdk-web-signature`（md5 + 硬编码 salt），纯 HTTP 可算；`ttwid` 还能自己注册，
-> 所以**无 cookie 也能下**。已实测官方 yt-dlp 2026.08.19 + PR #17826 补丁：无 cookie 拿到 1080×1920 / h264 / 30fps；
-> 未打补丁则 403。结论：抖音应从"必须借浏览器的 L3"降级为"纯 HTTP 引擎"，
-> 浏览器方案保留作兜底与其它站点用。
-
-**体检发现（关键）**：~~`venv` 与 PATH 都没有 ffmpeg~~ → 2026-10-21 复检，本机 PATH 已有 **ffmpeg n8.1.2**（winget）。
-它仍是 B站/YouTube 的硬前提（DASH 音视频分离），但不再是当前阻塞（理由见 AGENTS.md 第二节）。
-
----
-
-### 3.2 目标拆解
-
-用户提出三件事，复杂度差异极大，建议**按依赖顺序推进，不要并行**：
-
-| # | 目标 | 性质 | 风险 |
-|---|---|---|---|
-| A | 支持 B站 | 工程，路径清晰 | 低 |
-| B | 通用网页视频下载 | 工程，边界要划清 | 中 |
-| C | 分析视频风格 → 生成提示词（**已冻结**，见计划文档 §0.1；不含三视图） | 半研究性质 | 中 —— 缺 H3 通道 |
-| D | 整体封装成 Skill | 形态重构 | 低（但依赖 A-C 稳定） |
-
-**2026-11-02 更新：目标 C 解冻后当天即冻结。** 范围已收窄为「同风格新内容 + MiniMax H3 提示词」，
-人物三视图不做；计划见 [`docs/style-transfer-plan.md`](docs/style-transfer-plan.md)（A0–A5，约 6 天）。
-冻结原因不是方向不成立，而是**缺 H3 运行通道**（用户不再长租算力，本机 10 GB 显存差一个数量级），
-A0 第三项与 A5 无法验收，重启条件见该文档 §0.1。
-当时（2026-10-21）暂缓的理由是「三视图一致性与提示词可复刻性不足」，这个判断对三视图仍然成立。
-
----
-
-### 3.3 目标 A：B站 —— 加"第二个引擎"，不是新写提取器
-
-#### 3.3.1 问题定性（2026-10-21 更正）
-
-抖音的病**不是**"签名算不出来"：签名是 `x-secsdk-web-signature = md5(uifid_timestamp_SALT_query)`，
-纯 HTTP 可算，见 §3.1 更正。「必须借浏览器」这条判断不成立。
-B站的病是**要不要登录**（WBI 签名 yt-dlp 已经实现）。
-
-两者性质不同，所以 B站不该复刻截流方案。
-
-#### 3.3.2 方案对比
-
-| 方案 | 能拿到 | 代价 | 结论 |
-|---|---|---|---|
-| A1. yt-dlp 裸跑 | 最高 720P（未登录） | 零成本 | 起步够用 |
-| A2. yt-dlp + 自有 profile 导 cookie | 1080P / 部分 4K | 需登录一次 | **推荐主线** |
-| A3. Playwright 截 `playurl` 响应 | 同 A2 | 复刻抖音那套 | 冗余，不做 |
-
-#### 3.3.3 核心洞察：三道墙其实可以合法绕开
-
-App-Bound Encryption 挡的是「**从磁盘偷用户的 cookie**」——密钥绑在浏览器进程上，
-离线解密必挂。但我们自己起的独立 profile，`context.storage_state()` 拿到的是
-**明文 cookie**，因为我们是进程内的合法持有者，不是外部窃取者。
-
-```
-在 browser_profile 里扫码登录一次 B站
-  → context.storage_state() 导出 → cookies.txt
-  → 喂给 yt-dlp --cookies cookies.txt
-```
-
-不碰用户浏览器、不用关 Edge、不涉及任何解密。
-同一把钥匙以后还能开 YouTube（年龄限制）、小红书、微博。
-
-**结论**：这条路比"再写一个截流器"划算得多，应作为通用凭据方案。
-
-#### 3.3.4 待办
-
-- [ ] 实现 `auth.py`：headful 打开目标站 → 用户手动登录 → 导出 `cookies.txt`
-- [ ] B站 engine 接入 yt-dlp，格式选择 `bv*+ba/b`（最高画质优先）
-- [ ] 验证 1080P 是否真的拿到（对比 `-F` 列表里的分辨率）
-
----
-
-### 3.4 目标 B：通用化 —— 分层，别指望一个万能的
-
-#### 3.4.1 三层结构
-
-| 层 | 手段 | 覆盖 | 可靠性 | 备注 |
-|---|---|---|---|---|
-| L1 | yt-dlp | 1752 站点 | 高 | 社区维护，优先 |
-| L2 | 通用嗅探（拦 m3u8/mp4/DASH） | 任意网页 | 中 | 复用抖音那套拦截思路 |
-| L3 | 逆向站点签名 | 抖音这类 | 低 | 易失效，逐个加 |
-
-路由原则：**域名命中 L3 → L3；否则先试 L1；L1 报 unsupported → 降级 L2。**
-
-#### 3.4.2 L2 的真正难点（不是"截到地址"）
-
-截到 URL 只是开始，后面的处理才是难点：
-
-1. **m3u8 分片** —— 不要自己拼，把 m3u8 URL 直接交给 ffmpeg 吃
-2. **DASH 分离流** —— 要挑 video + audio 两条，再 `-c copy` 合并
-3. **候选选优** —— 页面里常有广告流 / 预览流 / 正片流混杂，不能只按字节数排序
-4. **流式落盘** —— 现在的 `save()` 用 `resp.body()` 全量进内存，
-   1GB 的文件直接爆。必须改成边下边写 + 边算大小
-
-#### 3.4.3 DRM 历史决策（已更新）
-
-历史上将 DRM 排除在范围之外；该决定已于 2026-10-27 取消，现以 §2.6.3 和 `ReversePlan.md` 为准。取消禁令不代表现有实现支持任何 DRM 方案；具体协议、内容和权限须分别验证。
-
----
-
-### 3.5 目标 C：视频分析 —— 已解冻，见独立计划（2026-11-02）
-
-> ✅ **本项目已重启**，执行计划见 [`docs/style-transfer-plan.md`](docs/style-transfer-plan.md)。
-> 以下是 2026-10-19 的原始设计输入，部分已被新计划收窄或替换：
-> 三视图仍不做；提示词部分改为对齐 MiniMax H3 官方三字段格式；VLM 确定为 DeepSeek。
->
-> **2026-11-06 现状**：范围收窄后的 **A1（分镜 + 抽帧 + 台词 + 客观指标）已落地**
-> （`ts/src/analyze/`、`cli analyze`），**A2–A5 仍冻结**——它们要 H3 出片才能验收。
-
-#### 3.5.1 三段式拆解（确定性依次下降）
-
-| 段 | 内容 | 手段 | 确定性 |
-|---|---|---|---|
-| C1 | 抽帧 + 场景切换检测 + 语音转写 | ffmpeg `scdet` + faster-whisper | **确定，纯工程** |
-| C2 | 画面内容理解 | VLM（本地 Qwen-VL 类 7B / 云端多模态 API） | 半确定 |
-| C3 | 生成三视图 / 视频提示词 | 文生图 / 提示词工程 | **不确定** |
-
-建议**先做 C1，C2 可做，C3 单独隔离**。别让高不确定性功能拖垮已经很稳的下载工具。
-
-#### 3.5.2 坑一：三视图不能"抽一帧直接生成"
-
-单帧里压根没有背面和侧面的信息，模型只能瞎猜，出来是三张不同的脸。靠谱路径：
-
-```
-多帧采样（覆盖不同角度 / 景别）
-  → VLM 提炼「角色设定卡」（结构化字段）
-     发色 / 发型 / 瞳色 / 体型 / 服装 / 配饰 / 画风 / 年龄段
-  → 逐视角独立生成（正面 / 侧面 / 背面，固定 seed + 同一设定卡）
-```
-
-**预期管理**：一致性是行业难题。能做到"参考级"三视图，做不到"可直接进 pipeline 的资产级"。
-要资产级需上角色 LoRA 或 ControlNet，那是另一个量级的工程。
-
-#### 3.5.3 坑二：反推提示词不是"写一段描述"
-
-视频生成模型吃的是**镜头级**提示词，结构大致：
-
-```
-主体 + 动作 + 运镜（推/拉/摇/移/环绕）+ 光线 + 风格 + 时长 + 情绪
-```
-
-一条长描述喂给 Seedance 只会得到平庸结果。必须**按镜头切分，一镜一条**。
-而且各平台偏好不同（MiniMax 偏自然语言叙事、可灵支持结构化运镜参数），
-需要一层「模板适配器」，不能一套提示词打天下。
-
-#### 3.5.4 合规红线
-
-视频里是真实人物时，生成其三视图属肖像权高风险区。
-默认走「风格化 / 二次元化」路径，或在 UI 上明确标注用途受限。
-
----
-
-### 3.6 目标 D：Skill 化 —— 值得做，但不是现在
-
-#### 3.6.1 三个判断
-
-**判断一：现在这套形态和 Skill 要的不是一回事。**
-Skill 的消费者是 agent，agent 不会去点 tkinter。它需要的是：
-
-```bash
-cli.py "url" --json    # 吐结构化结果
-```
-
-GUI 留着给人用，两者共用同一套后端。这正好倒逼把 `download()` 的
-log 回调改成「结构化事件 + 可选人类可读日志」。
-
-**判断二：拆两个 Skill，不要合成一个。**
-
-| Skill | 输入 → 输出 | 触发语 | 失败模式 |
-|---|---|---|---|
-| `video-acquire` | 链接 → mp4 + meta.json | 下载/保存这个视频 | 网络、签名失效 |
-| `video-analyze` | 本地视频 → 分析 JSON / 提示词 / 三视图 | 分析这个视频、反推提示词 | 模型幻觉、画质不足 |
-
-合成一个会导致 SKILL.md 臃肿到触发条件模糊。
-
-**判断三：有三个硬约束必须先解决，否则 Skill 不可用。**
-
-1. **profile 单例锁** —— `browser_profile` 被两个进程同时用会崩，必须上文件锁
-2. **超时** —— agent 耐心是分钟级。单视频 6~10 秒 + 启动浏览器 3 秒，
-   批量 5 个就一分钟。要么"先返回任务 id 再轮询"，要么限制批量
-3. **输出契约** —— 日志给人看，agent 要的是：
-   ```json
-   {"ok": true, "path": "...", "title": "...", "platform": "douyin",
-    "quality": "1080p", "bytes": 833706, "error_code": null}
-   ```
-   错误码要区分：`signature_invalid` / `login_required` / `drm_unsupported` / `network`，
-   而不是一句 `Fresh cookies needed`。
-
----
-
-### 3.7 现有代码的重构点
-
-增量重构即可，GUI 几乎不用动。
-
-| 位置 | 问题 | 改法 |
-|---|---|---|
-| `dy_dl.py:40` `extract_targets()` | 硬编码 douyin 域名，无抖音链接就退化成抠数字 ID，B站链接会被当无效输入 | 拆成「通用 URL 抽取」+「域名路由」 |
-| `dy_dl.py:74` `collect_candidates()` | 写死 `aweme.video.bit_rate` 结构 | 移进 `DouyinEngine` |
-| `dy_dl.py:182` `fetch()` | 只认 `/aweme/detail` 响应 | 移进 `DouyinEngine` |
-| `dy_dl.py:210` `save()` | `resp.body()` 全量进内存 | 重写为流式落盘 |
-| `dy_dl.py:172` `_wait_aweme()` | `time.sleep(0.8)` 轮询 | 改事件等待（`page.wait_for_response`） |
-| `dy_dl.py:271` 命名 | `vid_title.mp4` 的 vid 语义绑定抖音 | 换通用 schema |
-
-目标形态：
-
-```python
-class Engine:          # 抽象
-    def fetch(url) -> MediaInfo
-    def download(MediaInfo, dest) -> Path
-
-class DouyinEngine(Engine):   # 现有 Grabber 收编
-class YtdlpEngine(Engine):    # B站/YouTube/1752 站点
-class SniffEngine(Engine):    # 通用 m3u8 / 直链兜底
-
-def route(url) -> Engine: ...  # 域名 → 引擎
-```
-
----
-
-### 3.8 当年的推进顺序（P0–P5，已完成归档）
-
-| 优先级 | 任务 | 状态 | 验收标准 | 依赖 |
-|---|---|---|---|---|
-| **P0** | 装 ffmpeg | **完成**（本机 n8.1.2） | `yt-dlp -F` 不再警告 ffmpeg not found | — |
-| **P0.5** | 抖音纯 HTTP 签名引擎（`dy_http.py`） | **完成 2026-10-21** | 无 cookie 拿 1080p，浏览器方案降为兜底 | P0 |
-| **P1** | 引擎路由重构 + B站跑通 | **完成**（M1 + M5） | B站视频下有声音有画面，1080P | P0 |
-| **P2** | 通用兜底 | **完成**：`ytdlp-generic`（R3）+ L2 直链/`m3u8` 嗅探（3.2.0，`ts/src/engines/sniff.ts`；不跑页面 JS、不做 blob/MSE） | 任找一个 yt-dlp 不支持的站点下成功 | P1 |
-| **P3** | 分析链路（分镜 + 抽帧 + 客观指标） | **A1 已落地 2026-11-06**：`ts/src/analyze/` + `cli analyze`（台词只读同名字幕，不做语音识别） | 30s 视频出 scenes + 帧 + 台词 → 真机 122s MV 出 47 段/41 帧 | — |
-| **P4** | 风格卡 + H3 提示词 | **仍冻结**（`docs/style-transfer-plan.md` §0.1：没有 H3 通道就无法验收 A2–A5） | 产出可直接喂 H3 的三字段 prompt | P3 + H3 通道 |
-| **P5** | Skill 化封装（`video-acquire`） | **完成**（M6） | agent 能一句话调通 | P1 |
-
-**P0/P1 是地基**，且能验证"通用化"这个假设成不成立。
-P3 之后的每一段都应能独立失败而不影响下载器。
-
----
-
-### 3.9 当年已决策（2026-10-21）
-
-| # | 决策 | 影响 |
-|---|---|---|
-| 1 | **ffmpeg：优先便携版**，`ffmpeg.exe` + `ffprobe.exe` 放 `venv\Scripts\`；找不到再回落系统 PATH | 运行时查找顺序以 `legacy/python/vdl/core/env.py` 为准：`venv\Scripts` → `PATH` → 报 `ffmpeg_missing`；TS 侧认 `VDL_FFMPEG` 或 PATH。二进制不入库（venv 已 gitignore）。**本机现状（2026-10-23 实装）**：`winget install Gyan.FFmpeg` → **ffmpeg/ffprobe 9.0.2-full_build**，shim 在 `%LOCALAPPDATA%\Microsoft\WinGet\Links`（在用户 PATH）。功能等同，但不符合"不污染系统"的初衷；换机时按便携版放进 `venv\Scripts\` 即符合决策 |
-| 2 | 分析侧走**云端 DeepSeek API**（2026-11-02 确认） | 用户确认 DeepSeek 支持图像输入。A0 仍要先做连通性验证，不通过则退到 Qwen-VL / GLM-4V。生成侧用 **MiniMax H3** |
-| 3 | **B站 V1 就登录** | `vdl auth bilibili`：独立 profile 扫码 → `storage_state()` 导出 cookie → yt-dlp 用。不登录只到 720P |
-| 4 | GUI 壳 = **本地 Web UI**（`vdl serve`），tkinter 仅过渡 | 端口固定 `8765` + 一次性 token；SSE 推进度 |
-| 5 | 音乐默认 **lossless**，拿不到时如实降级并标注 | 单曲体积大，UI 必须先显示真实大小 |
-| 6 | infOS **暂不集成**，UI 风格向它靠 | 等作者确认要不要子应用；我们的 `vdl serve` 已为其预留对接点 |
+## 3. 设计存档（已归档）
+
+> 2026-10-19 的架构讨论（目标 A–D、分层取舍、重构点、当年 P0–P5 顺序）已整体下沉到
+> [`docs/archive/plan-design-2026-10.md`](docs/archive/plan-design-2026-10.md)。
+> **那是当年的取舍记录，不是待办**；当前计划只看 §2.4–§2.9。
 
 ---
 
@@ -899,3 +549,15 @@ P3 之后的每一段都应能独立失败而不影响下载器。
   ⑤ **Android**：端上 `albumAny` 补酷狗（离线自检 +9 条断言）；JDK 17 / Gradle 8.7 / SDK 34 装到
   `C:\tools`，`assembleDebug` 出 **1.05MB APK** 并在雷电模拟器装上启动——但该模拟器 adb 不通，
   **真机流程未验收**。⑥ CI 恢复 `push`/`PR` 自动触发。测试 **344 pass / 0 fail**。
+- 2026-11-23：**真机回归 + 签名包 + 错误码统一 + 文档拆档**。① **模拟器回归**（adb 仍不通，
+  用 `ldconsole installapp/runapp` + PrintWindow 截图 + 鼠标/键盘自动化）：release 包装上并启动，
+  真实酷狗歌单解析出 **20/36 首**；顺手抓到两个**端上独有**的问题——任务卡显示内部 id
+  （`mmwt04ayr20`）、失败文案缺「平台原话：需要付费」。已修并在设备上复验：标题变成
+  `G.E.M.邓紫棋 - GLORIA`，文案带上原话。② **release 签名**：`keystore/` + `keystore.properties`
+  （均不入库），`assembleRelease` 出 **822 KB** 签名包，`apksigner verify` 通过（`CN=VDACC`）。
+  ③ **错误码统一**：新增 `core/hints.ts`，六个引擎与收藏夹的接口错误都带解释；**搞不清的码返回空串**。
+  ④ **文档拆档**：`Plan.md` 108→67 KB、`AGENTS.md` 35→16 KB，平台事实表下沉
+  `docs/verified-facts.md`（40+ 条，唯一事实来源）。⑤ **任务显示名**：`/api/jobs` 接受 `name`，
+  专辑/歌单/分P/收藏夹入口都带上，桌面与端上同口径。⑥ **DSH 插件方案**：
+  `docs/design/dsh-plugin-plan.md`——不迁移只加壳，与 infOS 共用中立工具描述。
+  测试 **353 pass / 0 fail**。

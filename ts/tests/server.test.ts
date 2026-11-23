@@ -173,6 +173,25 @@ describe('设置', () => {
 });
 
 describe('队列持久化与事件重连', () => {
+  test('提交时可带显示名：任务卡不再是一串内部 id', async () => {
+    const res = await authed('/api/jobs', { method: 'POST', body: JSON.stringify({
+      url: 'https://example.invalid/unsupported', formatId: '',
+      // 批量入口会给「歌手 - 歌名」；多行/超长要收敛
+      name: '  G.E.M.邓紫棋 - 于是\n(超长) ' + 'x'.repeat(200),
+    }) });
+    expect(res.status).toBe(202);
+    const job = (await res.json() as any).job;
+    expect(job.name.startsWith('G.E.M.邓紫棋 - 于是 (超长)')).toBe(true);
+    expect(job.name).not.toContain('\n');
+    expect(job.name.length).toBeLessThanOrEqual(120);
+
+    // 不带 name 时不伪造：保持 undefined，界面自己退回档位 id / 任务 id
+    const plain = await authed('/api/jobs', { method: 'POST', body: JSON.stringify({
+      url: 'https://example.invalid/unsupported', formatId: 'x',
+    }) });
+    expect((await plain.json() as any).job.name).toBeUndefined();
+  });
+
   test('历史写盘失败时整批回滚，API 不假报成功或启动下载', async () => {
     const file = join(TMP, 'jobs.json');
     renameSync(file, file + '.backup'); mkdirSync(file);

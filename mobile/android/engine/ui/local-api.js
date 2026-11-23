@@ -259,9 +259,13 @@
       const ids = Array.isArray(body.formatIds) && body.formatIds.length
         ? body.formatIds.filter((one) => typeof one === 'string')
         : [String(body.formatId || '')];
+      // 显示名：批量入口（专辑/歌单/分P）已经知道标题，带上它任务卡才不是一串 id
+      // （2026-11-23 真机回归：20 条失败任务全显示 `mmwt04ayr20` 这种内部 id）
+      const nameText = String(body.name || '').replace(/\s+/g, ' ').trim().slice(0, 120);
       const created = ids.map((formatId) => {
         const job = {
           id: nowId(), url: target, formatId,
+          ...(nameText ? { name: nameText } : {}),
           // 附属产物开关与桌面 /api/jobs 同名字段；端上目前只有 B站 认它们
           subs: !!body.subs, danmaku: !!body.danmaku, cover: !!body.cover,
           status: 'queued', percent: 0, bytes: 0, total: 0, createdAt: Date.now(),

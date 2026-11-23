@@ -5,6 +5,16 @@ plugins {
     id 'org.jetbrains.kotlin.android'
 }
 
+// release 签名：真实密钥**不入库**（`keystore/` 与 `keystore.properties` 都在 .gitignore 里）。
+// 没有 keystore.properties 时 debug 照常；`assembleRelease` 会在下面的 taskGraph 钩子里**直接失败**
+// ——未签名的 release 包装不上、也没法升级覆盖，静默产出比报错更坑。
+def keystorePropsFile = rootProject.file('keystore.properties')
+def hasReleaseKey = keystorePropsFile.exists()
+def keystoreProps = new Properties()
+if (hasReleaseKey) {
+    keystorePropsFile.withInputStream { keystoreProps.load(it) }
+}
+
 android {
     namespace 'com.vdacc.app'
     compileSdk 34
@@ -18,9 +28,21 @@ android {
         versionName '1.0'
     }
 
+    signingConfigs {
+        if (hasReleaseKey) {
+            release {
+                storeFile rootProject.file(keystoreProps['storeFile'])
+                storePassword keystoreProps['storePassword']
+                keyAlias keystoreProps['keyAlias']
+                keyPassword keystoreProps['keyPassword']
+            }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
+            if (hasReleaseKey) signingConfig signingConfigs.release
         }
     }
 
@@ -37,3 +59,13 @@ android {
 // 仍然刻意不引第三方运行时依赖：壳子只做 WebView 包装 + 一条桥。
 // kotlin-stdlib 由 Kotlin 插件自动加入（它是语言运行库，不是业务框架）。
 dependencies {}
+
+// 没有密钥就别悄悄产出未签名包：`assembleRelease` 直接失败并说清怎么补。
+gradle.taskGraph.whenReady { graph ->
+    if (!hasReleaseKey && graph.allTasks.any { it.name == 'assembleRelease' }) {
+        // 用英文：Windows 控制台默认 GBK，中文在这里会变成乱码，反而看不懂
+        throw new GradleException(
+            'Missing mobile/android/keystore.properties: release builds must be signed.'
+            + ' Copy keystore.properties.example, generate the key with its keytool command, then retry.')
+    }
+}

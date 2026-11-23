@@ -226,7 +226,8 @@ createApp({
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             // 档位留空 = 用引擎推荐档；资源开关沿用账号面板里的全局偏好
-            body: { url: item.url, formatIds: [''], ...enabledSidecars('bilibili') },
+            // name：收藏夹/合集条目带标题，任务卡才显示「某视频」而不是内部 id
+            body: { url: item.url, formatIds: [''], name: item.title, ...enabledSidecars('bilibili') },
           });
           if (data.ok) {
             for (const job of data.jobs || []) upsert(job);
@@ -423,7 +424,12 @@ createApp({
       if (album.value) {
         // 音乐封面由引擎内嵌；独立视频封面开关不冒充音乐 sidecar 能力。
         for (const track of albumTracks.value.filter((x) => checkedTracks.value.includes(x.id))) {
-          requests.push({ url: track.url, formatIds: [''] });
+          // name 只是显示用（不参与落盘命名）：队列里与失败的任务卡靠它认出是哪首歌
+          requests.push({
+            url: track.url,
+            formatIds: [''],
+            name: track.author ? `${track.author} - ${track.title}` : track.title,
+          });
         }
       } else if (result.value && selected.value.length) {
         const parts = result.value.media.parts || [];
@@ -431,12 +437,15 @@ createApp({
           const picked = parts.filter((p) => checkedParts.value.includes(p.index));
           for (const part of picked) {
             // 每条分P 用自己那套附属开关，不用全局——否则单 P 的细调等于白设
-            requests.push({ url: part.url, formatIds: [selected.value[0]], ...optOf(part.index) });
+            requests.push({ url: part.url, formatIds: [selected.value[0]], name: part.title, ...optOf(part.index) });
           }
         } else if (parts.length && platform === 'bilibili') {
           // 单 P 也走 parts[0]：cid/url 来自同一次探测，且能带上这一 P 的附属选择
           const part = parts.find((p) => p.selected) || parts[0];
-          requests.push({ url: part.url || result.value.media.source_url || url.value, formatIds: [...selected.value], ...optOf(part.index) });
+          requests.push({
+            url: part.url || result.value.media.source_url || url.value,
+            formatIds: [...selected.value], name: part.title, ...optOf(part.index),
+          });
         } else {
           requests.push({ url: result.value.media.source_url || url.value, formatIds: [...selected.value], ...sidecars });
         }

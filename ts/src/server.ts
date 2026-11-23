@@ -184,9 +184,16 @@ async function downloadUrl(url: string, formatId: string,
   }
 }
 
-function createJob(url: string, formatId: string, opts: DownloadOptions = {}): Job {
+/** 显示名只做轻量清洗：单行、去首尾空白、最多 120 字符（不参与落盘命名）。 */
+function displayName(value: unknown): string | undefined {
+  const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+  return text ? text.slice(0, 120) : undefined;
+}
+
+function createJob(url: string, formatId: string, opts: DownloadOptions = {}, name?: string): Job {
   const job: Job = {
     id: randomBytes(4).toString('hex'), url, formatId: formatId || '',
+    ...(name ? { name } : {}),
     status: 'queued', percent: 0, bytes: 0, total: 0, createdAt: Date.now(),
     ...(opts.subs ? { subs: true } : {}),
     ...(opts.danmaku ? { danmaku: true } : {}),
@@ -198,7 +205,7 @@ function createJob(url: string, formatId: string, opts: DownloadOptions = {}): J
 }
 
 /** 先整体持久化再启动；写盘失败时回滚，避免客户端收不到成功却已经开始下载。 */
-function submitJobs(url: string, ids: string[], opts: DownloadOptions): { created: Job[]; reused: Job[] } {
+function submitJobs(url: string, ids: string[], opts: DownloadOptions, name?: string): { created: Job[]; reused: Job[] } {
   // 同一 URL + 档位已在队列里就直接复用，避免双击创建两个写同一目标文件的任务
   const created: Job[] = [];
   const reused: Job[] = [];
@@ -207,7 +214,7 @@ function submitJobs(url: string, ids: string[], opts: DownloadOptions): { create
       .map((jobId) => jobs.get(jobId))
       .find((job): job is Job => !!job && isSameActiveJob(job, url, id));
     if (dup) { reused.push(dup); continue; }
-    created.push(createJob(url, id, opts));
+    created.push(createJob(url, id, opts, name));
   }
   try { saveStore(); }
   catch (err) {
@@ -838,7 +845,8 @@ const server = Bun.serve({
       }
       // 附属产物开关：只认显式 true，避免字符串 "false" 之类被当成开启
       const opts = { cover: body.cover === true, subs: body.subs === true, danmaku: body.danmaku === true };
-      const created = submitJobs(target, [...new Set(ids)], opts);
+      // 显示名：批量入口（专辑/歌单/收藏夹/分P）已经知道标题，带上它任务卡才不是一串 id
+      const created = submitJobs(target, [...new Set(ids)], opts, displayName(body.name));
       return json({
         ok: true, jobs: created.created, reused: created.reused.map((j) => j.id),
         job: created.created[0] || created.reused[0],

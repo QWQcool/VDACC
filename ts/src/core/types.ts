@@ -14,6 +14,12 @@ export interface CoverResult { cover: string | null; warnings: string[] }
 export interface Job extends DownloadOptions {
   id: string;
   url: string;
+  /**
+   * 提交时给的显示名（批量入口已经有歌名/分P 标题，顺手带上来）。
+   * 队列里/失败的任务没有 `path`，界面只能退回 id 或档位 id——2026-11-23 真机回归
+   * 看到任务卡写着 `mmwt04ayr20` 就是这么来的。探测/下载成功后仍以真实产物名为准。
+   */
+  name?: string;
   formatId: string;
   status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
   percent: number;

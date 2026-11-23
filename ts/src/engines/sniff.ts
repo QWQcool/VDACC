@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { streamToFile } from '../core/audio';
 import { DownloadCancelled, throwIfCancelled } from '../core/cancel';
 import { VdlError } from '../core/errors';
+import { httpHint } from '../core/hints';
 import { UA, request } from '../core/http';
 import { releaseDest, reserveDest } from '../core/dest';
 import { safeName } from '../core/naming';
@@ -91,7 +92,7 @@ export function parseMediaDuration(text: string): number {
 
 async function playlist(url: string): Promise<string> {
   const res = await request(url, { headers: { Referer: originOf(url) } });
-  if (!res.ok) throw new VdlError(`http_${res.status}`, `播放列表 HTTP ${res.status}`);
+  if (!res.ok) throw new VdlError(`http_${res.status}`, `播放列表 HTTP ${res.status}`, httpHint(res.status));
   return res.text();
 }
 

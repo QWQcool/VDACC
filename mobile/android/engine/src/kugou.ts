@@ -10,6 +10,7 @@
  */
 import { request } from '../../../../ts/src/core/http';
 import { VdlError } from '../../../../ts/src/core/errors';
+import { httpHint } from '../../../../ts/src/core/hints';
 import { safeName } from '../../../../ts/src/core/naming';
 import { format, type Format, type ProbeResult } from '../../../../ts/src/core/types';
 import type { AlbumInfo, AlbumTrack } from '../../../../ts/src/core/album';
@@ -55,7 +56,7 @@ function headers(): Record<string, string> {
 
 async function json(url: string): Promise<any> {
   const res = await request(url, { headers: headers(), timeoutMs: 20_000 });
-  if (!res.ok) throw new VdlError(`http_${res.status}`, `酷狗接口 HTTP ${res.status}`);
+  if (!res.ok) throw new VdlError(`http_${res.status}`, `酷狗接口 HTTP ${res.status}`, httpHint(res.status));
   return res.json();
 }
 
@@ -166,6 +167,9 @@ export async function probeImpl(input: string): Promise<KugouProbeInternal> {
       id: 'kg-128', url: plain, ext: String(info.extName || 'mp3').toLowerCase(),
       bitrate: Number(info.bitRate || 0) * 1000, size: Number(info.fileSize || 0), source: 'getSongInfo',
     });
+  } else if (String(info.error || '').trim()) {
+    // 与桌面端同口径：平台回了原因就照原话带出来（付费曲回「需要付费」，url 空、timeLength=0）
+    warnings.push(`平台没给公开档地址，原话：${String(info.error).trim()}`);
   }
 
   const formats: Format[] = [];
@@ -188,7 +192,10 @@ export async function probeImpl(input: string): Promise<KugouProbeInternal> {
   }
 
   if (!formats.length) {
-    throw new VdlError('filtered', `「${title || hash.slice(0, 8)}」没有可下载的音频地址`,
+    // 平台原话照转，别只留一句「没有地址」——那是 2026-11-23 真机回归里看到的旧文案
+    const platReason = String(info.error || '').trim();
+    throw new VdlError('filtered',
+      `「${title || hash.slice(0, 8)}」没有可下载的音频地址${platReason ? `（平台原话：${platReason}）` : ''}`,
       '酷狗公开通道对受限曲目只给封面与信息；端上不做 .kgm 解密、不伪造会员，也不支持登录');
   }
   formats[0].recommended = true;

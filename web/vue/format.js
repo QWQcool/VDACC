@@ -24,8 +24,10 @@ window.VDACC_FORMAT = {
 
   /** 任务标题：优先用落盘文件名（去掉目录与扩展名），没有就退回清晰度/ID */
   jobName(job) {
+    // 队列里/失败的任务还没有 path：优先用提交时带的显示名（专辑/歌单/分P 都有），
+    // 都没有才退回档位 id / 任务 id —— 否则任务卡只会写 `mmwt04ayr20` 这种内部 id。
     const path = job && job.path ? String(job.path) : '';
-    if (!path) return (job && (job.formatId || job.id)) || '';
+    if (!path) return (job && (job.name || job.formatId || job.id)) || '';
     const base = path.split(/[\\/]/).pop() || path;
     return base.replace(/\.[a-z0-9]{2,5}$/i, '');
   },

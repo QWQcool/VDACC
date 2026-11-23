@@ -24,6 +24,7 @@ import { throwIfCancelled } from '../core/cancel';
 import { releaseDest, reserveDest } from '../core/dest';
 import { runFfmpeg } from '../core/ffmpeg';
 import { VdlError } from '../core/errors';
+import { httpHint, platformCodeHint } from '../core/hints';
 import { UA, request } from '../core/http';
 import { safeName } from '../core/naming';
 import { report } from '../core/progress';
@@ -137,7 +138,7 @@ async function fetchDetail(mid: string): Promise<SongDetail> {
   const url = `${DETAIL}?${new URLSearchParams({ songmid: mid, platform: 'yqq', format: 'json' })}`;
   const res = await request(url, { headers: { Referer: 'https://y.qq.com/' } });
   const text = await res.text();
-  if (!res.ok) throw new VdlError(`http_${res.status}`, `QQ 音乐详情接口 HTTP ${res.status}`);
+  if (!res.ok) throw new VdlError(`http_${res.status}`, `QQ 音乐详情接口 HTTP ${res.status}`, httpHint(res.status));
   let data: any;
   try {
     data = JSON.parse(text);
@@ -201,7 +202,7 @@ async function fetchVkeys(mid: string, cred: Credential | null): Promise<{ sip: 
     body: JSON.stringify(payload),
   });
   const text = await res.text();
-  if (!res.ok) throw new VdlError(`http_${res.status}`, `QQ 音乐 vkey 接口 HTTP ${res.status}`);
+  if (!res.ok) throw new VdlError(`http_${res.status}`, `QQ 音乐 vkey 接口 HTTP ${res.status}`, httpHint(res.status));
   let data: any;
   try {
     data = JSON.parse(text);
@@ -236,12 +237,9 @@ async function headBytes(url: string): Promise<number> {
  * - VIP-only 曲目则四个档位全回 `104003`。
  * 所以它读作「当前账号对该曲没有该档位权益」，既不是网络错误，也不是「没登录」。
  */
-const RESULT_HINTS: Record<number, string> = {
-  104003: '当前账号无此档位权益（320K/FLAC 需绿钻，或该曲仅对付费用户开放）',
-};
-
+/** 平台业务码统一走 `core/hints.ts`（同一份表，别的平台也能用）。 */
 function resultHint(code: number): string {
-  const hint = RESULT_HINTS[code];
+  const hint = platformCodeHint('qq', code);
   return hint ? `：${hint}` : '';
 }
 
