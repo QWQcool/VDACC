@@ -587,3 +587,11 @@ Android 壳复用同一批 HTTP 接口，不再单独实现。
   变体排序 / HEAD·Range 探长 / 类型拒绝），`mcp.ts` 71% → 86.2%（token 头、复用实例、日志改道、轮询超时）。
   ③ **ASR**（`analyze/asr.ts`）：`--asr` 时若没有字幕则调本机 whisper.cpp（抽 16k wav → `-osrt` →
   读回 srt），`transcript.source='asr'`；**不内建模型**，没装只记 warning。测试 **400 pass / 0 fail**。
+- 2026-11-25：**抖音商城商品（主图视频 + 图集）**。① 新增 `engines/douyin_shop.ts`：短链先跟 302 判归属
+  （与短视频共用 `v.douyin.com`），商品数据从 `promotion/pack/h5` 的 `head_figure_data.media_list`
+  取视频与主图集；视频**保持原格式**（实测 HEVC 576×768/45.1s），图片换 `resize_q:1440:1440:q100`
+  取原尺寸。② `engines/shop/crawl.cjs`：node + playwright-core + 系统 Edge 抓包（Bun 下 CDP 会超时）；
+  `core/dispatch.ts` 统一「这条链接归谁」，CLI 与服务端共用。③ 落盘 `<标题>/video.mp4` +
+  `<标题>/images/NN.webp`，重复执行跳过；服务端任务同样可用（实测 done / 1.21MB）。
+  ④ **详情页长图不做**：H5 无详情区、`product/detail` 回 `10002 用户未登录`、扫码登录触发风控
+  （三条路都实测堵死），写进 README/事实表而不是留成「待办」。测试 **408 pass / 0 fail**。

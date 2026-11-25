@@ -21,9 +21,9 @@
 > bun ts/src/cli.ts auth <bilibili|netease|qq>            # 失效就重扫（弹独立 Edge）
 > ```
 >
-> 迁移状态：引擎 ✅（抖音 / 网易云 / QQ 音乐 / 酷我 / 酷狗 / B站 分P·番剧 / L2 直链·m3u8）、
+> 迁移状态：引擎 ✅（抖音 / 抖音商城(商品视频+图集) / 网易云 / QQ 音乐 / 酷我 / 酷狗 / B站 分P·番剧 / L2 直链·m3u8）、
 > 服务 ✅（probe / jobs / SSE / files / settings / cancel / retry / 持久化）、`auth` ✅（在线校验）、
-> **MCP（给 Agent 用）✅**、**TS 测试 400 个 ✅**、**yt-dlp 可选组件 ✅（SHA256 校验）**、**设置面板 ✅**、**限速 ✅**（`--limit 2M`）、**并发 1–4 ✅**、
+> **MCP（给 Agent 用）✅**、**TS 测试 408 个 ✅**、**yt-dlp 可选组件 ✅（SHA256 校验）**、**设置面板 ✅**、**限速 ✅**（`--limit 2M`）、**并发 1–4 ✅**、
 > **B站字幕 `--subs` / 弹幕 `--danmaku` ✅**（CLI 与 Web UI 都能开）、
 > **专辑 `--album` ✅**（CLI `--offset` + `--dry-run`；Web UI 分批加载，每批 20 首）、
 > **QQ 音乐 ✅**（`auth qq` 扫码；档位由账号会员权限决定）。
@@ -113,6 +113,34 @@ bun ts/src/cli.ts get   "<链接>" --limit 2M
 ```
 
 > Python 版（tkinter 界面 / `dy_dl.py`）已归档到 `legacy/python/`，不再演进，仅作参考。
+
+## 抖音商城商品（主图视频 + 商品图）
+
+商城分享链接（`v.douyin.com/…` 跳到 `haohuo.jinritemai.com`）与普通短视频**共用短链域名**，
+程序会先跟一次重定向再决定走哪条路。支持的东西：
+
+| 素材 | 说明 |
+|---|---|
+| **商品主图视频** | 平台原格式（实测 HEVC/mp4），**不转码** |
+| **商品图** | 主图集（实测 4–5 张，1440 长边，webp） |
+
+```bash
+bun ts/src/cli.ts probe "https://v.douyin.com/xxxx/"   # 显示「商品视频 / 商品图 N 张」
+bun ts/src/cli.ts get   "https://v.douyin.com/xxxx/"   # 视频 + 图集都下
+bun ts/src/cli.ts get   "<链接>" --format shop-images  # 只下图
+```
+
+落盘布局：`下载\<商品标题>\video.mp4` + `下载\<商品标题>\images\01.webp…`
+
+**前置条件**：这条链路要过浏览器（商品数据来自带 `a_bogus` 的接口），所以要
+**Node + `playwright-core` + 系统 Edge**（`cd ts && bun install` 已装 playwright-core；
+`vdl auth` 也依赖同样的三样）。抓一次约 15–20 秒。
+
+> 独立包 `vdl.exe` **不含**这条链路：它没有 node/playwright/Edge 的环境，硬塞进去只会得到一个
+> 跑不起来的 exe。商城下载请用仓库里的 `bun ts/src/cli.ts`（或本地服务）。
+
+**不做**：详情页长图——实测 `product/detail` 接口回 `10002 用户未登录`，
+而扫码登录会触发风控，所以这条明确不支持。
 
 ## 为什么不用 yt-dlp / 那些 GUI
 
@@ -292,7 +320,7 @@ VDACC\
 │  ├─ src\            主线：cli / server / auth / skill_cli
 │  │  ├─ core\        契约层：types / platform / config / http / progress / cancel / rate
 │  │  └─ engines\     douyin / netease / qq / kuwo / kugou / bilibili(_api) / generic(yt-dlp)
-│  ├─ tests\          bun test（400 个）
+│  ├─ tests\          bun test（408 个）
 │  └─ src\mcp.ts      MCP server（stdio，四个工具）
 ├─ web\               Vue 3 界面（默认入口 /）
 ├─ legacy\python\     Python 归档：vdl / skill / tests / tools / dy_* / VDACC.bat（冻结）

@@ -18,6 +18,8 @@ import { isSameActiveJob } from './core/jobmatch';
 import { runOperation } from './core/operation';
 import { currentLimitBytesPerSec, setLimitBytesPerSec } from './core/rate';
 import { getDouyin, previewDouyin, probeDouyin } from './engines/douyin';
+import { getShop, probeShop } from './engines/douyin_shop';
+import { resolveTarget } from './core/dispatch';
 import {
   albumTracks as neteaseAlbum, playlistTracks as neteasePlaylist,
   expandShortLink, previewNetease, getNetease, probeNetease,
@@ -150,8 +152,12 @@ function failBody(platform: string, err: unknown) {
 }
 
 async function probeUrl(url: string): Promise<ProbeResult> {
-  switch (platformOf(url)) {
+  // 短链可能是短视频也可能是抖音商城：先解析归属（见 core/dispatch.ts）
+  const resolved = await resolveTarget(url);
+  url = resolved.target;
+  switch (resolved.platform) {
     case 'douyin': return probeDouyin(url);
+    case 'douyin-shop': return probeShop(url);
     case 'netease': return probeNetease(url);
     case 'qq': return probeQQ(url);
     case 'kuwo': return probeKuwo(url);
@@ -168,8 +174,11 @@ async function probeUrl(url: string): Promise<ProbeResult> {
 
 async function downloadUrl(url: string, formatId: string,
                              opts: DownloadOptions = {}) {
-  switch (platformOf(url)) {
+  const resolved = await resolveTarget(url);
+  url = resolved.target;
+  switch (resolved.platform) {
     case 'douyin': return getDouyin(url, formatId, OUT, opts);
+    case 'douyin-shop': return getShop(url, formatId, OUT);
     case 'netease': return getNetease(url, formatId, OUT);
     case 'qq': return getQQ(url, formatId, OUT);
     case 'kuwo': return getKuwo(url, formatId, OUT);

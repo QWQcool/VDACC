@@ -16,7 +16,7 @@ window.VDACC_FORMAT = {
   /** 平台标签的语义色：B站粉、抖音蓝、音乐紫、嗅探/其它中性 */
   platformClass(p) {
     return {
-      bilibili: 'accent', douyin: 'sky',
+      bilibili: 'accent', douyin: 'sky', 'douyin-shop': 'sky',
       netease: 'purple', qq: 'purple', kuwo: 'purple', kugou: 'purple',
       sniff: 'sky',
     }[p] || 'neutral';
@@ -28,7 +28,10 @@ window.VDACC_FORMAT = {
     // 都没有才退回档位 id / 任务 id —— 否则任务卡只会写 `mmwt04ayr20` 这种内部 id。
     const path = job && job.path ? String(job.path) : '';
     if (!path) return (job && (job.name || job.formatId || job.id)) || '';
-    const base = path.split(/[\\/]/).pop() || path;
+    const parts = path.split(/[\\/]/).filter(Boolean);
+    const base = parts.pop() || path;
+    // 商品图落盘是 `<商品标题>/images/`：末段是目录名，用上一级（商品标题）才看得懂
+    if (!/\.[a-z0-9]{2,5}$/i.test(base) && parts.length) return parts.pop() || base;
     return base.replace(/\.[a-z0-9]{2,5}$/i, '');
   },
 };

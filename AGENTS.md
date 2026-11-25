@@ -111,11 +111,13 @@
 │                    只删 ≥1s 的静音；黑场/口头语/闪白要靠模型判断，猜错就是删正片，不做
 │                    asr.ts 是可选适配器：找本机 whisper.cpp（VDACC_WHISPER_BIN/MODEL）→
 │                    抽 16k wav → 读回 .srt；**不内建模型**，没装只记 warning，不静默降级
-├─ ts/tests/         bun test（当前 400 个）；env.ts 是能力探测（非测试文件），
+├─ ts/tests/         bun test（当前 408 个）；env.ts 是能力探测（非测试文件），
 │                    capabilities.test.ts 把 ffmpeg/Bun 版本打进输出，缺什么一眼能看到
 ├─ web/              Vue 3 界面（默认入口 /）+ vendor / assets（无 PWA：sw/manifest 已删）
 ├─ ts/src/mcp.ts     MCP server（stdio + 行分隔 JSON-RPC）；默认**在本进程内** startServer({port:0})，
 │                    也可用 VDACC_BASE_URL / VDACC_TOKEN 复用已开实例；能编译成单文件 exe
+├─ ts/src/engines/douyin_shop.ts  抖音商城（商品主图视频 + 图集）；**详情长图不做**（要登录且风控）
+├─ ts/src/shop/crawl.cjs          商城抓包：node + playwright-core + Edge（Bun 下 CDP 超时，必须走 node）
 ├─ legacy/python/    Python 归档：vdl / skill / tests / tools / dy_* / VDACC.bat（冻结，仅参考）
 ├─ docs/             CHANGELOG.md、verified-facts.md（平台事实表）、music-channels.md、
 │                    design/（UI 与能力基线）、archive/（已收口章节）
@@ -170,7 +172,7 @@ venv\Scripts\python.exe -m pip install playwright yt-dlp   # 仅 legacy 需要
 ```bash
 bun --version                              # 1.4.x
 ffmpeg -version                            # 9.x；缺了 B站/音乐/m3u8 全废
-bun test ts/tests                          # 400 pass（缺 ffmpeg 时 3 条端到端 skip，capabilities.test.ts 会写明）
+bun test ts/tests                          # 408 pass（缺 ffmpeg 时 3 条端到端 skip，capabilities.test.ts 会写明）
 bun ts/src/cli.ts probe "<抖音或B站链接>" --json
 ```
 
@@ -224,6 +226,10 @@ ffmpeg 已改异步可取消。**限速仍是「每条流」**，总带宽 ≈ �
   + 脚本内生成的 `README.txt`；**不再产 SKILL.md**）。别手工往 `dist/` 拷代码。
   面向 Agent 的入口是 `ts/src/mcp.ts`（MCP），不是包里的文档——文档会腐化，schema 不会。
   legacy 包（`legacy/python/tools/build_skill.py`）保持原样，只作历史参考。
+- **商城抓取固定走 node 子进程。** `douyin_shop.ts` 用 `spawn('node', shop/crawl.cjs)`，
+  不要在 Bun 里直接 import playwright——`connectOverCDP` 在 Bun 下会 30s 超时（`auth.ts` 早就记过这条）。
+  另外**详情页长图不做**：H5 无详情区、`product/detail` 回 `10002 用户未登录`、扫码登录触发风控，
+  三条路都实测堵死；别反复试登录，会被风控。
 - **MCP 的 stdout 只许写协议。** `ts/src/mcp.ts` 里任何日志必须走 stderr；stdio 传输是
   **行分隔 JSON-RPC**，写错一行整条连接就废。工具级失败放 `result.isError`，
   不要用 JSON-RPC error（宿主会当成协议故障）。

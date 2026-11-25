@@ -1,5 +1,5 @@
 export type Platform =
-  | 'douyin' | 'netease' | 'bilibili' | 'qq' | 'kuwo' | 'kugou' | 'sniff' | 'unsupported';
+  | 'douyin' | 'douyin-shop' | 'netease' | 'bilibili' | 'qq' | 'kuwo' | 'kugou' | 'sniff' | 'unsupported';
 
 /** 文本里的第一个 URL：分享文案常是「标题 + 链接 + 引导语」，不能整段当 URL 解析。 */
 const URL_IN_TEXT = /https?:\/\/[^\s，。、；：！？）】"'<>]+/i;
@@ -18,6 +18,9 @@ export function platformOf(input: string): Platform {
   if (/^\d{15,20}$/.test(raw)) return 'douyin';
   // 整段分享文案（抖音/小红书式）先抽链接再判域名，否则会掉进通用解析
   const target = firstUrl(raw) || raw;
+  // 抖音商城（`haohuo.jinritemai.com`）与短视频是两套数据源：前者要过浏览器抓商品 pack，
+  // 后者走 aweme 接口。短链 `v.douyin.com` 两者共用，归属在 `core/dispatch.ts` 里靠重定向判定。
+  if (/(^|\.)haohuo\.jinritemai\.com$/i.test(hostOf(target))) return 'douyin-shop';
   if (/(^|\.)douyin\.com/i.test(hostOf(target))) return 'douyin';
   // QQ 音乐只认域名：songmid 是 14 位 base62，裸串识别会和任何 14 字符文本撞车，
   // 所以裸 mid 请用分享链接（引擎的 canHandle 仍支持裸 mid，供直接调用）

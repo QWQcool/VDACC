@@ -1,4 +1,6 @@
 import { getDouyin, probeDouyin } from './engines/douyin';
+import { getShop, probeShop } from './engines/douyin_shop';
+import { resolveTarget } from './core/dispatch';
 import { MAX_ALBUM_TRACKS, planAlbum } from './core/album';
 import {
   albumTracks as neteaseAlbum, playlistTracks as neteasePlaylist,
@@ -54,9 +56,12 @@ for (const arg of argv) {
 }
 
 async function probe(url: string): Promise<ProbeResult> {
-  const platform = platformOf(url);
+  // 短链可能是视频也可能是商城：先解析归属（见 core/dispatch.ts）
+  const { platform, target } = await resolveTarget(url);
+  url = target;
   switch (platform) {
     case 'douyin': return probeDouyin(url);
+    case 'douyin-shop': return probeShop(url);
     case 'netease': return probeNetease(url);
     case 'qq': return probeQQ(url);
     case 'kuwo': return probeKuwo(url);
@@ -83,8 +88,13 @@ function human(res: ProbeResult) {
     return;
   }
   const m = res.media;
+  // 平台名给人看时用中文；引擎名保持原样（排查时要能和代码对上）
+  const PLATFORM_LABEL: Record<string, string> = {
+    'douyin-shop': '抖音商城', douyin: '抖音', bilibili: 'B站',
+    netease: '网易云', qq: 'QQ音乐', kuwo: '酷我', kugou: '酷狗', sniff: '直链',
+  };
   console.log(m.title);
-  console.log(`  ${m.author || '未知作者'} · ${m.platform} / ${res.engine}`);
+  console.log(`  ${m.author || '未知作者'} · ${PLATFORM_LABEL[m.platform] || m.platform} / ${res.engine}`);
   for (const f of res.formats) {
     const size = f.bytes ? `${(f.bytes / 1048576).toFixed(2)} MB` : '未知';
     // 不可用档位也要打印：只说「没有这一档」用户不知道是被拒、没返回还是没地址
@@ -404,8 +414,11 @@ if (cmd === 'auth') {
       process.exit(failed.length ? 1 : 0);
     }
 
-    const platform = platformOf(url);
-    if (['douyin', 'bilibili', 'netease', 'qq', 'kuwo', 'kugou'].includes(platform)) {
+    // 短链可能是视频也可能是商城商品：先解析归属
+    const resolvedTarget = await resolveTarget(url);
+    const platform = resolvedTarget.platform;
+    const target = resolvedTarget.target;
+    if (['douyin', 'douyin-shop', 'bilibili', 'netease', 'qq', 'kuwo', 'kugou'].includes(platform)) {
       if ((has('--subs') || has('--danmaku')) && platform !== 'bilibili') {
         console.error(`--subs / --danmaku 目前只支持 B站，${platform} 会忽略这些参数`);
       }
@@ -414,8 +427,10 @@ if (cmd === 'auth') {
         console.error('--format audio 只下音频轨，--subs / --danmaku 会被忽略');
       }
       const out = platform === 'douyin'
-        ? await getDouyin(url, flag('--format'), flag('-o', '下载') || '下载', { cover: has('--cover') })
-        : platform === 'netease'
+        ? await getDouyin(target, flag('--format'), flag('-o', '下载') || '下载', { cover: has('--cover') })
+        : platform === 'douyin-shop'
+          ? await getShop(target, flag('--format'), flag('-o', '下载') || '下载')
+          : platform === 'netease'
           ? await getNetease(url, flag('--format'), flag('-o', '下载') || '下载')
           : platform === 'qq'
             ? await getQQ(url, flag('--format'), flag('-o', '下载') || '下载')
@@ -434,7 +449,7 @@ if (cmd === 'auth') {
           ...(has('--subs') ? { srt: (out as any).srt || null, srt_count: (out as any).srtCount || 0 } : {}),
         }, null, 2));
       } else {
-        console.log(`完成 ${out.path} (${(out.bytes / 1048576).toFixed(2)} MB)`);
+        console.log(`${out.skipped ? '已存在' : '完成'} ${out.path} (${(out.bytes / 1048576).toFixed(2)} MB)`);
         if ('warnings' in out) for (const warning of out.warnings) console.error(`提示：${warning}`);
         if (has('--subs')) {
           const srt = (out as any).srt as string | null;
