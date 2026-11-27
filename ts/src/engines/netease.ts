@@ -504,8 +504,74 @@ async function streamTo(url: string, part: string): Promise<number> {
 
 
 
-async function getNeteaseImpl(input: string, formatId: string | null, outDir: string) {
+export interface NeteaseGetOptions {
+  /** 只要歌词，不下载音频（`get --lyrics`） */
+  lyricsOnly?: boolean;
+  /** 同时保存翻译歌词（`get --lyrics-translate` → `.zh.lrc`） */
+  translateLyrics?: boolean;
+}
+
+/** 与音频同名的歌词路径（`.lrc` / `.zh.lrc`）；只下歌词时 base 是「歌手 - 歌名」。 */
+export function lyricsPaths(base: string): { lrc: string; translation: string } {
+  const stem = base.replace(/\.\w+$/, '');
+  return { lrc: `${stem}.lrc`, translation: `${stem}.zh.lrc` };
+}
+
+/**
+ * 取歌词并落盘。
+ *
+ * 细节：
+ * - **翻译为空时不写文件**——空的 `.zh.lrc` 会让播放器显示空白，而不是回退到原文；
+ * - 歌词失败只记 warning，不拖垮音频下载；
+ * - `doFetch` 可注入，用例离线跑（不联网）。
+ */
+export async function writeLyrics(
+  base: string, id: string, opts: NeteaseGetOptions = {}, doFetch: typeof fetch = fetch,
+): Promise<{ files: string[]; warnings: string[] }> {
+  const files: string[] = [];
+  const warnings: string[] = [];
+  try {
+    const json = await getJson(`/api/song/lyric?id=${id}&lv=1&kv=1&tv=-1`, cookieHeader(), doFetch);
+    const paths = lyricsPaths(base);
+    const lrc = String((json.lrc || {}).lyric || '').trim();
+    if (lrc) {
+      writeFileSync(paths.lrc, `${lrc}\n`, 'utf8');
+      files.push(paths.lrc);
+    } else {
+      warnings.push('这首歌没有歌词');
+    }
+    if (opts.translateLyrics) {
+      const tr = String((json.tlyric || {}).lyric || '').trim();
+      if (tr) {
+        writeFileSync(paths.translation, `${tr}\n`, 'utf8');
+        files.push(paths.translation);
+      } else {
+        warnings.push('这首歌没有翻译歌词');
+      }
+    }
+  } catch (err) {
+    warnings.push(`歌词获取失败：${(err as Error).message}`);
+  }
+  return { files, warnings };
+}
+
+async function getNeteaseImpl(input: string, formatId: string | null, outDir: string,
+                              opts: NeteaseGetOptions = {}) {
   const probe = await probeNetease(input);
+
+  // --lyrics：只取歌词。文件名用「歌手 - 歌名」，不必为了歌词下整首音频
+  if (opts.lyricsOnly) {
+    mkdirSync(outDir, { recursive: true });
+    const title = safeName(String(probe.media?.title || '').trim() || '歌词');
+    const author = safeName(String(probe.media?.author || '').trim());
+    const base = join(outDir, author ? `${author} - ${title}` : title);
+    const ly = await writeLyrics(base, String(probe.media?.id || ''), opts);
+    if (!ly.files.length) {
+      throw new VdlError('no_lyrics', ly.warnings.join('；') || '没有拿到歌词',
+        '这首可能没有时间轴歌词；换一首或稍后重试');
+    }
+    return { path: ly.files[0], bytes: statSync(ly.files[0]).size, skipped: false, warnings: ly.warnings };
+  }
   // 显式点名了档位就不能换：静默降级会让用户以为拿到的是无损，实际是 320K
   const wanted = (formatId || '').trim();
   let fmt: Format | undefined;
@@ -542,7 +608,10 @@ async function getNeteaseImpl(input: string, formatId: string | null, outDir: st
     `${probe.media!.id}_${safeName(probe.media!.title)}_${label}.${fmt.ext}`);
   try {
   if (existsSync(dest)) {
-    return { path: dest, bytes: statSync(dest).size, skipped: true, warnings: [] };
+    // 音频已存在时**补写缺失的歌词**：老版本只在下音频时顺带写，
+    // 用户重跑一次不该因为「音频已在」而永远拿不到 .lrc
+    const ly = await writeLyrics(dest, probe.media!.id, opts);
+    return { path: dest, bytes: statSync(dest).size, skipped: true, warnings: ly.warnings };
   }
 
   const part = dest + '.part';
@@ -560,17 +629,10 @@ async function getNeteaseImpl(input: string, formatId: string | null, outDir: st
       '可能是试听片段或下载被截断：确认账号权益后重试，或改用其它档位');
   }
 
-  // 歌词单独落 .lrc（ID3 的 USLT 各播放器支持不一）
-  try {
-    const lyric = await getJson(
-      `/api/song/lyric?id=${probe.media!.id}&lv=1&kv=1&tv=-1`, cookieHeader());
-    const text = String((lyric.lrc || {}).lyric || '').trim();
-    if (text) writeFileSync(dest.replace(/\.\w+$/, '.lrc'), text + '\n', 'utf8');
-  } catch {
-    // 歌词失败不影响音频
-  }
+  // 歌词单独落 .lrc（ID3 的 USLT 各播放器支持不一）；失败只记 warning
+  const lyricWarnings = (await writeLyrics(dest, probe.media!.id, opts)).warnings;
 
-  const warnings: string[] = [];
+  const warnings: string[] = [...lyricWarnings];
   // 临时封面必须跟着目标文件走：固定名在并发下载时会互相覆盖
   const rawCover = dest + '.cover.img';
   const smallCover = dest + '.cover.jpg';

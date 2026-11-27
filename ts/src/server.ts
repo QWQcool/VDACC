@@ -179,7 +179,9 @@ async function downloadUrl(url: string, formatId: string,
   switch (resolved.platform) {
     case 'douyin': return getDouyin(url, formatId, OUT, opts);
     case 'douyin-shop': return getShop(url, formatId, OUT);
-    case 'netease': return getNetease(url, formatId, OUT);
+    case 'netease': return getNetease(url, formatId, OUT, {
+      lyricsOnly: opts.lyricsOnly, translateLyrics: opts.lyricsTranslate,
+    });
     case 'qq': return getQQ(url, formatId, OUT);
     case 'kuwo': return getKuwo(url, formatId, OUT);
     case 'kugou': return getKugou(url, formatId, OUT);
@@ -209,6 +211,9 @@ function createJob(url: string, formatId: string, opts: DownloadOptions = {}, na
     ...(opts.subs ? { subs: true } : {}),
     ...(opts.danmaku ? { danmaku: true } : {}),
     ...(opts.cover ? { cover: true } : {}),
+    // 歌词开关：false 不落字段，任务 JSON 里不出现无意义的 `lyricsOnly:false`
+    ...(opts.lyricsOnly ? { lyricsOnly: true } : {}),
+    ...(opts.lyricsTranslate ? { lyricsTranslate: true } : {}),
   };
   jobs.set(job.id, job);
   order.push(job.id);
@@ -283,8 +288,10 @@ async function runJob(job: Job): Promise<void> {
     scheduleSave();
     emit(job);
     try {
-      const out = await runOperation(() => downloadUrl(job.url, job.formatId,
-        { cover: job.cover, subs: job.subs, danmaku: job.danmaku }), {
+      const out = await runOperation(() => downloadUrl(job.url, job.formatId, {
+        cover: job.cover, subs: job.subs, danmaku: job.danmaku,
+        lyricsOnly: job.lyricsOnly, lyricsTranslate: job.lyricsTranslate,
+      }), {
         cancelled: () => !!job.cancelRequested,
         progress(written, total) {
           job.bytes = written;
@@ -885,7 +892,14 @@ export function startServer(opts: ServeOptions = {}) {
         throw new VdlError('bad_input', '每次提交 1–20 个有效档位');
       }
       // 附属产物开关：只认显式 true，避免字符串 "false" 之类被当成开启
-      const opts = { cover: body.cover === true, subs: body.subs === true, danmaku: body.danmaku === true };
+      const opts = {
+        cover: body.cover === true,
+        subs: body.subs === true,
+        danmaku: body.danmaku === true,
+        // 网易云歌词：`lyricsOnly` 让这个任务只产 .lrc（不下载音频）
+        lyricsOnly: body.lyricsOnly === true,
+        lyricsTranslate: body.lyricsTranslate === true,
+      };
       // 显示名：批量入口（专辑/歌单/收藏夹/分P）已经知道标题，带上它任务卡才不是一串 id
       const created = submitJobs(target, [...new Set(ids)], opts, displayName(body.name));
       return json({

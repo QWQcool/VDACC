@@ -595,3 +595,17 @@ Android 壳复用同一批 HTTP 接口，不再单独实现。
   `<标题>/images/NN.webp`，重复执行跳过；服务端任务同样可用（实测 done / 1.21MB）。
   ④ **详情页长图不做**：H5 无详情区、`product/detail` 回 `10002 用户未登录`、扫码登录触发风控
   （三条路都实测堵死），写进 README/事实表而不是留成「待办」。测试 **408 pass / 0 fail**。
+- 2026-11-26：**补最后一道防线的测试 + 删假兜底**。① `engines/generic.ts`（yt-dlp 兜底）
+  此前**行覆盖 0%**；拆成 `parseGenericInfo`（纯函数）+ 注入 `run`，离线用例覆盖分辨率分桶、
+  h264 优先、纯音频/直链判别、落盘模板、`+bestaudio` 选择器、回扫兜底、组件缺失。
+  覆盖率 **0% → 90.5%**。② 顺手修 bug：纯音频作品被标成「原文件/mp4」（音频分支不可达）。
+  ③ 删 `VDL_BILI_ENGINE=ytdlp` 假兜底（找的是 `%TEMP%` 下的 yt-dlp，与组件目录不一致、
+  无用例无文档），连带删 `engines/bilibili.ts` 与 `core/helper.ts`；B站 只留原生 API。
+  ④ README/事实表写明 yt-dlp 的边界（可选组件、默认关闭、不在 exe 里）。测试 **419 pass / 0 fail**。
+- 2026-11-27：**网易云歌词单独可下**。① `get --lyrics` 只取歌词不碰音频，命名「歌手 - 歌名.lrc」；
+  `--lyrics-translate` 另存 `.zh.lrc`（翻译为空不写文件）。② 修掉一个实际缺陷：音频已存在时
+  直接 return，**永远补不上缺失的 `.lrc`**；现在会补写。③ 抽 `writeLyrics`（可注入 fetch）+
+  `lyricsPaths`，5 条离线用例覆盖原文/翻译/空翻译/无歌词/接口失败。实测 `空梦` 36 行带时间轴、
+  `--lyrics` 仅 1.2 KB；`Shape of You` 翻译 4.0 KB。④ **界面同步**：面板加「翻译歌词」开关与
+  「只下载歌词」按钮，走 `/api/jobs` 的 `lyricsOnly`/`lyricsTranslate`（任务字段只认显式 true）；
+  服务端实测 done / 5,890 字节 / 135 行全带时间轴 / 翻译文件同时生成。测试 **425 pass / 0 fail**。

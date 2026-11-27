@@ -31,6 +31,8 @@ createApp({
     // 附属产物开关：只对 B站 生效，持久化免得每次重开都要勾
     const withSubs = ref(localStorage.getItem('vdl-subs') === '1');
     const withDanmaku = ref(localStorage.getItem('vdl-danmaku') === '1');
+    // 网易云：翻译歌词开关（持久化）。「只下歌词」是每次点按钮的动作，不记忆
+    const withLyricsTranslate = ref(localStorage.getItem('vdl-lyrics-tr') === '1');
     // 专辑 / 歌单：与单条结果互斥，独立走 /api/album；默认一首都不勾（防误点整张专辑）
     const album = ref(null);
     const albumTracks = ref([]);
@@ -123,6 +125,8 @@ createApp({
       cover: withCover.value && ['douyin', 'bilibili'].includes(platform),
       subs: withSubs.value && platform === 'bilibili',
       danmaku: withDanmaku.value && platform === 'bilibili',
+      // 只有网易云有歌词；其它平台不带这个键，免得后端多一个无意义字段
+      ...(platform === 'netease' ? { lyricsTranslate: withLyricsTranslate.value } : {}),
     });
 
     function initPartOpts(parts, platform) {
@@ -420,6 +424,7 @@ createApp({
         cover: withCover.value && ['douyin', 'bilibili'].includes(platform),
         subs: withSubs.value && platform === 'bilibili',
         danmaku: withDanmaku.value && platform === 'bilibili',
+        ...(platform === 'netease' ? { lyricsTranslate: withLyricsTranslate.value } : {}),
       };
       if (album.value) {
         // 音乐封面由引擎内嵌；独立视频封面开关不冒充音乐 sidecar 能力。
@@ -473,9 +478,42 @@ createApp({
       }
     }
 
+    /**
+     * 只下载歌词（网易云）：建一个 `lyricsOnly` 任务，不碰音频。
+     * 文件名由引擎拼成「歌手 - 歌名.lrc」，任务卡显示的是产物名。
+     */
+    async function downloadLyricsOnly() {
+      if (!result.value || submitting.value || busy.value) return;
+      submitting.value = true;
+      try {
+        const media = result.value.media;
+        const name = [media.author, media.title].filter(Boolean).join(' - ');
+        const data = await api('/api/jobs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: {
+            url: media.source_url || url.value,
+            formatIds: [''],
+            name: name ? `${name} 歌词` : '歌词',
+            lyricsOnly: true,
+            lyricsTranslate: withLyricsTranslate.value,
+          },
+        });
+        if (data.ok) {
+          for (const job of data.jobs || []) upsert(job);
+          message.value = `${t('queued')} 1/1`;
+        } else {
+          message.value = errorText(data);
+        }
+      } finally {
+        submitting.value = false;
+      }
+    }
+
     function persistSidecars() {
       localStorage.setItem('vdl-subs', withSubs.value ? '1' : '0');
       localStorage.setItem('vdl-danmaku', withDanmaku.value ? '1' : '0');
+      localStorage.setItem('vdl-lyrics-tr', withLyricsTranslate.value ? '1' : '0');
       // 全局开关同时是「套用到所有 P」，界面上写了这句，行为就得对上
       applySidecarsToAll();
     }
@@ -1114,7 +1152,7 @@ createApp({
 
     return {
       t, lang, url, partUrl, result, selected, jobs, busy, submitting, message, version, reconnecting, settingsError,
-      withCover, withSubs, withDanmaku, size, statusLabel, dur,
+      withCover, withSubs, withDanmaku, withLyricsTranslate, size, statusLabel, dur,
       connected, outDir, limitRate, rateText, platformClass, jobName,
       settingsOpen, sOutDir, sTheme, sLimitRateMB, sConcurrency, sGeneric,
       compStatus, compBusy, previewUrl, previewAudioUrl, audioEl, syncPreviewAudio,
@@ -1134,6 +1172,7 @@ createApp({
       album, albumTracks, checkedTracks, allTracks, toggleTrack, toggleAllTracks,
       loadingMore, loadMoreTracks,
       toggleLang, toggleTheme, toggleFormat, persistSidecars, probe, probePart, download, downloadAudioOnly,
+      downloadLyricsOnly,
       audioFormat, cancel, retry,
       openSettings, saveSettings, installComponent, previewSelected, previewJob, closePreview,
       analysis, analysisBusy, analysisName, analyzable, analyzeJob, closeAnalysis,

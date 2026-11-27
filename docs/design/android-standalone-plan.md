@@ -195,7 +195,8 @@ mobile/android/
 | `engines/douyin` | **复用 90%** | 签名在 TS 内计算，不依赖 `node:vm`；分享文案抽取已有 |
 | `engines/netease/qq/kuwo/kugou` | **复用 85%** | 下载与 tag 改 bridge；`music.ts` 直接复用 |
 | `engines/sniff` | **暂缓** | HLS 依赖 ffmpeg，M5 再评估 |
-| `engines/generic`（yt-dlp）、`bilibili.ts`（旧 yt-dlp 路径） | **不移植** | 端上无 Python |
+| `engines/generic`（yt-dlp 组件） | **不移植** | 端上无 Python；桌面侧也只在「其它站点」+ 手动开启时用 |
+| ~~`bilibili.ts`（旧 yt-dlp 路径）~~ | **已删除（2026-11-26）** | 假兜底：找的是 TEMP 下的 yt-dlp，无人调用、无用例 |
 | `core/ffmpeg.ts` `core/doctor.ts` `core/auth.ts`（playwright） | **不移植** | 桌面专属 |
 | `web/vue/*` | **复用** | 只需替换 `api.js` 为 `local-api.js`，隐藏「组件/账号/诊断」等服务端功能 |
 | `ts/src/server.ts` `cli.ts` `skill_cli.ts` | **不移植** | 桌面/Skill 保留 |

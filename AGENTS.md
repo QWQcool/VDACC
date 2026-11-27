@@ -1,6 +1,7 @@
 # AGENTS.md —— 给后续 AI / 协作者的上下文
 
-这个仓库是一个**多平台视频/音频下载工具**（抖音 / B站 / 网易云 + yt-dlp 通用兜底），
+这个仓库是一个**多平台视频/音频下载工具**（抖音 / B站 / 网易云 / QQ / 酷我 / 酷狗 原生实现；
+「其它站点」靠**可选**的 yt-dlp 组件，默认关闭），
 定位是「桌面可编程下载内核 + 可选 Web GUI + MCP（给 Agent 用）」。
 > 2026-11-23 起**没有 Skill 了**：SKILL.md 那种「给 Agent 看的说明」会随发版腐化
 > （删之前它把 QQ / 酷我 / 酷狗 都写成不支持），Agent 入口统一走 `ts/src/mcp.ts`（stdio MCP，
@@ -111,7 +112,7 @@
 │                    只删 ≥1s 的静音；黑场/口头语/闪白要靠模型判断，猜错就是删正片，不做
 │                    asr.ts 是可选适配器：找本机 whisper.cpp（VDACC_WHISPER_BIN/MODEL）→
 │                    抽 16k wav → 读回 .srt；**不内建模型**，没装只记 warning，不静默降级
-├─ ts/tests/         bun test（当前 408 个）；env.ts 是能力探测（非测试文件），
+├─ ts/tests/         bun test（当前 425 个）；env.ts 是能力探测（非测试文件），
 │                    capabilities.test.ts 把 ffmpeg/Bun 版本打进输出，缺什么一眼能看到
 ├─ web/              Vue 3 界面（默认入口 /）+ vendor / assets（无 PWA：sw/manifest 已删）
 ├─ ts/src/mcp.ts     MCP server（stdio + 行分隔 JSON-RPC）；默认**在本进程内** startServer({port:0})，
@@ -172,7 +173,7 @@ venv\Scripts\python.exe -m pip install playwright yt-dlp   # 仅 legacy 需要
 ```bash
 bun --version                              # 1.4.x
 ffmpeg -version                            # 9.x；缺了 B站/音乐/m3u8 全废
-bun test ts/tests                          # 408 pass（缺 ffmpeg 时 3 条端到端 skip，capabilities.test.ts 会写明）
+bun test ts/tests                          # 425 pass（缺 ffmpeg 时 3 条端到端 skip，capabilities.test.ts 会写明）
 bun ts/src/cli.ts probe "<抖音或B站链接>" --json
 ```
 

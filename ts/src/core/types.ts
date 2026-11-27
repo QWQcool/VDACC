@@ -8,7 +8,15 @@ export interface Config {
   ytdlpSha256?: string;
 }
 
-export interface DownloadOptions { cover?: boolean; subs?: boolean; danmaku?: boolean }
+export interface DownloadOptions {
+  cover?: boolean;
+  subs?: boolean;
+  danmaku?: boolean;
+  /** 网易云：只取歌词，不下载音频（任务级别） */
+  lyricsOnly?: boolean;
+  /** 网易云：同时保存翻译歌词（`.zh.lrc`） */
+  lyricsTranslate?: boolean;
+}
 export interface CoverResult { cover: string | null; warnings: string[] }
 
 export interface Job extends DownloadOptions {

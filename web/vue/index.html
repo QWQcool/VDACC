@@ -325,6 +325,12 @@
                   <input type="checkbox" v-model="withDanmaku" @change="persistSidecars">
                   <span class="track"></span>{{ t('danmaku') }}
                 </label>
+                <!-- 网易云：歌词随音频自动保存，这里只控制要不要翻译 -->
+                <label class="switch" v-if="result.platform === 'netease'">
+                  <input type="checkbox" v-model="withLyricsTranslate" @change="persistSidecars">
+                  <span class="track"></span>{{ t('lyricsTranslate') }}
+                </label>
+                <span class="help" v-if="result.platform === 'netease'">{{ t('lyricsAuto') }}</span>
                 <span class="section-label" style="letter-spacing:0"
                       v-if="result.platform === 'bilibili' && (withSubs || withDanmaku)">
                   {{ t('sidecarHint') }}
@@ -339,7 +345,12 @@
                 </div>
               </div>
 
-              <div style="display:flex;justify-content:flex-end;margin-top:16px">
+              <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+                <!-- 只下歌词：不下载音频，产物是「歌手 - 歌名.lrc」 -->
+                <button class="btn ghost" v-if="result.platform === 'netease'"
+                        :disabled="busy || submitting" @click="downloadLyricsOnly">
+                  {{ t('lyricsOnly') }}
+                </button>
                 <button class="btn primary" data-testid="download"
                         :disabled="!selected.length || busy || submitting || (isBatch && !checkedParts.length)"
                         @click="download">

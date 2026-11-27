@@ -6,7 +6,6 @@ import {
   albumTracks as neteaseAlbum, playlistTracks as neteasePlaylist,
   expandShortLink, getNetease, probeNetease,
 } from './engines/netease';
-import { probeBilibili } from './engines/bilibili';
 import { AUDIO_FORMAT_ID, getBilibiliApi, probeBilibiliApi } from './engines/bilibili_api';
 import { albumTracks as qqAlbum, playlistTracks as qqPlaylist, getQQ, probeQQ } from './engines/qq';
 import { getKuwo, probeKuwo } from './engines/kuwo';
@@ -39,7 +38,7 @@ const KNOWN_FLAGS = new Set([
   '--json', '--limit', '--album', '--playlist', '--offset', '--dry-run', '--format', '--cover',
   '--subs', '--danmaku', '--scenes-only', '--max-frames', '--threshold', '--describe',
   '--max-describe', '--visuals', '--pair-frames', '--style-card', '--no-audio',
-  '--cutlist', '--cut-min-silence', '--asr', '--asr-lang',
+  '--cutlist', '--cut-min-silence', '--lyrics', '--lyrics-translate', '--asr', '--asr-lang',
   '--status', '--offline', '--clear', '--renew', '--qr', '--timeout',
   '--help', '-h', '-o',
 ]);
@@ -47,6 +46,7 @@ const KNOWN_FLAGS = new Set([
 const FLAG_TYPOS: Record<string, string> = {
   '--out': '-o', '--output': '-o', '--dir': '-o',
   '--max-frame': '--max-frames', '--subtitle': '--subs', '--describe-shots': '--describe',
+  '--lyric': '--lyrics', '--lyrics-trans': '--lyrics-translate',
 };
 
 for (const arg of argv) {
@@ -66,10 +66,10 @@ async function probe(url: string): Promise<ProbeResult> {
     case 'qq': return probeQQ(url);
     case 'kuwo': return probeKuwo(url);
     case 'kugou': return probeKugou(url);
-    case 'bilibili':
-      return process.env.VDL_BILI_ENGINE === 'ytdlp'
-        ? probeBilibili(url)
-        : probeBilibiliApi(url);
+    // 只有一条 B站 路径：原生 API。旧的 `VDL_BILI_ENGINE=ytdlp` 备选已删——
+    // 它找的是 %TEMP%\vdacc-ts\yt-dlp.exe（与组件目录不是同一个），没有用例也没有文档，
+    // 实际一跑就是「找不到 yt-dlp」，属于假兜底。
+    case 'bilibili': return probeBilibiliApi(url);
     default: {
       // L2：直链 / m3u8 自己吃，不依赖 yt-dlp 组件
       if (canSniff(url)) return probeSniff(url);
@@ -321,7 +321,8 @@ if (cmd === 'auth') {
   const url = positional[0];
   if (!url || !['probe', 'get'].includes(cmd)) {
     console.error('用法: bun src/cli.ts probe|get <url> [--format id] [-o dir] [--limit 2M] [--json]'
-    + ' [--album|--playlist [--offset N]] [--subs] [--danmaku]');
+    + ' [--album|--playlist [--offset N]] [--subs] [--danmaku]'
+    + ' [--lyrics [--lyrics-translate]]');
     process.exit(2);
   }
 
@@ -426,12 +427,18 @@ if (cmd === 'auth') {
         && (has('--subs') || has('--danmaku'))) {
         console.error('--format audio 只下音频轨，--subs / --danmaku 会被忽略');
       }
+      if ((has('--lyrics') || has('--lyrics-translate')) && platform !== 'netease') {
+        console.error(`--lyrics / --lyrics-translate 目前只支持网易云，${platform} 会忽略`);
+      }
       const out = platform === 'douyin'
         ? await getDouyin(target, flag('--format'), flag('-o', '下载') || '下载', { cover: has('--cover') })
         : platform === 'douyin-shop'
           ? await getShop(target, flag('--format'), flag('-o', '下载') || '下载')
           : platform === 'netease'
-          ? await getNetease(url, flag('--format'), flag('-o', '下载') || '下载')
+          ? await getNetease(url, flag('--format'), flag('-o', '下载') || '下载', {
+            lyricsOnly: has('--lyrics'),
+            translateLyrics: has('--lyrics-translate'),
+          })
           : platform === 'qq'
             ? await getQQ(url, flag('--format'), flag('-o', '下载') || '下载')
             : platform === 'kuwo'
@@ -449,7 +456,11 @@ if (cmd === 'auth') {
           ...(has('--subs') ? { srt: (out as any).srt || null, srt_count: (out as any).srtCount || 0 } : {}),
         }, null, 2));
       } else {
-        console.log(`${out.skipped ? '已存在' : '完成'} ${out.path} (${(out.bytes / 1048576).toFixed(2)} MB)`);
+        // 小于 1 MB 用 KB 显示：歌词这类 1–2 KB 的产物不该印成 (0.00 MB)
+        const size = out.bytes >= 1048576
+          ? `${(out.bytes / 1048576).toFixed(2)} MB`
+          : `${Math.max(1, Math.round(out.bytes / 1024))} KB`;
+        console.log(`${out.skipped ? '已存在' : '完成'} ${out.path} (${size})`);
         if ('warnings' in out) for (const warning of out.warnings) console.error(`提示：${warning}`);
         if (has('--subs')) {
           const srt = (out as any).srt as string | null;

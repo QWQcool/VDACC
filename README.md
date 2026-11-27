@@ -23,7 +23,7 @@
 >
 > 迁移状态：引擎 ✅（抖音 / 抖音商城(商品视频+图集) / 网易云 / QQ 音乐 / 酷我 / 酷狗 / B站 分P·番剧 / L2 直链·m3u8）、
 > 服务 ✅（probe / jobs / SSE / files / settings / cancel / retry / 持久化）、`auth` ✅（在线校验）、
-> **MCP（给 Agent 用）✅**、**TS 测试 408 个 ✅**、**yt-dlp 可选组件 ✅（SHA256 校验）**、**设置面板 ✅**、**限速 ✅**（`--limit 2M`）、**并发 1–4 ✅**、
+> **MCP（给 Agent 用）✅**、**TS 测试 425 个 ✅**、**yt-dlp 可选组件 ✅（SHA256 校验）**、**设置面板 ✅**、**限速 ✅**（`--limit 2M`）、**并发 1–4 ✅**、
 > **B站字幕 `--subs` / 弹幕 `--danmaku` ✅**（CLI 与 Web UI 都能开）、
 > **专辑 `--album` ✅**（CLI `--offset` + `--dry-run`；Web UI 分批加载，每批 20 首）、
 > **QQ 音乐 ✅**（`auth qq` 扫码；档位由账号会员权限决定）。
@@ -92,7 +92,7 @@ python tools/verify_skill_ts.py dist/video-acquire-ts   # 解压后核对每个�
 ## Python legacy（仍可用，不再演进）
 
 支持抖音（纯 HTTP 签名，浏览器兜底）、B站（含 4K，需登录）、网易云音乐（无损），
-其它 http(s) 站点交给 yt-dlp 兜底。三种用法：**Web 界面**（`vdl serve`）、**命令行**（`vdl`）、
+其它 http(s) 站点交给**可选的** yt-dlp 组件兜底（默认关闭）。三种用法：**Web 界面**（`vdl serve`）、**命令行**（`vdl`）、
 **Agent Skill**（`video-acquire`）。
 
 下面这个 tkinter 界面是抖音专用的轻量入口；要下 B站/音乐或同时选多个档位，用 Web 界面。
@@ -320,7 +320,7 @@ VDACC\
 │  ├─ src\            主线：cli / server / auth / skill_cli
 │  │  ├─ core\        契约层：types / platform / config / http / progress / cancel / rate
 │  │  └─ engines\     douyin / netease / qq / kuwo / kugou / bilibili(_api) / generic(yt-dlp)
-│  ├─ tests\          bun test（408 个）
+│  ├─ tests\          bun test（425 个）
 │  └─ src\mcp.ts      MCP server（stdio，四个工具）
 ├─ web\               Vue 3 界面（默认入口 /）
 ├─ legacy\python\     Python 归档：vdl / skill / tests / tools / dy_* / VDACC.bat（冻结）
@@ -411,9 +411,21 @@ python -m vdl get   "https://www.bilibili.com/video/BV1j5nj68E48" --format bili-
   没有字幕时静默跳过，不影响视频。
 - **封面**：`vdl get <url> --cover` 把封面存成同名图片（`.jpg` / `.png` / `.webp`，
   按实际类型定）。Web 界面在下载按钮旁有「封面」勾选框，默认勾上。
+- **歌词**（网易云）：下音频时会自动落同名的 `.lrc`（带 `[mm:ss.xxx]` 时间轴）；
+  只需要歌词时用 `--lyrics`，**不会下载音频**，文件名是「歌手 - 歌名.lrc」；
+  加 `--lyrics-translate` 再存一份翻译歌词（`.zh.lrc`，没有翻译时不生成空文件）。
+  音频已存在时会**补写**缺失的 `.lrc`，不用重下整首。
+  界面里同样有这两个入口：「翻译歌词」开关（随音频一起存）与「只下载歌词」按钮（只出 `.lrc`）。
 
-**其它站点**会自动交给 yt-dlp 兜底（引擎名 `ytdlp-generic`）：抖音/B站/网易云之外的
-http(s) 链接会被尝试一次，失败时返回 yt-dlp 的原始报错，而不是一句「不支持」。
+**其它站点**（抖音/B站/网易云/QQ/酷我/酷狗 与直链、m3u8 之外）只能靠 yt-dlp 兜底，
+而它是**可选组件、默认关闭**：
+
+- 组件要单独下载（约 18 MB，装到 `%LOCALAPPDATA%\vdl\components\yt-dlp.exe`，带 SHA256 校验），
+  **不在 exe 里**，也不影响上面六个平台；
+- 还要在设置里打开「通用解析」（`allowGeneric`），否则仍然直接报「不支持这个站点」；
+- 兜底引擎名是 `ytdlp-generic`，失败时返回 yt-dlp 的原始报错，而不是一句「不支持」。
+
+换句话说：**装完就能用 ≠ 什么站点都能下**——六个平台是原生实现，长尾站点要额外开这一层。
 
 `vdl serve` 会打印一个带 `token` 的地址，**必须用那个地址打开**（直接访问 127.0.0.1:8765
 会拿不到 token，接口返回 401）。token 只在本机有效，用来防别的网页偷偷向本地服务发任务。

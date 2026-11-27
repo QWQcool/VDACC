@@ -242,6 +242,24 @@ describe('队列持久化与事件重连', () => {
     expect((await plain.json() as any).job.name).toBeUndefined();
   });
 
+  test('歌词开关只认显式 true，不会被字符串 "false" 之类带偏', async () => {
+    const on = await authed('/api/jobs', { method: 'POST', body: JSON.stringify({
+      url: 'https://example.invalid/unsupported', formatId: '',
+      lyricsOnly: true, lyricsTranslate: true,
+    }) });
+    const job = (await on.json() as any).job;
+    expect(job.lyricsOnly).toBe(true);
+    expect(job.lyricsTranslate).toBe(true);
+
+    // 非 true 一律不落字段（避免任务 JSON 里出现 `lyricsOnly: "yes"`）
+    const off = await authed('/api/jobs', { method: 'POST', body: JSON.stringify({
+      url: 'https://example.invalid/unsupported', formatId: '', lyricsOnly: 'yes', lyricsTranslate: 1,
+    }) });
+    const offJob = (await off.json() as any).job;
+    expect(offJob.lyricsOnly).toBeUndefined();
+    expect(offJob.lyricsTranslate).toBeUndefined();
+  });
+
   test('删除与清空历史：只删已结束，删除后列表与磁盘一致', async () => {
     const del = await authed('/api/jobs/aabb', { method: 'DELETE' });
     expect(del.status).toBe(200);
